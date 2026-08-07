@@ -26,8 +26,8 @@ import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -62,8 +62,8 @@ public final class LoopFilterApplier {
     /// @param decodedPlanes the reconstructed planes to post-process
     /// @param loopFilter the normalized frame-level loop-filter state
     /// @return the post-loop-filter planes
-    public DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader.LoopFilterInfo loopFilter) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+    public DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader.LoopFilterInfo loopFilter) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader.LoopFilterInfo checkedLoopFilter = Objects.requireNonNull(loopFilter, "loopFilter");
         if (hasActiveLevels(checkedLoopFilter, checkedDecodedPlanes.hasChroma())) {
             throw new IllegalStateException("Active AV1 loop filtering requires decoded block edge state");
@@ -77,12 +77,12 @@ public final class LoopFilterApplier {
     /// @param frameHeader the normalized frame header that owns the planes
     /// @param syntaxDecodeResult the decoded frame syntax that carries block and transform edges
     /// @return the post-loop-filter planes
-    public DecodedPlanes apply(
-            DecodedPlanes decodedPlanes,
+    public DecodedSurface apply(
+            DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         FrameHeader.LoopFilterInfo loopFilter = checkedFrameHeader.loopFilter();
         if (!hasActiveLevels(loopFilter, checkedDecodedPlanes.hasChroma())) {
@@ -111,7 +111,7 @@ public final class LoopFilterApplier {
             applyPlane(chromaV, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 2);
         }
 
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 checkedDecodedPlanes.bitDepth(),
                 checkedDecodedPlanes.chromaFormat(),
                 checkedDecodedPlanes.codedWidth(),
@@ -836,8 +836,8 @@ public final class LoopFilterApplier {
         /// @param plane the immutable decoded plane
         /// @param bitDepth the decoded sample bit depth
         /// @return a mutable copy of one decoded plane
-        public static PlaneBuffer create(DecodedPlane plane, int bitDepth) {
-            DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
+        public static PlaneBuffer create(PaddedPlane plane, int bitDepth) {
+            PaddedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
             return new PlaneBuffer(
                     checkedPlane.width(),
                     checkedPlane.height(),
@@ -931,8 +931,8 @@ public final class LoopFilterApplier {
         /// Returns one immutable decoded-plane snapshot from the current samples.
         ///
         /// @return one immutable decoded-plane snapshot from the current samples
-        public DecodedPlane toDecodedPlane() {
-            return DecodedPlane.fromOwnedSamples(width, height, stride, samples);
+        public PaddedPlane toDecodedPlane() {
+            return PaddedPlane.fromOwnedSamples(width, height, stride, samples);
         }
     }
 
@@ -988,7 +988,7 @@ public final class LoopFilterApplier {
         /// @return one decoded block and transform lookup map
         public static LoopFilterBlockMap create(
                 FrameSyntaxDecodeResult syntaxDecodeResult,
-                DecodedPlanes decodedPlanes
+                DecodedSurface decodedPlanes
         ) {
             LoopFilterBlockMap map = new LoopFilterBlockMap(
                     (decodedPlanes.codedWidth() + MI_SIZE - 1) / MI_SIZE,

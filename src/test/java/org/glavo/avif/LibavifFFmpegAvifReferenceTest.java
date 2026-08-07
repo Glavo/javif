@@ -458,7 +458,7 @@ final class LibavifFFmpegAvifReferenceTest {
             assertEquals(AvifBitDepth.SIXTEEN_BITS, reader.info().bitDepth());
             assertEquals(fallback.sourceMetadata().chromaFormat(), reader.info().chromaFormat());
 
-            AvifPlanes derived = reader.readRawColorPlanes(0);
+            DecodedPlanes derived = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, derived.bitDepth());
             assertEquals(fallback.width(), derived.codedWidth());
             assertEquals(fallback.height(), derived.codedHeight());
@@ -479,7 +479,11 @@ final class LibavifFFmpegAvifReferenceTest {
         String resourceName = reference.resourceName();
         ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            ArgbImage expected = rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
+            @Nullable AvifImageTransformInfo transformInfo = reader.info().transformInfo();
+            ArgbImage expected = rawExpected.transformed(
+                    transformInfo == null ? -1 : transformInfo.rotationCode(),
+                    transformInfo == null ? -1 : transformInfo.mirrorAxis()
+            );
             assertImageInfoMatchesFFmpegMetadata(reader.info(), expected);
             AvifFrame actual = reader.readFrame();
             assertNotNull(actual);
@@ -500,8 +504,11 @@ final class LibavifFFmpegAvifReferenceTest {
         String resourceName = reference.resourceName();
         ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            ArgbImage transformedExpected =
-                    rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
+            @Nullable AvifImageTransformInfo transformInfo = reader.info().transformInfo();
+            ArgbImage transformedExpected = rawExpected.transformed(
+                    transformInfo == null ? -1 : transformInfo.rotationCode(),
+                    transformInfo == null ? -1 : transformInfo.mirrorAxis()
+            );
             boolean dimensionsComparable = !hasDerivedFFmpegDimensions(resourceName);
             if (dimensionsComparable) {
                 assertEquals(transformedExpected.width(), reader.info().width());
@@ -533,7 +540,7 @@ final class LibavifFFmpegAvifReferenceTest {
         String resourceName = reference.resourceName();
         SourcePlanes expected = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            AvifPlanes actual = reader.readRawColorPlanes(0);
+            DecodedPlanes actual = reader.readRawColorPlanes(0);
             SourcePlaneTolerance tolerance = sourcePlaneReference.tolerance();
             assertEquals(expected.width(), actual.codedWidth());
             assertEquals(expected.height(), actual.codedHeight());
@@ -549,8 +556,8 @@ final class LibavifFFmpegAvifReferenceTest {
                     tolerance
             );
             if (expected.sourceMetadata().chromaFormat() != Av1ChromaFormat.MONOCHROME) {
-                AvifPlane chromaUPlane = actual.chromaUPlane();
-                AvifPlane chromaVPlane = actual.chromaVPlane();
+                DecodedPlane chromaUPlane = actual.chromaUPlane();
+                DecodedPlane chromaVPlane = actual.chromaVPlane();
                 assertNotNull(chromaUPlane);
                 assertNotNull(chromaVPlane);
                 assertPlaneMatches(
@@ -641,7 +648,7 @@ final class LibavifFFmpegAvifReferenceTest {
             String label,
             int expectedWidth,
             int expectedHeight,
-            AvifPlane actual,
+            DecodedPlane actual,
             SourceSample expectedSample,
             SourcePlaneTolerance tolerance
     ) {

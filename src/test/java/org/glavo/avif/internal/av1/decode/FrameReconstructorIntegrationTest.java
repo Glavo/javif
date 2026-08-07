@@ -46,8 +46,8 @@ import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.testutil.HexFixtureResources;
@@ -116,7 +116,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsMonochromeDcPredictedLeaf() {
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(Av1ChromaFormat.MONOCHROME, createLeaf(true, false));
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertEquals(8, decodedPlanes.bitDepth());
         assertEquals(Av1ChromaFormat.MONOCHROME, decodedPlanes.chromaFormat());
@@ -133,7 +133,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsI420DcPredictedLeaf() {
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(Av1ChromaFormat.YUV420, createLeaf(true, true));
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertEquals(Av1ChromaFormat.YUV420, decodedPlanes.chromaFormat());
         assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
@@ -157,14 +157,14 @@ final class FrameReconstructorIntegrationTest {
                 createLeaf(false, false)
         );
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes expected = reconstructor.reconstruct(syntaxDecodeResult);
-        FutureTask<DecodedPlanes> workerTask = new FutureTask<>(
+        DecodedSurface expected = reconstructor.reconstruct(syntaxDecodeResult);
+        FutureTask<DecodedSurface> workerTask = new FutureTask<>(
                 () -> reconstructor.reconstruct(syntaxDecodeResult)
         );
         Thread worker = new Thread(workerTask, "frame-reconstructor-workspace-handoff");
 
         worker.start();
-        DecodedPlanes actual = workerTask.get();
+        DecodedSurface actual = workerTask.get();
 
         assertDecodedPlanesEqual(expected, actual);
     }
@@ -181,14 +181,14 @@ final class FrameReconstructorIntegrationTest {
                 Av1ChromaFormat.MONOCHROME,
                 createLeaf(false, false)
         );
-        DecodedPlanes expected = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface expected = new FrameReconstructor().reconstruct(syntaxDecodeResult);
         CountDownLatch startGate = new CountDownLatch(1);
-        FutureTask<DecodedPlanes> firstTask = repeatedReconstructionTask(
+        FutureTask<DecodedSurface> firstTask = repeatedReconstructionTask(
                 new FrameReconstructor(),
                 syntaxDecodeResult,
                 startGate
         );
-        FutureTask<DecodedPlanes> secondTask = repeatedReconstructionTask(
+        FutureTask<DecodedSurface> secondTask = repeatedReconstructionTask(
                 new FrameReconstructor(),
                 syntaxDecodeResult,
                 startGate
@@ -218,7 +218,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(0, leafNode.header().uvPaletteSize());
         assertEquals(32, leafNode.header().yPaletteIndices().length);
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertPlaneEquals(
                 decodedPlanes.lumaPlane(),
@@ -252,7 +252,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(2, leafNode.header().uvPaletteSize());
         assertEquals(8, leafNode.header().uvPaletteIndices().length);
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertPlaneFilled(decodedPlanes.lumaPlane(), 8, 8, 128);
         assertPlaneEquals(
@@ -302,7 +302,7 @@ final class FrameReconstructorIntegrationTest {
                 leafNode
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertPlaneFilled(decodedPlanes.lumaPlane(), 8, 8, 128);
         byte[] packedIndices = packPaletteIndices(chromaPaletteIndices);
@@ -343,7 +343,7 @@ final class FrameReconstructorIntegrationTest {
                 leafNode
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertPlaneFilled(decodedPlanes.lumaPlane(), 8, 8, 128);
         byte[] packedIndices = packPaletteIndices(chromaPaletteIndices);
@@ -427,21 +427,21 @@ final class FrameReconstructorIntegrationTest {
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baselineDecodedPlanes = reconstructor.reconstruct(
+        DecodedSurface baselineDecodedPlanes = reconstructor.reconstruct(
                 zeroResidualSyntaxDecodeResult,
                 createReferenceSurfaceSlots(0, baselineReferenceSurfaceSnapshot)
         );
-        DecodedPlanes offsetDecodedPlanes = reconstructor.reconstruct(
+        DecodedSurface offsetDecodedPlanes = reconstructor.reconstruct(
                 zeroResidualSyntaxDecodeResult,
                 createReferenceSurfaceSlots(0, offsetReferenceSurfaceSnapshot)
         );
 
-        DecodedPlane baselineLumaPlane = baselineDecodedPlanes.lumaPlane();
-        DecodedPlane offsetLumaPlane = offsetDecodedPlanes.lumaPlane();
-        DecodedPlane baselineChromaUPlane = requirePlane(baselineDecodedPlanes.chromaUPlane());
-        DecodedPlane offsetChromaUPlane = requirePlane(offsetDecodedPlanes.chromaUPlane());
-        DecodedPlane baselineChromaVPlane = requirePlane(baselineDecodedPlanes.chromaVPlane());
-        DecodedPlane offsetChromaVPlane = requirePlane(offsetDecodedPlanes.chromaVPlane());
+        PaddedPlane baselineLumaPlane = baselineDecodedPlanes.lumaPlane();
+        PaddedPlane offsetLumaPlane = offsetDecodedPlanes.lumaPlane();
+        PaddedPlane baselineChromaUPlane = requirePlane(baselineDecodedPlanes.chromaUPlane());
+        PaddedPlane offsetChromaUPlane = requirePlane(offsetDecodedPlanes.chromaUPlane());
+        PaddedPlane baselineChromaVPlane = requirePlane(baselineDecodedPlanes.chromaVPlane());
+        PaddedPlane offsetChromaVPlane = requirePlane(offsetDecodedPlanes.chromaVPlane());
 
         assertTrue(planeDiffers(baselineLumaPlane, offsetLumaPlane));
         assertTrue(planeDiffers(baselineChromaUPlane, offsetChromaUPlane));
@@ -536,9 +536,9 @@ final class FrameReconstructorIntegrationTest {
                 syntaxDecodeResult.finalTileCdfContexts()
         );
 
-        DecodedPlane referenceLumaPlane = createCheckerboardPlane(64, 64, 16, 208);
-        DecodedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
-        DecodedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
+        PaddedPlane referenceLumaPlane = createCheckerboardPlane(64, 64, 16, 208);
+        PaddedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
+        PaddedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 64,
@@ -548,11 +548,11 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface reconstructedPlanes = new FrameReconstructor().reconstruct(
                 zeroResidualSyntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 zeroResidualSyntaxDecodeResult
@@ -706,9 +706,9 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
-        DecodedPlane referenceLumaPlane = createGradientPlane(8, 8, 17, 5, 9);
-        DecodedPlane referenceChromaUPlane = createGradientPlane(4, 4, 41, 7, 11);
-        DecodedPlane referenceChromaVPlane = createGradientPlane(4, 4, 83, 13, 3);
+        PaddedPlane referenceLumaPlane = createGradientPlane(8, 8, 17, 5, 9);
+        PaddedPlane referenceChromaUPlane = createGradientPlane(4, 4, 41, 7, 11);
+        PaddedPlane referenceChromaVPlane = createGradientPlane(4, 4, 83, 13, 3);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 8,
@@ -718,7 +718,7 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
@@ -867,9 +867,9 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
-        DecodedPlane referenceLumaPlane = createGradientPlane(4, 4, 10, 30, 20);
-        DecodedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 20, 40);
-        DecodedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -20, -40);
+        PaddedPlane referenceLumaPlane = createGradientPlane(4, 4, 10, 30, 20);
+        PaddedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 20, 40);
+        PaddedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -20, -40);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 4,
@@ -879,11 +879,11 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface reconstructedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 syntaxDecodeResult
@@ -1026,9 +1026,9 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
-        DecodedPlane referenceLumaPlane = createGradientPlane(8, 4, 19, 23, 11);
-        DecodedPlane referenceChromaUPlane = createGradientPlane(4, 2, 73, 29, 17);
-        DecodedPlane referenceChromaVPlane = createGradientPlane(4, 2, 181, -19, 13);
+        PaddedPlane referenceLumaPlane = createGradientPlane(8, 4, 19, 23, 11);
+        PaddedPlane referenceChromaUPlane = createGradientPlane(4, 2, 73, 29, 17);
+        PaddedPlane referenceChromaVPlane = createGradientPlane(4, 2, 181, -19, 13);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredSuperResolvedReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 4,
@@ -1039,11 +1039,11 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface reconstructedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 syntaxDecodeResult
@@ -1213,11 +1213,11 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baseline = reconstructor.reconstruct(
+        DecodedSurface baseline = reconstructor.reconstruct(
                 createSyntheticResult(assembly, zeroResidualLeaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedPlanes reconstructed = reconstructor.reconstruct(
+        DecodedSurface reconstructed = reconstructor.reconstruct(
                 createSyntheticResult(assembly, residualLeaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
@@ -1249,7 +1249,7 @@ final class FrameReconstructorIntegrationTest {
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1284,7 +1284,7 @@ final class FrameReconstructorIntegrationTest {
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1343,7 +1343,7 @@ final class FrameReconstructorIntegrationTest {
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1402,7 +1402,7 @@ final class FrameReconstructorIntegrationTest {
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1453,11 +1453,11 @@ final class FrameReconstructorIntegrationTest {
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baselinePlanes = reconstructor.reconstruct(
+        DecodedSurface baselinePlanes = reconstructor.reconstruct(
                 createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1}),
                 new ReferenceSurfaceSnapshot[0]
         );
-        DecodedPlanes decodedPlanes = reconstructor.reconstruct(
+        DecodedSurface decodedPlanes = reconstructor.reconstruct(
                 createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, intrabcLeaf}),
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1470,8 +1470,8 @@ final class FrameReconstructorIntegrationTest {
         int chromaOriginY = lumaOriginY >> 1;
         int visibleChromaWidth = visibleLumaWidth >> 1;
         int visibleChromaHeight = visibleLumaHeight >> 1;
-        DecodedPlane baselineChromaUPlane = requirePlane(baselinePlanes.chromaUPlane());
-        DecodedPlane baselineChromaVPlane = requirePlane(baselinePlanes.chromaVPlane());
+        PaddedPlane baselineChromaUPlane = requirePlane(baselinePlanes.chromaUPlane());
+        PaddedPlane baselineChromaVPlane = requirePlane(baselinePlanes.chromaVPlane());
         int[][] expectedLumaSamples = sampleReferencePlaneBlockBilinearly(
                 baselinePlanes.lumaPlane(),
                 visibleLumaWidth,
@@ -1596,11 +1596,11 @@ final class FrameReconstructorIntegrationTest {
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baselinePlanes = reconstructor.reconstruct(
+        DecodedSurface baselinePlanes = reconstructor.reconstruct(
                 createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1}),
                 new ReferenceSurfaceSnapshot[0]
         );
-        DecodedPlanes zeroResidualPlanes = reconstructor.reconstruct(
+        DecodedSurface zeroResidualPlanes = reconstructor.reconstruct(
                 createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, zeroResidualLeaf}),
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1656,7 +1656,7 @@ final class FrameReconstructorIntegrationTest {
             assertPlaneBlockEquals(requirePlane(zeroResidualPlanes.chromaVPlane()), chromaOriginX, chromaOriginY, expectedChromaVSamples);
         }
 
-        DecodedPlanes decodedPlanes = reconstructor.reconstruct(
+        DecodedSurface decodedPlanes = reconstructor.reconstruct(
                 createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, decodedLeaf}),
                 new ReferenceSurfaceSnapshot[0]
         );
@@ -1743,7 +1743,7 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
@@ -1825,7 +1825,7 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 createSyntheticResult(assembly, leafNode),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
@@ -1893,8 +1893,8 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
-        DecodedPlane referenceLumaPlane0 = createGradientPlane(64, 64, 11, 3, 5);
-        DecodedPlane referenceLumaPlane1 = createGradientPlane(64, 64, 211, -2, -4);
+        PaddedPlane referenceLumaPlane0 = createGradientPlane(64, 64, 11, 3, 5);
+        PaddedPlane referenceLumaPlane1 = createGradientPlane(64, 64, 211, -2, -4);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.MONOCHROME,
                 64,
@@ -1912,7 +1912,7 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
@@ -2028,12 +2028,12 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
-        DecodedPlane referenceLumaPlane0 = createGradientPlane(8, 8, 12, 6, 9);
-        DecodedPlane referenceChromaUPlane0 = createGradientPlane(4, 4, 31, 8, 5);
-        DecodedPlane referenceChromaVPlane0 = createGradientPlane(4, 4, 77, 4, 12);
-        DecodedPlane referenceLumaPlane1 = createGradientPlane(8, 8, 196, -7, -9);
-        DecodedPlane referenceChromaUPlane1 = createGradientPlane(4, 4, 184, -11, -5);
-        DecodedPlane referenceChromaVPlane1 = createGradientPlane(4, 4, 221, -9, -7);
+        PaddedPlane referenceLumaPlane0 = createGradientPlane(8, 8, 12, 6, 9);
+        PaddedPlane referenceChromaUPlane0 = createGradientPlane(4, 4, 31, 8, 5);
+        PaddedPlane referenceChromaVPlane0 = createGradientPlane(4, 4, 77, 4, 12);
+        PaddedPlane referenceLumaPlane1 = createGradientPlane(8, 8, 196, -7, -9);
+        PaddedPlane referenceChromaUPlane1 = createGradientPlane(4, 4, 184, -11, -5);
+        PaddedPlane referenceChromaVPlane1 = createGradientPlane(4, 4, 221, -9, -7);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 8,
@@ -2051,7 +2051,7 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane1
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
@@ -2175,8 +2175,8 @@ final class FrameReconstructorIntegrationTest {
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
-        DecodedPlanes residual = reconstructor.reconstruct(residualSyntax);
+        DecodedSurface baseline = reconstructor.reconstruct(baselineSyntax);
+        DecodedSurface residual = reconstructor.reconstruct(residualSyntax);
 
         assertPlanesEqual(baseline.lumaPlane(), residual.lumaPlane());
         assertPlaneDiffersFromBaselineByUniformSignedOffset(
@@ -2200,8 +2200,8 @@ final class FrameReconstructorIntegrationTest {
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
-        DecodedPlanes residual = reconstructor.reconstruct(residualSyntax);
+        DecodedSurface baseline = reconstructor.reconstruct(baselineSyntax);
+        DecodedSurface residual = reconstructor.reconstruct(residualSyntax);
 
         assertPlanesEqual(baseline.lumaPlane(), residual.lumaPlane());
         assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residual.chromaUPlane()));
@@ -2393,7 +2393,7 @@ final class FrameReconstructorIntegrationTest {
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(Av1ChromaFormat.MONOCHROME, leaf, true);
         assertEquals(FilterIntraMode.DC, leaf.header().filterIntraMode());
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertEquals(8, decodedPlanes.bitDepth());
         assertEquals(Av1ChromaFormat.MONOCHROME, decodedPlanes.chromaFormat());
@@ -2421,8 +2421,8 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(residualUnit.dcCoefficient() != 0);
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlane baselineLuma = reconstructor.reconstruct(baselineSyntax).lumaPlane();
-        DecodedPlanes reconstructed = reconstructor.reconstruct(residualSyntax);
+        PaddedPlane baselineLuma = reconstructor.reconstruct(baselineSyntax).lumaPlane();
+        DecodedSurface reconstructed = reconstructor.reconstruct(residualSyntax);
 
         assertEquals(baselineLuma.width(), reconstructed.lumaPlane().width());
         assertEquals(baselineLuma.height(), reconstructed.lumaPlane().height());
@@ -2465,7 +2465,7 @@ final class FrameReconstructorIntegrationTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 decodeReducedStillPictureSyntaxResultFromCombinedFrame(SUPPORTED_SINGLE_TILE_PAYLOAD);
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertStillPicturePlanesFilledWith(decodedPlanes, 128);
     }
@@ -2483,7 +2483,7 @@ final class FrameReconstructorIntegrationTest {
         );
 
         assertEquals(2, syntaxDecodeResult.tileCount());
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertStillPicturePlanesFilledWith(decodedPlanes, 128, 128, 8);
     }
@@ -2576,14 +2576,14 @@ final class FrameReconstructorIntegrationTest {
     /// @param syntaxDecodeResult the immutable frame syntax to reconstruct
     /// @param startGate the gate that releases concurrent workers
     /// @return the task that returns its final reconstructed frame
-    private static FutureTask<DecodedPlanes> repeatedReconstructionTask(
+    private static FutureTask<DecodedSurface> repeatedReconstructionTask(
             FrameReconstructor reconstructor,
             FrameSyntaxDecodeResult syntaxDecodeResult,
             CountDownLatch startGate
     ) {
         return new FutureTask<>(() -> {
             startGate.await();
-            DecodedPlanes result = reconstructor.reconstruct(syntaxDecodeResult);
+            DecodedSurface result = reconstructor.reconstruct(syntaxDecodeResult);
             for (int iteration = 1; iteration < 32; iteration++) {
                 result = reconstructor.reconstruct(syntaxDecodeResult);
             }
@@ -3437,7 +3437,7 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(header.uvPaletteSize() >= 2);
         assertTrue(allResidualUnitsZero(paletteLeaf.residualLayout()));
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 createSyntheticResult(
                         createPaletteEnabledAssembly(
                                 chromaFormat,
@@ -3872,8 +3872,8 @@ final class FrameReconstructorIntegrationTest {
         FrameAssembly assembly = createAssembly(chromaFormat, new byte[0], codedWidth, codedHeight, transformMode);
         TilePartitionTreeReader.LeafNode baselineLeaf = clearDecodedLeafChromaResiduals(decodedLeaf);
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
-        DecodedPlanes reconstructed = reconstructor.reconstruct(createSyntheticResult(assembly, decodedLeaf));
+        DecodedSurface baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
+        DecodedSurface reconstructed = reconstructor.reconstruct(createSyntheticResult(assembly, decodedLeaf));
         return planeDiffers(requirePlane(baseline.chromaUPlane()), requirePlane(reconstructed.chromaUPlane()))
                 || planeDiffers(requirePlane(baseline.chromaVPlane()), requirePlane(reconstructed.chromaVPlane()));
     }
@@ -3883,7 +3883,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param first the first decoded plane
     /// @param second the second decoded plane
     /// @return whether two decoded planes differ at any stored sample coordinate
-    private static boolean planeDiffers(DecodedPlane first, DecodedPlane second) {
+    private static boolean planeDiffers(PaddedPlane first, PaddedPlane second) {
         assertEquals(first.width(), second.width());
         assertEquals(first.height(), second.height());
         for (int y = 0; y < first.height(); y++) {
@@ -4074,7 +4074,7 @@ final class FrameReconstructorIntegrationTest {
     /// chroma-V residual while chroma-U stays midpoint-gray.
     ///
     /// @param decodedPlanes the reconstructed planes returned by the frame reconstructor
-    private static void assertLegacyDirectionalStillPicturePlanes(DecodedPlanes decodedPlanes) {
+    private static void assertLegacyDirectionalStillPicturePlanes(DecodedSurface decodedPlanes) {
         assertEquals(8, decodedPlanes.bitDepth());
         assertEquals(Av1ChromaFormat.YUV420, decodedPlanes.chromaFormat());
         assertEquals(64, decodedPlanes.codedWidth());
@@ -4103,7 +4103,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param originY the zero-based block origin Y coordinate
     /// @param expected the expected block in row-major order
     private static void assertPlaneBlockEquals(
-            @Nullable DecodedPlane plane,
+            @Nullable PaddedPlane plane,
             int originX,
             int originY,
             int[][] expected
@@ -4130,7 +4130,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param width the expected width
     /// @param height the expected height
     /// @param value the expected constant sample value
-    private static void assertPlaneFilled(DecodedPlane plane, int width, int height, int value) {
+    private static void assertPlaneFilled(PaddedPlane plane, int width, int height, int value) {
         assertEquals(width, plane.width());
         assertEquals(height, plane.height());
         for (int y = 0; y < height; y++) {
@@ -4144,7 +4144,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param plane the decoded plane to inspect
     /// @param expected the expected raster in row-major order
-    private static void assertPlaneEquals(DecodedPlane plane, int[][] expected) {
+    private static void assertPlaneEquals(PaddedPlane plane, int[][] expected) {
         assertEquals(expected[0].length, plane.width());
         assertEquals(expected.length, plane.height());
         for (int y = 0; y < expected.length; y++) {
@@ -4162,7 +4162,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param processingAlignment the plane-local AV1 frame-grid alignment
     /// @return the expected horizontally upscaled raster
     private static int[][] expectedHorizontallyUpscaledPlane(
-            DecodedPlane sourcePlane,
+            PaddedPlane sourcePlane,
             int targetWidth,
             int processingAlignment
     ) {
@@ -4235,7 +4235,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param height the block height in samples
     /// @param expectedSample the expected constant sample value
     private static void assertPlaneBlockFilledWith(
-            @Nullable DecodedPlane plane,
+            @Nullable PaddedPlane plane,
             int originX,
             int originY,
             int width,
@@ -4257,7 +4257,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param decodedPlanes the reconstructed planes returned by the frame reconstructor
     /// @param expectedSample the expected constant sample value shared by the visible planes
-    private static void assertStillPicturePlanesFilledWith(DecodedPlanes decodedPlanes, int expectedSample) {
+    private static void assertStillPicturePlanesFilledWith(DecodedSurface decodedPlanes, int expectedSample) {
         assertStillPicturePlanesFilledWith(decodedPlanes, expectedSample, 64, 64);
     }
 
@@ -4269,7 +4269,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param expectedWidth the expected coded and rendered frame width
     /// @param expectedHeight the expected coded and rendered frame height
     private static void assertStillPicturePlanesFilledWith(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             int expectedSample,
             int expectedWidth,
             int expectedHeight
@@ -4289,7 +4289,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param plane the decoded plane to inspect
     /// @param expectedSample the expected constant sample value
-    private static void assertPlaneFilledWith(@Nullable DecodedPlane plane, int expectedSample) {
+    private static void assertPlaneFilledWith(@Nullable PaddedPlane plane, int expectedSample) {
         if (plane == null) {
             throw new AssertionError("Decoded plane was null");
         }
@@ -4304,7 +4304,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param expected the expected decoded planes
     /// @param actual the actual decoded planes
-    private static void assertDecodedPlanesEqual(DecodedPlanes expected, DecodedPlanes actual) {
+    private static void assertDecodedPlanesEqual(DecodedSurface expected, DecodedSurface actual) {
         assertEquals(expected.bitDepth(), actual.bitDepth());
         assertEquals(expected.chromaFormat(), actual.chromaFormat());
         assertEquals(expected.codedWidth(), actual.codedWidth());
@@ -4327,7 +4327,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param expected the expected decoded plane
     /// @param actual the actual decoded plane
-    private static void assertPlanesEqual(DecodedPlane expected, DecodedPlane actual) {
+    private static void assertPlanesEqual(PaddedPlane expected, PaddedPlane actual) {
         assertEquals(expected.width(), actual.width());
         assertEquals(expected.height(), actual.height());
         for (int y = 0; y < expected.height(); y++) {
@@ -4343,8 +4343,8 @@ final class FrameReconstructorIntegrationTest {
     /// @param reconstructed the reconstructed plane after one non-zero residual
     /// @param expectedSign the required delta sign, either `1` or `-1`
     private static void assertPlaneDiffersFromBaselineByUniformSignedOffset(
-            DecodedPlane baseline,
-            DecodedPlane reconstructed,
+            PaddedPlane baseline,
+            PaddedPlane reconstructed,
             int expectedSign
     ) {
         assertEquals(baseline.width(), reconstructed.width());
@@ -4376,8 +4376,8 @@ final class FrameReconstructorIntegrationTest {
     /// @param residualUnit the residual unit whose footprint should carry the injected delta
     /// @param expectedSign the expected sign of every non-zero delta inside the residual footprint
     private static void assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
-            DecodedPlane baseline,
-            DecodedPlane reconstructed,
+            PaddedPlane baseline,
+            PaddedPlane reconstructed,
             TransformResidualUnit residualUnit,
             int expectedSign
     ) {
@@ -4420,13 +4420,13 @@ final class FrameReconstructorIntegrationTest {
 
         TilePartitionTreeReader.LeafNode baselineLeaf = clearDecodedLeafChromaResiduals(decodedLeaf);
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
-        DecodedPlanes reconstructed = reconstructor.reconstruct(createSyntheticResult(assembly, decodedLeaf));
+        DecodedSurface baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
+        DecodedSurface reconstructed = reconstructor.reconstruct(createSyntheticResult(assembly, decodedLeaf));
 
         assertPlanesEqual(baseline.lumaPlane(), reconstructed.lumaPlane());
 
-        DecodedPlane baselineChromaU = requirePlane(baseline.chromaUPlane());
-        DecodedPlane reconstructedChromaU = requirePlane(reconstructed.chromaUPlane());
+        PaddedPlane baselineChromaU = requirePlane(baseline.chromaUPlane());
+        PaddedPlane reconstructedChromaU = requirePlane(reconstructed.chromaUPlane());
         TransformResidualUnit chromaUUnit = residualLayout.chromaUUnits()[0];
         if (!planeDiffers(baselineChromaU, reconstructedChromaU)) {
             assertPlanesEqual(baselineChromaU, reconstructedChromaU);
@@ -4439,8 +4439,8 @@ final class FrameReconstructorIntegrationTest {
             );
         }
 
-        DecodedPlane baselineChromaV = requirePlane(baseline.chromaVPlane());
-        DecodedPlane reconstructedChromaV = requirePlane(reconstructed.chromaVPlane());
+        PaddedPlane baselineChromaV = requirePlane(baseline.chromaVPlane());
+        PaddedPlane reconstructedChromaV = requirePlane(reconstructed.chromaVPlane());
         TransformResidualUnit chromaVUnit = residualLayout.chromaVUnits()[0];
         if (!planeDiffers(baselineChromaV, reconstructedChromaV)) {
             assertPlanesEqual(baselineChromaV, reconstructedChromaV);
@@ -4526,8 +4526,8 @@ final class FrameReconstructorIntegrationTest {
     /// @return whether the visible `intrabc` target block changes after residual reintroduction
     private static boolean residualChangesIntrabcTargetBlock(
             TilePartitionTreeReader.LeafNode zeroResidualLeaf,
-            DecodedPlanes baseline,
-            DecodedPlanes reconstructed,
+            DecodedSurface baseline,
+            DecodedSurface reconstructed,
             Av1ChromaFormat chromaFormat
     ) {
         int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
@@ -4592,7 +4592,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param height the block height in samples
     /// @return one row-major integer raster copied from the requested block
     private static int[][] readPlaneBlock(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int originX,
             int originY,
             int width,
@@ -4611,7 +4611,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param plane the decoded plane reference, or `null`
     /// @return the same decoded plane reference after a non-null assertion
-    private static DecodedPlane requirePlane(@Nullable DecodedPlane plane) {
+    private static PaddedPlane requirePlane(@Nullable PaddedPlane plane) {
         assertNotNull(plane);
         return plane;
     }
@@ -4639,8 +4639,8 @@ final class FrameReconstructorIntegrationTest {
         FrameSyntaxDecodeResult injectedSyntax = replaceLeaf(syntaxDecodeResult, targetLeaf, injectedLeaf);
 
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
-        DecodedPlanes reconstructed = reconstructor.reconstruct(injectedSyntax);
+        DecodedSurface baseline = reconstructor.reconstruct(baselineSyntax);
+        DecodedSurface reconstructed = reconstructor.reconstruct(injectedSyntax);
 
         assertPlanesEqual(baseline.lumaPlane(), reconstructed.lumaPlane());
 
@@ -4696,8 +4696,8 @@ final class FrameReconstructorIntegrationTest {
                 );
                 FrameSyntaxDecodeResult baselineSyntax = replaceLeaf(syntaxDecodeResult, leaf, clearedLeaf);
                 FrameSyntaxDecodeResult injectedSyntax = replaceLeaf(syntaxDecodeResult, leaf, injectedLeaf);
-                DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
-                DecodedPlanes reconstructed = reconstructor.reconstruct(injectedSyntax);
+                DecodedSurface baseline = reconstructor.reconstruct(baselineSyntax);
+                DecodedSurface reconstructed = reconstructor.reconstruct(injectedSyntax);
                 try {
                     assertPlanesEqual(baseline.lumaPlane(), reconstructed.lumaPlane());
                     if (chromaUDcCoefficient == 0) {
@@ -5078,9 +5078,9 @@ final class FrameReconstructorIntegrationTest {
                 syntaxDecodeResult.finalTileCdfContexts()
         );
 
-        DecodedPlane referenceLumaPlane = createCheckerboardPlane(64, 64, 16, 208);
-        DecodedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
-        DecodedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
+        PaddedPlane referenceLumaPlane = createCheckerboardPlane(64, 64, 16, 208);
+        PaddedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
+        PaddedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 64,
@@ -5090,7 +5090,7 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface decodedPlanes = new FrameReconstructor().reconstruct(
                 zeroResidualSyntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
@@ -5103,8 +5103,8 @@ final class FrameReconstructorIntegrationTest {
         int chromaOriginY = lumaOriginY >> 1;
         int visibleChromaWidth = visibleLumaWidth >> 1;
         int visibleChromaHeight = visibleLumaHeight >> 1;
-        DecodedPlane decodedChromaUPlane = requirePlane(decodedPlanes.chromaUPlane());
-        DecodedPlane decodedChromaVPlane = requirePlane(decodedPlanes.chromaVPlane());
+        PaddedPlane decodedChromaUPlane = requirePlane(decodedPlanes.chromaUPlane());
+        PaddedPlane decodedChromaVPlane = requirePlane(decodedPlanes.chromaVPlane());
 
         assertEquals(Av1ChromaFormat.YUV420, decodedPlanes.chromaFormat());
         assertTrue(decodedPlanes.hasChroma());
@@ -5234,9 +5234,9 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
-        DecodedPlane referenceLumaPlane = createGradientPlane(4, 4, 24, 32, 11);
-        DecodedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 28, 17);
-        DecodedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -24, -13);
+        PaddedPlane referenceLumaPlane = createGradientPlane(4, 4, 24, 32, 11);
+        PaddedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 28, 17);
+        PaddedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -24, -13);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
                 Av1ChromaFormat.YUV420,
                 4,
@@ -5246,11 +5246,11 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
+        DecodedSurface reconstructedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 syntaxDecodeResult
@@ -5676,8 +5676,8 @@ final class FrameReconstructorIntegrationTest {
                         true,
                         chromaFormat,
                         0,
-                        chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422,
-                        chromaFormat == Av1ChromaFormat.YUV420,
+                        chromaFormat != Av1ChromaFormat.YUV444,
+                        chromaFormat == Av1ChromaFormat.MONOCHROME || chromaFormat == Av1ChromaFormat.YUV420,
                         false
                 )
         );
@@ -6729,9 +6729,9 @@ final class FrameReconstructorIntegrationTest {
             Av1ChromaFormat chromaFormat,
             int codedWidth,
             int codedHeight,
-            DecodedPlane lumaPlane,
-            @Nullable DecodedPlane chromaUPlane,
-            @Nullable DecodedPlane chromaVPlane
+            PaddedPlane lumaPlane,
+            @Nullable PaddedPlane chromaUPlane,
+            @Nullable PaddedPlane chromaVPlane
     ) {
         FrameAssembly assembly = createAssembly(chromaFormat, new byte[0], codedWidth, codedHeight, FrameHeader.TransformMode.LARGEST);
         FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecodeResult(
@@ -6742,7 +6742,7 @@ final class FrameReconstructorIntegrationTest {
         return new ReferenceSurfaceSnapshot(
                 assembly.frameHeader(),
                 syntaxDecodeResult,
-                new DecodedPlanes(
+                new DecodedSurface(
                         8,
                         chromaFormat,
                         codedWidth,
@@ -6773,9 +6773,9 @@ final class FrameReconstructorIntegrationTest {
             int codedWidth,
             int upscaledWidth,
             int codedHeight,
-            DecodedPlane lumaPlane,
-            @Nullable DecodedPlane chromaUPlane,
-            @Nullable DecodedPlane chromaVPlane
+            PaddedPlane lumaPlane,
+            @Nullable PaddedPlane chromaUPlane,
+            @Nullable PaddedPlane chromaVPlane
     ) {
         FrameAssembly assembly = createSuperResolvedInterAssembly(
                 chromaFormat,
@@ -6790,7 +6790,7 @@ final class FrameReconstructorIntegrationTest {
         return new ReferenceSurfaceSnapshot(
                 assembly.frameHeader(),
                 syntaxDecodeResult,
-                new DecodedPlanes(
+                new DecodedSurface(
                         8,
                         chromaFormat,
                         upscaledWidth,
@@ -6901,7 +6901,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param evenSample the sample value stored at even `(x + y)` parity
     /// @param oddSample the sample value stored at odd `(x + y)` parity
     /// @return one exact decoded checkerboard plane
-    private static DecodedPlane createCheckerboardPlane(int width, int height, int evenSample, int oddSample) {
+    private static PaddedPlane createCheckerboardPlane(int width, int height, int evenSample, int oddSample) {
         short[] samples = new short[width * height];
         int nextIndex = 0;
         for (int y = 0; y < height; y++) {
@@ -6909,7 +6909,7 @@ final class FrameReconstructorIntegrationTest {
                 samples[nextIndex++] = (short) ((((x + y) & 1) == 0) ? evenSample : oddSample);
             }
         }
-        return new DecodedPlane(width, height, width, samples);
+        return new PaddedPlane(width, height, width, samples);
     }
 
     /// Creates one exact decoded gradient plane.
@@ -6920,7 +6920,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param xStep the per-column delta
     /// @param yStep the per-row delta
     /// @return one exact decoded gradient plane
-    private static DecodedPlane createGradientPlane(int width, int height, int baseValue, int xStep, int yStep) {
+    private static PaddedPlane createGradientPlane(int width, int height, int baseValue, int xStep, int yStep) {
         short[] samples = new short[width * height];
         int nextIndex = 0;
         for (int y = 0; y < height; y++) {
@@ -6928,7 +6928,7 @@ final class FrameReconstructorIntegrationTest {
                 samples[nextIndex++] = (short) (baseValue + x * xStep + y * yStep);
             }
         }
-        return new DecodedPlane(width, height, width, samples);
+        return new PaddedPlane(width, height, width, samples);
     }
 
     /// Samples one rectangular reference-plane block using bilinear interpolation with edge
@@ -6943,7 +6943,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param denominatorY the vertical plane-local denominator
     /// @return one sampled reference-plane block in row-major order
     private static int[][] sampleReferencePlaneBlockBilinearly(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -7089,7 +7089,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param denominatorY the plane-local vertical denominator
     /// @return the predicted coded-domain plane raster
     private static int[][] expectedScaledInterPlaneBilinearly(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int codedWidth,
             int codedHeight,
             int sourceOffsetEighthPelX,

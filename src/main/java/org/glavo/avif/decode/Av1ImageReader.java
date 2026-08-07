@@ -15,6 +15,8 @@
  */
 package org.glavo.avif.decode;
 
+import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
@@ -43,7 +45,6 @@ import org.glavo.avif.internal.av1.recon.InvalidFrameReconstructionException;
 import org.glavo.avif.internal.av1.recon.LargeScaleTileOutputBuilder;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.av1.runtime.FrameOutputPolicy;
-import org.glavo.avif.internal.av1.runtime.OutputFrameFactory;
 import org.glavo.avif.internal.av1.runtime.RuntimeReferenceSlot;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -111,9 +112,6 @@ public final class Av1ImageReader implements AutoCloseable {
     private long nextPresentationIndex;
     /// Whether this reader has already been closed.
     private boolean closed;
-    /// The postprocessed decoded planes from the most recent frame, or `null`.
-    private @Nullable DecodedPlanes lastPlanes;
-
     /// Creates a sequential image reader.
     ///
     /// @param source the forward-only buffered byte source
@@ -255,12 +253,29 @@ public final class Av1ImageReader implements AutoCloseable {
         }
         DecodedFrame frame;
         try {
-            frame = output.createFrame();
+            frame = output.createOutput().toFrame();
         } catch (UnsupportedOperationException exception) {
             throw unsupportedOutputConversion(output.packet(), exception);
         }
         nextPresentationIndex++;
         return frame;
+    }
+
+    /// Reads the next decoded presentation output without forcing RGB conversion.
+    ///
+    /// Each successful call consumes exactly one presentation output. The returned object keeps
+    /// the planes, color configuration, and frame metadata together; [Av1DecodedOutput#toFrame()]
+    /// may be called later to obtain packed ARGB pixels.
+    ///
+    /// @return the next decoded output, or `null` at end-of-stream
+    /// @throws IOException if the source is unreadable or the bitstream is malformed
+    public @Nullable Av1DecodedOutput readOutput() throws IOException {
+        @Nullable PendingOutput output = readNextOutput();
+        if (output == null) {
+            return null;
+        }
+        nextPresentationIndex++;
+        return output.createOutput();
     }
 
     /// Reads the next output frame as postprocessed YUV planes without RGB conversion.
@@ -273,12 +288,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @return the next decoded plane snapshot, or `null` at end-of-stream
     /// @throws IOException if the source is unreadable or the bitstream is malformed
     public @Nullable DecodedPlanes readPlanes() throws IOException {
-        @Nullable PendingOutput output = readNextOutput();
-        if (output == null) {
-            return null;
-        }
-        nextPresentationIndex++;
-        return output.planes();
+        @Nullable Av1DecodedOutput output = readOutput();
+        return output == null ? null : output.planes();
     }
 
     /// Decodes packets until one presentation output is available.
@@ -407,24 +418,6 @@ public final class Av1ImageReader implements AutoCloseable {
         }
         pendingLayeredOutput = output;
         return null;
-    }
-
-    /// Returns the postprocessed planes from the most recently prepared presentation output.
-    ///
-    /// The value is updated before packed-pixel conversion, so it may be non-null after
-    /// [#readFrame()] fails because the active color configuration cannot be converted.
-    ///
-    /// @return the postprocessed planes, or `null` if no presentation output has been prepared yet
-    public @Nullable DecodedPlanes lastPlanes() {
-        return lastPlanes;
-    }
-
-    /// Returns the color configuration from the active AV1 sequence header.
-    ///
-    /// @return the active color configuration, or `null` before a sequence header is parsed
-    public @Nullable Av1ColorConfig lastColorConfig() {
-        SequenceHeader activeSequenceHeader = sequenceHeader;
-        return activeSequenceHeader != null ? activeSequenceHeader.colorConfig() : null;
     }
 
     /// Reads all decoded frames from the source until end-of-stream.
@@ -782,7 +775,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 ? storedReferenceFrameSyntaxState(frameHeader, syntaxDecodeResult, cdfReferenceState)
                 : null;
 
-        @Nullable DecodedPlanes decodedPlanes = null;
+        @Nullable DecodedSurface decodedPlanes = null;
         if (shouldOutput || needsSurfaceSnapshot || needsAnchorSnapshot) {
             try {
                 decodedPlanes = frameReconstructor.reconstruct(
@@ -803,7 +796,7 @@ public final class Av1ImageReader implements AutoCloseable {
             }
         }
 
-        @Nullable DecodedPlanes postprocessedPlanes = null;
+        @Nullable DecodedSurface postprocessedPlanes = null;
         if (decodedPlanes != null) {
             postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
             if (needsSurfaceSnapshot || needsAnchorSnapshot) {
@@ -823,12 +816,11 @@ public final class Av1ImageReader implements AutoCloseable {
         if (!shouldOutput) {
             return null;
         }
-        DecodedPlanes presentationPlanes = applyPresentationFilters(
+        DecodedSurface presentationPlanes = applyPresentationFilters(
                 Objects.requireNonNull(postprocessedPlanes, "postprocessedPlanes"),
                 frameHeader,
                 assembly.sequenceHeader().colorConfig()
         );
-        lastPlanes = presentationPlanes;
         return PendingOutput.normal(
                 presentationPlanes,
                 assembly.sequenceHeader().colorConfig(),
@@ -1008,7 +1000,7 @@ public final class Av1ImageReader implements AutoCloseable {
         enforceFrameSizeLimit(outputWidth, outputHeight, packet);
 
         LargeScaleTileOutputBuilder outputBuilder = new LargeScaleTileOutputBuilder(
-                cameraSequenceHeader.colorConfig().bitDepth(),
+                cameraSequenceHeader.colorConfig().bitDepth().bits(),
                 cameraSequenceHeader.colorConfig().chromaFormat(),
                 tileWidth,
                 tileHeight,
@@ -1125,7 +1117,7 @@ public final class Av1ImageReader implements AutoCloseable {
                     decodedTileSyntax
             );
 
-            DecodedPlanes reconstructed;
+            DecodedSurface reconstructed;
             try {
                 reconstructed = frameReconstructor.reconstructTile(
                         syntaxDecodeResult,
@@ -1153,8 +1145,7 @@ public final class Av1ImageReader implements AutoCloseable {
             decodedTileOutputIndices.put(decodeKey, outputTileIndex);
         }
 
-        DecodedPlanes outputPlanes = outputBuilder.build();
-        lastPlanes = outputPlanes;
+        DecodedSurface outputPlanes = outputBuilder.build();
         return PendingOutput.normal(
                 outputPlanes,
                 cameraSequenceHeader.colorConfig(),
@@ -1405,12 +1396,11 @@ public final class Av1ImageReader implements AutoCloseable {
         if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
             return null;
         }
-        DecodedPlanes presentationPlanes = applyPresentationFilters(
+        DecodedSurface presentationPlanes = applyPresentationFilters(
                 referenceSurfaceSnapshot.decodedPlanes(),
                 referencedFrameHeader,
                 referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
         );
-        lastPlanes = presentationPlanes;
         return PendingOutput.existing(
                 presentationPlanes,
                 referenceSurfaceSnapshot,
@@ -1445,12 +1435,12 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param frameHeader the normalized frame header that owns the output
     /// @param colorConfig the sequence color configuration associated with the output surface
     /// @return the presentation planes after output-only processing
-    private DecodedPlanes applyPresentationFilters(
-            DecodedPlanes decodedPlanes,
+    private DecodedSurface applyPresentationFilters(
+            DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             Av1ColorConfig colorConfig
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         if (FrameOutputPolicy.requiresFilmGrainSynthesis(checkedFrameHeader, config)) {
@@ -1756,7 +1746,7 @@ public final class Av1ImageReader implements AutoCloseable {
     ///                        newly decoded frame
     @NotNullByDefault
     private record PendingOutput(
-            DecodedPlanes planes,
+            DecodedSurface planes,
             @Nullable Av1ColorConfig colorConfig,
             FrameHeader frameHeader,
             boolean showFrame,
@@ -1774,7 +1764,7 @@ public final class Av1ImageReader implements AutoCloseable {
         /// @param packet the OBU that completed the output
         /// @return one pending output for a newly decoded frame
         private static PendingOutput normal(
-                DecodedPlanes planes,
+                DecodedSurface planes,
                 Av1ColorConfig colorConfig,
                 FrameHeader frameHeader,
                 boolean showFrame,
@@ -1801,7 +1791,7 @@ public final class Av1ImageReader implements AutoCloseable {
         /// @param packet the OBU that requested the output
         /// @return one pending output for a stored reference surface
         private static PendingOutput existing(
-                DecodedPlanes planes,
+                DecodedSurface planes,
                 ReferenceSurfaceSnapshot existingSurface,
                 FrameHeader outputRequestHeader,
                 long presentationIndex,
@@ -1818,25 +1808,30 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
 
-        /// Converts this pending output to the public packed-pixel frame representation.
+        /// Creates the public decoded-output representation.
         ///
-        /// @return the converted public frame
-        /// @throws UnsupportedOperationException if the color configuration cannot be converted
-        private DecodedFrame createFrame() {
+        /// @return the public decoded output
+        private Av1DecodedOutput createOutput() {
             if (existingSurface != null) {
-                return OutputFrameFactory.createExistingFrame(
+                FrameHeader referencedFrameHeader = existingSurface.frameHeader();
+                return new Av1DecodedOutput(
                         planes,
-                        existingSurface,
-                        frameHeader,
-                        presentationIndex
+                        existingSurface.frameSyntaxState().sequenceHeader().colorConfig(),
+                        referencedFrameHeader.frameType(),
+                        true,
+                        presentationIndex,
+                        frameHeader.temporalId(),
+                        frameHeader.spatialId()
                 );
             }
-            return OutputFrameFactory.createFrame(
+            return new Av1DecodedOutput(
                     planes,
                     Objects.requireNonNull(colorConfig, "colorConfig"),
-                    frameHeader,
+                    frameHeader.frameType(),
                     showFrame,
-                    presentationIndex
+                    presentationIndex,
+                    frameHeader.temporalId(),
+                    frameHeader.spatialId()
             );
         }
     }

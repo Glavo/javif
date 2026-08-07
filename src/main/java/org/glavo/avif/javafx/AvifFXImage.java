@@ -268,8 +268,8 @@ public final class AvifFXImage extends WritableImage {
     /// @return the JavaFX cycle count
     private static int sequenceCycleCount(AvifSequenceInfo info) {
         int repetitionCount = info.repetitionCount();
-        if (repetitionCount == AvifImageInfo.REPETITION_COUNT_UNKNOWN
-                || repetitionCount == AvifImageInfo.REPETITION_COUNT_INFINITE) {
+        if (repetitionCount == AvifSequenceInfo.REPETITION_COUNT_UNKNOWN
+                || repetitionCount == AvifSequenceInfo.REPETITION_COUNT_INFINITE) {
             return Animation.INDEFINITE;
         }
         return repetitionCount == Integer.MAX_VALUE ? Integer.MAX_VALUE : repetitionCount + 1;

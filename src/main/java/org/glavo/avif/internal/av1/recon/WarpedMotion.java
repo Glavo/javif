@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -373,7 +373,7 @@ final class WarpedMotion {
     /// @param model the normalized affine model
     static void predictPlane(
             MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int visibleWidth,
@@ -387,7 +387,7 @@ final class WarpedMotion {
             Model model
     ) {
         MutablePlaneBuffer checkedDestination = Objects.requireNonNull(destinationPlane, "destinationPlane");
-        DecodedPlane checkedReference = Objects.requireNonNull(referencePlane, "referencePlane");
+        PaddedPlane checkedReference = Objects.requireNonNull(referencePlane, "referencePlane");
         Model checkedModel = Objects.requireNonNull(model, "model");
         int[] predictions = predictPlaneSamples(
                 checkedReference,
@@ -433,7 +433,7 @@ final class WarpedMotion {
     /// @param model the normalized affine model
     /// @return the row-major higher-precision compound predictors
     static int[] predictCompoundPlane(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int visibleWidth,
             int visibleHeight,
             int codedWidth,
@@ -478,7 +478,7 @@ final class WarpedMotion {
     /// @param model the normalized affine model
     /// @return the row-major signed predictors at the requested precision
     private static int[] predictPlaneSamples(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int visibleWidth,
             int visibleHeight,
             int codedWidth,
@@ -491,7 +491,7 @@ final class WarpedMotion {
             int retainedBits,
             Model model
     ) {
-        DecodedPlane checkedReference = Objects.requireNonNull(referencePlane, "referencePlane");
+        PaddedPlane checkedReference = Objects.requireNonNull(referencePlane, "referencePlane");
         Model checkedModel = Objects.requireNonNull(model, "model");
         if (!checkedModel.affine()) {
             throw new IllegalArgumentException("Warped prediction requires an affine model");
@@ -558,7 +558,7 @@ final class WarpedMotion {
     /// @param intermediateBits the horizontal intermediate precision
     /// @param retainedBits the fractional precision retained after vertical filtering
     private static void predict8x8(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int[] predictions,
             int predictionStride,
             int destinationX,

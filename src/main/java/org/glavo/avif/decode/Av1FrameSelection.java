@@ -17,15 +17,15 @@ package org.glavo.avif.decode;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Public frame filtering modes that mirror the upstream dav1d settings.
+/// Selects the AV1 frame categories decoded by [Av1ImageReader].
 @NotNullByDefault
-public enum DecodeFrameType {
-    /// Decode all frames that become available.
+public enum Av1FrameSelection {
+    /// Decodes every frame that becomes available.
     ALL,
-    /// Decode only frames that are referenced by other frames.
+    /// Decodes frames retained as references for other frames.
     REFERENCE,
-    /// Decode only intra frames, including key frames.
+    /// Decodes intra frames, including key frames.
     INTRA,
-    /// Decode only key frames.
+    /// Decodes key frames only.
     KEY
 }

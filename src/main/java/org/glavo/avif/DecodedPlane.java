@@ -23,12 +23,12 @@ import java.nio.ShortBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Immutable raw decoded AVIF image plane.
+/// Immutable decoded image plane.
 ///
 /// Samples are unsigned values stored in the low bits of each `short`. `stride` is measured in
 /// samples, not bytes.
 @NotNullByDefault
-public final class AvifPlane {
+public final class DecodedPlane {
     /// The plane width in samples.
     private final int width;
     /// The plane height in samples.
@@ -44,7 +44,7 @@ public final class AvifPlane {
     /// @param height the plane height in samples
     /// @param stride the plane row stride in samples
     /// @param samples the unsigned plane samples in row-major order
-    public AvifPlane(int width, int height, int stride, short[] samples) {
+    public DecodedPlane(int width, int height, int stride, short[] samples) {
         this(width, height, stride, immutableSamples(Objects.requireNonNull(samples, "samples")));
     }
 
@@ -57,7 +57,7 @@ public final class AvifPlane {
     /// @param height the plane height in samples
     /// @param stride the plane row stride in samples
     /// @param samples the unsigned plane samples in row-major order
-    public AvifPlane(int width, int height, int stride, @Unmodifiable ShortBuffer samples) {
+    public DecodedPlane(int width, int height, int stride, @Unmodifiable ShortBuffer samples) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }

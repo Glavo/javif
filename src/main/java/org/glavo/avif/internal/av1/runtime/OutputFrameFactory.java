@@ -17,11 +17,12 @@ package org.glavo.avif.internal.av1.runtime;
 
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.OutputFrameMetadata;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -42,7 +43,7 @@ public final class OutputFrameFactory {
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
     public static DecodedFrame createFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             boolean visible,
             long presentationIndex
@@ -65,7 +66,7 @@ public final class OutputFrameFactory {
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
     public static DecodedFrame createFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             Av1ColorConfig colorConfig,
             FrameHeader frameHeader,
             boolean visible,
@@ -80,6 +81,32 @@ public final class OutputFrameFactory {
         );
     }
 
+    /// Creates one public decoded frame from complete public output metadata.
+    ///
+    /// @param decodedPlanes the reconstructed planes to present
+    /// @param colorConfig the AV1 sequence color configuration for the decoded planes
+    /// @param frameType the frame category of the presented surface
+    /// @param visible whether the output is visible
+    /// @param presentationIndex the zero-based presentation index
+    /// @param temporalId the temporal-layer identifier
+    /// @param spatialId the spatial-layer identifier
+    /// @return one public decoded frame backed by the appropriate ARGB storage type
+    public static DecodedFrame createFrame(
+            DecodedSurface decodedPlanes,
+            Av1ColorConfig colorConfig,
+            FrameType frameType,
+            boolean visible,
+            long presentationIndex,
+            int temporalId,
+            int spatialId
+    ) {
+        return createFrame(
+                Objects.requireNonNull(decodedPlanes, "decodedPlanes"),
+                new OutputFrameMetadata(frameType, visible, presentationIndex, temporalId, spatialId),
+                YuvToRgbTransform.fromColorConfig(colorConfig)
+        );
+    }
+
     /// Creates one public decoded frame from the supplied reconstructed planes and transform.
     ///
     /// @param decodedPlanes the reconstructed planes to present
@@ -89,13 +116,13 @@ public final class OutputFrameFactory {
     /// @param transform the selected YUV-to-RGB output transform
     /// @return one public decoded frame backed by the appropriate ARGB storage type
     private static DecodedFrame createFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             boolean visible,
             long presentationIndex,
             YuvToRgbTransform transform
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
         OutputFrameMetadata metadata = new OutputFrameMetadata(
@@ -115,11 +142,11 @@ public final class OutputFrameFactory {
     /// @param transform the selected YUV-to-RGB output transform
     /// @return one public decoded frame backed by the appropriate ARGB storage type
     private static DecodedFrame createFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             OutputFrameMetadata metadata,
             YuvToRgbTransform transform
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
         return switch (checkedDecodedPlanes.bitDepth()) {
@@ -148,12 +175,12 @@ public final class OutputFrameFactory {
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
     public static DecodedFrame createExistingFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             ReferenceSurfaceSnapshot surfaceSnapshot,
             FrameHeader outputRequestHeader,
             long presentationIndex
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         ReferenceSurfaceSnapshot checkedSnapshot = Objects.requireNonNull(surfaceSnapshot, "surfaceSnapshot");
         FrameHeader checkedOutputRequestHeader = Objects.requireNonNull(outputRequestHeader, "outputRequestHeader");
         FrameHeader referencedFrameHeader = checkedSnapshot.frameHeader();

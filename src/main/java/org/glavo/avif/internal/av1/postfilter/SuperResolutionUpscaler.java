@@ -17,8 +17,8 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -138,8 +138,8 @@ final class SuperResolutionUpscaler {
     /// @param decodedPlanes the decoded planes after CDEF in the coded-width domain
     /// @param frameHeader the frame header that owns the decoded planes
     /// @return the input planes or a new post-super-resolution snapshot
-    DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader frameHeader) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+    DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader frameHeader) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         if (!checkedFrameHeader.superResolution().enabled()) {
             return checkedDecodedPlanes;
@@ -154,15 +154,15 @@ final class SuperResolutionUpscaler {
         int upscaledWidth = frameSize.upscaledWidth();
         Av1ChromaFormat chromaFormat = checkedDecodedPlanes.chromaFormat();
         int bitDepth = checkedDecodedPlanes.bitDepth();
-        DecodedPlane upscaledLumaPlane = upscalePlaneHorizontally(
+        PaddedPlane upscaledLumaPlane = upscalePlaneHorizontally(
                 checkedDecodedPlanes.lumaPlane(),
                 upscaledWidth,
                 bitDepth,
                 8
         );
-        @Nullable DecodedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
-        @Nullable DecodedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
-        @Nullable DecodedPlane upscaledChromaUPlane = chromaUPlane != null
+        @Nullable PaddedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
+        @Nullable PaddedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
+        @Nullable PaddedPlane upscaledChromaUPlane = chromaUPlane != null
                 ? upscalePlaneHorizontally(
                         chromaUPlane,
                         chromaWidth(chromaFormat, upscaledWidth),
@@ -170,7 +170,7 @@ final class SuperResolutionUpscaler {
                         chromaFormat == Av1ChromaFormat.YUV444 ? 8 : 4
                 )
                 : null;
-        @Nullable DecodedPlane upscaledChromaVPlane = chromaVPlane != null
+        @Nullable PaddedPlane upscaledChromaVPlane = chromaVPlane != null
                 ? upscalePlaneHorizontally(
                         chromaVPlane,
                         chromaWidth(chromaFormat, upscaledWidth),
@@ -178,7 +178,7 @@ final class SuperResolutionUpscaler {
                         chromaFormat == Av1ChromaFormat.YUV444 ? 8 : 4
                 )
                 : null;
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 bitDepth,
                 chromaFormat,
                 upscaledWidth,
@@ -211,13 +211,13 @@ final class SuperResolutionUpscaler {
     /// @param bitDepth the decoded sample bit depth
     /// @param miWidth the plane-local width of one AV1 eight-luma-sample frame-grid unit
     /// @return one horizontally upscaled decoded plane
-    private static DecodedPlane upscalePlaneHorizontally(
-            DecodedPlane plane,
+    private static PaddedPlane upscalePlaneHorizontally(
+            PaddedPlane plane,
             int targetWidth,
             int bitDepth,
             int miWidth
     ) {
-        DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
+        PaddedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
         if (targetWidth <= 0) {
             throw new IllegalArgumentException("targetWidth <= 0: " + targetWidth);
         }
@@ -261,7 +261,7 @@ final class SuperResolutionUpscaler {
             }
         }
 
-        return DecodedPlane.fromOwnedSamples(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
+        return PaddedPlane.fromOwnedSamples(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
     }
 
     /// Returns the fixed-point step for one source and target width.

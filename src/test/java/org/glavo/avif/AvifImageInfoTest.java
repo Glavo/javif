@@ -38,24 +38,11 @@ final class AvifImageInfoTest {
         byte[] iccProfile = new byte[]{1, 2, 3};
         byte[] exif = new byte[]{4, 5};
         byte[] xmp = new byte[]{6};
-        AvifImageInfo info = new AvifImageInfo(
-                2,
-                3,
-                AvifBitDepth.EIGHT_BITS,
-                Av1ChromaFormat.YUV420,
-                null,
-                null,
-                null,
-                null,
-                false,
-                true,
-                null,
-                null,
-                iccProfile,
-                exif,
-                xmp,
-                null
-        );
+        AvifImageInfo info = new AvifImageInfo(2, 3, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.YUV420)
+                .withAlpha(false, true)
+                .withIccProfile(iccProfile)
+                .withExif(exif)
+                .withXmp(xmp);
         iccProfile[0] = 10;
         exif[0] = 11;
         xmp[0] = 12;
@@ -64,10 +51,6 @@ final class AvifImageInfoTest {
         assertEquals(3, info.height());
         assertFalse(info.animated());
         assertEquals(1, info.frameCount());
-        assertEquals(0, info.mediaTimescale());
-        assertEquals(0, info.mediaDuration());
-        assertEquals(AvifImageInfo.REPETITION_COUNT_UNKNOWN, info.repetitionCount());
-        assertArrayEquals(new int[0], info.frameDurations());
         assertNull(info.sequenceInfo());
         assertNull(info.transformInfo());
         assertFalse(info.alphaPresent());
@@ -83,64 +66,32 @@ final class AvifImageInfoTest {
         assertArrayEquals(new byte[]{6}, bytes(returnedXmp));
     }
 
-    /// Verifies that legacy sequence queries delegate to the typed sequence descriptor.
+    /// Verifies that sequence metadata is exposed through its typed descriptor.
     @Test
     void sequenceAccessorsDelegateToSequenceDescriptor() {
         int[] durations = new int[]{20, 30};
         AvifSequenceInfo sequenceInfo = new AvifSequenceInfo(2, 1_000, 50, 3, durations);
-        AvifImageInfo info = new AvifImageInfo(
-                4,
-                5,
-                AvifBitDepth.TEN_BITS,
-                Av1ChromaFormat.YUV444,
-                sequenceInfo,
-                null,
-                null,
-                null,
-                false,
-                false,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
+        AvifImageInfo info = new AvifImageInfo(4, 5, AvifBitDepth.TEN_BITS, Av1ChromaFormat.YUV444)
+                .withSequenceInfo(sequenceInfo);
         durations[0] = 99;
 
         assertTrue(info.animated());
         assertSame(sequenceInfo, info.sequenceInfo());
         assertEquals(2, info.frameCount());
-        assertEquals(1_000, info.mediaTimescale());
-        assertEquals(50, info.mediaDuration());
-        assertEquals(3, info.repetitionCount());
-        int[] returnedDurations = info.frameDurations();
+        assertEquals(1_000, sequenceInfo.mediaTimescale());
+        assertEquals(50, sequenceInfo.mediaDuration());
+        assertEquals(3, sequenceInfo.repetitionCount());
+        int[] returnedDurations = sequenceInfo.frameDurations();
         assertArrayEquals(new int[]{20, 30}, returnedDurations);
         returnedDurations[0] = 100;
-        assertArrayEquals(new int[]{20, 30}, info.frameDurations());
+        assertArrayEquals(new int[]{20, 30}, sequenceInfo.frameDurations());
     }
 
     /// Verifies alpha state that cannot be represented by a direct auxiliary image descriptor.
     @Test
     void explicitAlphaPresenceDoesNotRequireAuxiliaryDescriptor() {
-        AvifImageInfo info = new AvifImageInfo(
-                2,
-                3,
-                AvifBitDepth.EIGHT_BITS,
-                Av1ChromaFormat.YUV420,
-                null,
-                null,
-                null,
-                null,
-                true,
-                true,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
+        AvifImageInfo info = new AvifImageInfo(2, 3, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.YUV420)
+                .withAlpha(true, true);
 
         assertTrue(info.alphaPresent());
         assertTrue(info.alphaPremultiplied());
@@ -148,7 +99,7 @@ final class AvifImageInfoTest {
         assertArrayEquals(new AvifAuxiliaryImageInfo[0], info.auxiliaryImages());
     }
 
-    /// Verifies typed transform delegation and alpha detection from auxiliary descriptors.
+    /// Verifies typed transform metadata and alpha detection from auxiliary descriptors.
     @Test
     void transformAndAuxiliaryAccessorsDelegateToTypedDescriptors() {
         AvifImageTransformInfo transformInfo = new AvifImageTransformInfo(1, 2, 3, 4, 1, 0);
@@ -162,34 +113,20 @@ final class AvifImageInfoTest {
                 Av1ChromaFormat.MONOCHROME
         );
         AvifAuxiliaryImageInfo[] auxiliaryImages = new AvifAuxiliaryImageInfo[]{alphaInfo};
-        AvifImageInfo info = new AvifImageInfo(
-                3,
-                4,
-                AvifBitDepth.EIGHT_BITS,
-                Av1ChromaFormat.YUV420,
-                null,
-                transformInfo,
-                null,
-                auxiliaryImages,
-                false,
-                true,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
+        AvifImageInfo info = new AvifImageInfo(3, 4, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.YUV420)
+                .withTransformInfo(transformInfo)
+                .withAuxiliaryImages(null, auxiliaryImages)
+                .withAlpha(false, true);
         auxiliaryImages[0] = null;
 
         assertSame(transformInfo, info.transformInfo());
-        assertTrue(info.hasCleanApertureCrop());
-        assertEquals(1, info.cleanApertureCropX());
-        assertEquals(2, info.cleanApertureCropY());
-        assertEquals(3, info.cleanApertureCropWidth());
-        assertEquals(4, info.cleanApertureCropHeight());
-        assertEquals(1, info.rotationCode());
-        assertEquals(0, info.mirrorAxis());
+        assertTrue(transformInfo.hasCleanApertureCrop());
+        assertEquals(1, transformInfo.cleanApertureCropX());
+        assertEquals(2, transformInfo.cleanApertureCropY());
+        assertEquals(3, transformInfo.cleanApertureCropWidth());
+        assertEquals(4, transformInfo.cleanApertureCropHeight());
+        assertEquals(1, transformInfo.rotationCode());
+        assertEquals(0, transformInfo.mirrorAxis());
         assertTrue(info.alphaPresent());
         assertTrue(info.alphaPremultiplied());
         assertArrayEquals(new String[]{AvifAuxiliaryImageInfo.ALPHA_TYPE}, info.auxiliaryImageTypes());
@@ -209,24 +146,7 @@ final class AvifImageInfoTest {
     /// @param height the display height
     /// @return the created image metadata
     private static AvifImageInfo imageInfo(int width, int height) {
-        return new AvifImageInfo(
-                width,
-                height,
-                AvifBitDepth.EIGHT_BITS,
-                Av1ChromaFormat.YUV420,
-                null,
-                null,
-                null,
-                null,
-                false,
-                false,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
+        return new AvifImageInfo(width, height, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.YUV420);
     }
 
     /// Copies the remaining bytes from one metadata payload view.

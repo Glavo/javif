@@ -23,8 +23,6 @@ import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -553,12 +551,11 @@ final class ArgonAv1CorpusTest {
         ZipFile archive = archive();
         String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
         ZipEntry streamEntry = requireEntry(archive, streamPath);
-        Av1DecoderConfig config = Av1DecoderConfig.builder()
-                .applyFilmGrain(false)
-                .strictStdCompliance(true)
-                .outputAllLayers(true)
-                .largeScaleTileMode(testCase.largeScaleTileMode())
-                .build();
+        Av1DecoderConfig config = Av1DecoderConfig.DEFAULT
+                .withApplyFilmGrain(false)
+                .withStrictStdCompliance(true)
+                .withOutputAllLayers(true)
+                .withLargeScaleTileMode(testCase.largeScaleTileMode());
 
         assertThrows(DecodeException.class, () -> {
             BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry));
@@ -590,12 +587,11 @@ final class ArgonAv1CorpusTest {
         @Nullable List<LargeScaleTileDigestLayout> tileListLayouts = testCase.largeScaleTileMode()
                 ? readLargeScaleTileDigestLayouts(archive, streamEntry, testCase.annexB())
                 : null;
-        Av1DecoderConfig config = Av1DecoderConfig.builder()
-                .applyFilmGrain(referenceCase.output().applyFilmGrain())
-                .outputAllLayers(true)
-                .largeScaleTileMode(testCase.largeScaleTileMode())
-                .operatingPoint(referenceCase.operatingPoint())
-                .build();
+        Av1DecoderConfig config = Av1DecoderConfig.DEFAULT
+                .withApplyFilmGrain(referenceCase.output().applyFilmGrain())
+                .withOutputAllLayers(true)
+                .withLargeScaleTileMode(testCase.largeScaleTileMode())
+                .withOperatingPoint(referenceCase.operatingPoint());
 
         int frameCount = 0;
         @Nullable List<String> frameDiagnostics = Boolean.getBoolean(TRACE_FRAMES_PROPERTY)
@@ -664,9 +660,9 @@ final class ArgonAv1CorpusTest {
                 + " format=" + planes.chromaFormat()
                 + " bitDepth=" + planes.bitDepth()
                 + " md5=" + HexFormat.of().formatHex(frameDigest.digest())
-                + " y=" + planeDigest(planes.lumaPlane(), planes.bitDepth())
-                + " u=" + planeDigest(planes.chromaUPlane(), planes.bitDepth())
-                + " v=" + planeDigest(planes.chromaVPlane(), planes.bitDepth());
+                + " y=" + planeDigest(planes.lumaPlane(), planes.bitDepth().bits())
+                + " u=" + planeDigest(planes.chromaUPlane(), planes.bitDepth().bits())
+                + " v=" + planeDigest(planes.chromaVPlane(), planes.bitDepth().bits());
     }
 
     /// Returns the visible-sample digest of one decoded plane, or `none` for an absent plane.
@@ -709,12 +705,12 @@ final class ArgonAv1CorpusTest {
     /// @param digest the digest to update
     /// @param planes the decoded pre-grain planes
     private static void updateYuvDigest(MessageDigest digest, DecodedPlanes planes) {
-        updatePlaneDigest(digest, planes.lumaPlane(), planes.bitDepth());
+        updatePlaneDigest(digest, planes.lumaPlane(), planes.bitDepth().bits());
         @Nullable DecodedPlane chromaUPlane = planes.chromaUPlane();
         @Nullable DecodedPlane chromaVPlane = planes.chromaVPlane();
         if (chromaUPlane != null && chromaVPlane != null) {
-            updatePlaneDigest(digest, chromaUPlane, planes.bitDepth());
-            updatePlaneDigest(digest, chromaVPlane, planes.bitDepth());
+            updatePlaneDigest(digest, chromaUPlane, planes.bitDepth().bits());
+            updatePlaneDigest(digest, chromaVPlane, planes.bitDepth().bits());
         }
     }
 
@@ -741,7 +737,7 @@ final class ArgonAv1CorpusTest {
             updatePlaneRegionDigest(
                     digest,
                     planes.lumaPlane(),
-                    planes.bitDepth(),
+                    planes.bitDepth().bits(),
                     tileColumn * tileWidth,
                     tileRow * tileHeight,
                     tileWidth,
@@ -757,7 +753,7 @@ final class ArgonAv1CorpusTest {
                 updatePlaneRegionDigest(
                         digest,
                         chromaUPlane,
-                        planes.bitDepth(),
+                        planes.bitDepth().bits(),
                         tileColumn * chromaTileWidth,
                         tileRow * chromaTileHeight,
                         chromaTileWidth,
@@ -766,7 +762,7 @@ final class ArgonAv1CorpusTest {
                 updatePlaneRegionDigest(
                         digest,
                         chromaVPlane,
-                        planes.bitDepth(),
+                        planes.bitDepth().bits(),
                         tileColumn * chromaTileWidth,
                         tileRow * chromaTileHeight,
                         chromaTileWidth,

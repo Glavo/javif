@@ -19,8 +19,8 @@ import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -47,7 +47,7 @@ final class DecodedPlanesArgbIntOutputTest {
     /// Verifies that 8-bit monochrome planes become opaque grayscale ARGB pixels and ignore stride padding.
     @Test
     void convertsEightBitI400SamplesIntoOpaqueArgbPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 3,
@@ -80,7 +80,7 @@ final class DecodedPlanesArgbIntOutputTest {
     /// Verifies that AV1 render hints neither crop nor resample decoded output pixels.
     @Test
     void ignoresRenderSizeHintWhenConvertingDecodedPlanes() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 3,
@@ -112,7 +112,7 @@ final class DecodedPlanesArgbIntOutputTest {
     /// Verifies that high-bit-depth planes can be reduced directly into opaque 8-bit ARGB output.
     @Test
     void convertsTenBitI400SamplesIntoOpaqueArgbPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 10,
                 Av1ChromaFormat.MONOCHROME,
                 3,
@@ -146,7 +146,7 @@ final class DecodedPlanesArgbIntOutputTest {
     /// depending on one exact rounding formula.
     @Test
     void convertsEightBitI420SamplesUsingSharedChromaIntoOpaqueArgbPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.YUV420,
                 4,
@@ -186,7 +186,7 @@ final class DecodedPlanesArgbIntOutputTest {
     /// `YUV420`-style vertical chroma reuse.
     @Test
     void convertsEightBitI422SamplesUsingRowSpecificHorizontallySharedChromaIntoOpaqueArgbPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.YUV422,
                 4,
@@ -224,7 +224,7 @@ final class DecodedPlanesArgbIntOutputTest {
     /// rectangle. Exact packed pixels ensure the converter preserves the intended `AARRGGBB` byte order.
     @Test
     void convertsEightBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.YUV444,
                 4,
@@ -260,7 +260,7 @@ final class DecodedPlanesArgbIntOutputTest {
     ///
     /// @param planes the decoded planes to convert
     /// @return one opaque 8-bit ARGB frame
-    private static DecodedFrame convert(DecodedPlanes planes) {
+    private static DecodedFrame convert(DecodedSurface planes) {
         return ArgbOutput.toOpaqueArgb8Frame(
                 planes,
                 TEST_FRAME_TYPE,
@@ -282,7 +282,7 @@ final class DecodedPlanesArgbIntOutputTest {
     ///
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
-    private static void assertFrameMetadata(DecodedFrame frame, DecodedPlanes planes) {
+    private static void assertFrameMetadata(DecodedFrame frame, DecodedSurface planes) {
         assertEquals(planes.codedWidth(), frame.width());
         assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
@@ -299,12 +299,12 @@ final class DecodedPlanesArgbIntOutputTest {
     /// @param stride the plane stride in samples
     /// @param values the unsigned sample values in row-major order
     /// @return one immutable decoded plane
-    private static DecodedPlane plane(int width, int height, int stride, int... values) {
+    private static PaddedPlane plane(int width, int height, int stride, int... values) {
         short[] samples = new short[values.length];
         for (int i = 0; i < values.length; i++) {
             samples[i] = (short) values[i];
         }
-        return new DecodedPlane(width, height, stride, samples);
+        return new PaddedPlane(width, height, stride, samples);
     }
 
     /// Returns the packed alpha component from one `0xAARRGGBB` pixel.

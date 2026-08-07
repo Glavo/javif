@@ -146,7 +146,9 @@ final class ChromiumAvifCorpusTest {
             AvifImageInfo sourceInfo = sourceReader.info();
             assertEquals(200, croppedInfo.width());
             assertEquals(50, croppedInfo.height());
-            assertTrue(croppedInfo.hasCleanApertureCrop());
+            AvifImageTransformInfo croppedTransform = croppedInfo.transformInfo();
+            assertNotNull(croppedTransform);
+            assertTrue(croppedTransform.hasCleanApertureCrop());
             assertEquals(300, sourceInfo.width());
             assertEquals(100, sourceInfo.height());
 
@@ -175,8 +177,10 @@ final class ChromiumAvifCorpusTest {
             AvifImageInfo info = reader.info();
             assertEquals(180, info.width());
             assertEquals(100, info.height());
-            assertEquals(40, info.cleanApertureCropX());
-            assertEquals(80, info.cleanApertureCropY());
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            assertNotNull(transformInfo);
+            assertEquals(40, transformInfo.cleanApertureCropX());
+            assertEquals(80, transformInfo.cleanApertureCropY());
             assertEquals(180, reader.readFrame(0).width());
         }
         assertDecodeFails("blue-and-magenta-crop-invalid.avif");
@@ -356,10 +360,12 @@ final class ChromiumAvifCorpusTest {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
             assertEquals(5, info.frameCount());
-            assertEquals(testCase.repetitionCount(), info.repetitionCount());
+            AvifSequenceInfo sequenceInfo = info.sequenceInfo();
+            assertNotNull(sequenceInfo);
+            assertEquals(testCase.repetitionCount(), sequenceInfo.repetitionCount());
             assertEquals(testCase.alphaPresent(), info.alphaPresent());
-            assertEquals(5, info.frameDurations().length);
-            for (int duration : info.frameDurations()) {
+            assertEquals(5, sequenceInfo.frameDurations().length);
+            for (int duration : sequenceInfo.frameDurations()) {
                 assertTrue(duration > 0);
             }
             @Unmodifiable List<AvifFrame> frames = reader.readAllFrames();
@@ -390,9 +396,10 @@ final class ChromiumAvifCorpusTest {
     private static void assertOrientationFixture(OrientationFixture testCase) throws IOException {
         try (AvifImageReader reader = open(testCase.resourceName())) {
             AvifImageInfo info = reader.info();
-            assertEquals(testCase.rotationCode(), info.rotationCode());
-            assertEquals(testCase.mirrorAxis(), info.mirrorAxis());
-            assertNotNull(info.transformInfo());
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            assertNotNull(transformInfo);
+            assertEquals(testCase.rotationCode(), transformInfo.rotationCode());
+            assertEquals(testCase.mirrorAxis(), transformInfo.mirrorAxis());
             assertEquals(1, reader.readAllFrames().size());
         }
     }
@@ -412,7 +419,7 @@ final class ChromiumAvifCorpusTest {
             assertNotNull(gainMapInfo.metadata());
             assertEquals(testCase.gainMapWidth(), gainMapInfo.gainMapWidth());
             assertEquals(testCase.gainMapHeight(), gainMapInfo.gainMapHeight());
-            AvifPlanes gainMap = reader.readRawGainMapPlanes(0);
+            DecodedPlanes gainMap = reader.readRawGainMapPlanes(0);
             assertNotNull(gainMap);
             assertEquals(testCase.gainMapWidth(), gainMap.codedWidth());
             assertEquals(testCase.gainMapHeight(), gainMap.codedHeight());
@@ -523,7 +530,7 @@ final class ChromiumAvifCorpusTest {
             fixtures.add(new AnimatedFixture("star-animated-" + bitDepth + "bpc.avif", 0, false));
             fixtures.add(new AnimatedFixture(
                     "star-animated-" + bitDepth + "bpc-with-alpha.avif",
-                    AvifImageInfo.REPETITION_COUNT_UNKNOWN,
+                    AvifSequenceInfo.REPETITION_COUNT_UNKNOWN,
                     true
             ));
         }
@@ -531,7 +538,7 @@ final class ChromiumAvifCorpusTest {
         fixtures.add(new AnimatedFixture("star-animated-8bpc-10-repetition.avif", 10, false));
         fixtures.add(new AnimatedFixture(
                 "star-animated-8bpc-infinite-repetition.avif",
-                AvifImageInfo.REPETITION_COUNT_INFINITE,
+                AvifSequenceInfo.REPETITION_COUNT_INFINITE,
                 false
         ));
         return List.copyOf(fixtures);

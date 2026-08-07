@@ -204,20 +204,16 @@ public final class AvifContainerParser {
                 sampleTransform != null
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(av1Config.bitDepth()),
-                av1Config.chromaFormat(),
-                null,
-                transformInfo,
-                null,
-                auxiliaryImages(primaryItem.id, ispe.width, ispe.height),
-                alphaPayloads.present(),
-                alphaPremultiplied,
-                gainMapPayloads.info,
-                primaryItem.firstProperty(AvifColorInfo.class),
-                metadata.iccProfile,
-                metadata.exif,
-                metadata.xmp,
-                opaqueItemProperties(primaryItem)
-        );
+                av1Config.chromaFormat()
+        ).withTransformInfo(transformInfo)
+                .withAuxiliaryImages(null, auxiliaryImages(primaryItem.id, ispe.width, ispe.height))
+                .withAlpha(alphaPayloads.present(), alphaPremultiplied)
+                .withGainMapInfo(gainMapPayloads.info)
+                .withColorInfo(primaryItem.firstProperty(AvifColorInfo.class))
+                .withIccProfile(metadata.iccProfile)
+                .withExif(metadata.exif)
+                .withXmp(metadata.xmp)
+                .withOpaqueItemProperties(opaqueItemProperties(primaryItem));
 
         return new AvifContainer(
                 info,
@@ -293,20 +289,16 @@ public final class AvifContainerParser {
                 sampleTransform != null
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(colorGrid.representativeAv1C.bitDepth()),
-                colorGrid.representativeAv1C.chromaFormat(),
-                null,
-                transformInfo,
-                null,
-                auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight),
-                alphaPayloads.present(),
-                alphaPremultiplied,
-                gainMapPayloads.info,
-                gridItem.firstProperty(AvifColorInfo.class),
-                metadata.iccProfile,
-                metadata.exif,
-                metadata.xmp,
-                opaqueItemProperties(gridItem)
-        );
+                colorGrid.representativeAv1C.chromaFormat()
+        ).withTransformInfo(transformInfo)
+                .withAuxiliaryImages(null, auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight))
+                .withAlpha(alphaPayloads.present(), alphaPremultiplied)
+                .withGainMapInfo(gainMapPayloads.info)
+                .withColorInfo(gridItem.firstProperty(AvifColorInfo.class))
+                .withIccProfile(metadata.iccProfile)
+                .withExif(metadata.exif)
+                .withXmp(metadata.xmp)
+                .withOpaqueItemProperties(opaqueItemProperties(gridItem));
 
         return new AvifContainer(
                 info,
@@ -1938,26 +1930,18 @@ public final class AvifContainerParser {
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
-                s.chromaFormat != null ? s.chromaFormat : Av1ChromaFormat.YUV420,
-                new AvifSequenceInfo(
+                s.chromaFormat != null ? s.chromaFormat : Av1ChromaFormat.YUV420
+        ).withSequenceInfo(new AvifSequenceInfo(
                         colorPayloads.sampleCount,
                         ts,
                         dur,
                         repetitionCount,
                         colorPayloads.frameDeltas
-                ),
-                null,
-                meta.moovAuxiliaryTypes.toArray(String[]::new),
-                null,
-                alphaPayloads != null,
-                sequenceAlphaPremultiplied(),
-                null,
-                s.colr,
-                s.iccProfile,
-                null,
-                null,
-                null
-        );
+                ))
+                .withAuxiliaryImages(meta.moovAuxiliaryTypes.toArray(String[]::new), null)
+                .withAlpha(alphaPayloads != null, sequenceAlphaPremultiplied())
+                .withColorInfo(s.colr)
+                .withIccProfile(s.iccProfile);
         return new AvifContainer(info,
                 colorPayloads.payloads,
                 alphaPayloads,
@@ -2019,13 +2003,13 @@ public final class AvifContainerParser {
     /// @throws AvifDecodeException if a repeating edit list has an invalid track duration
     private static int sequenceRepetitionCount(MoovState track) throws AvifDecodeException {
         if (!track.editListSeen) {
-            return AvifImageInfo.REPETITION_COUNT_UNKNOWN;
+            return AvifSequenceInfo.REPETITION_COUNT_UNKNOWN;
         }
         if (!track.editListRepeating) {
             return 0;
         }
         if (track.trackDuration == INDEFINITE_TRACK_DURATION) {
-            return AvifImageInfo.REPETITION_COUNT_INFINITE;
+            return AvifSequenceInfo.REPETITION_COUNT_INFINITE;
         }
         if (track.trackDuration == 0) {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Invalid repeating edit-list track duration", null);
@@ -2035,7 +2019,7 @@ public final class AvifContainerParser {
                 + (track.trackDuration % segmentDuration != 0 ? 1 : 0)
                 - 1;
         return repetitionCount > Integer.MAX_VALUE
-                ? AvifImageInfo.REPETITION_COUNT_INFINITE
+                ? AvifSequenceInfo.REPETITION_COUNT_INFINITE
                 : (int) repetitionCount;
     }
 
@@ -3055,22 +3039,23 @@ public final class AvifContainerParser {
                 baseItemId,
                 gainMapItem.id,
                 toneMappedItem.type,
-                gainMapItem.type,
-                toneMappedDimensions.width,
-                toneMappedDimensions.height,
-                gainMapDimensions.width,
-                gainMapDimensions.height,
-                gainMapBitDepth,
-                gainMapChromaFormat,
-                toneMappedItem.firstProperty(AvifColorInfo.class),
-                iccProfile(toneMappedItem),
-                gainMapItem.firstProperty(AvifColorInfo.class),
-                metadata.version,
-                metadata.minimumVersion,
-                metadata.writerVersion,
-                true,
-                metadata.metadata
-        );
+                gainMapItem.type
+        ).withToneMappedSize(toneMappedDimensions.width, toneMappedDimensions.height)
+                .withGainMapImage(
+                        gainMapDimensions.width,
+                        gainMapDimensions.height,
+                        gainMapBitDepth,
+                        gainMapChromaFormat
+                )
+                .withToneMappedColorInfo(toneMappedItem.firstProperty(AvifColorInfo.class))
+                .withToneMappedIccProfile(iccProfile(toneMappedItem))
+                .withGainMapColorInfo(gainMapItem.firstProperty(AvifColorInfo.class))
+                .withMetadata(
+                        metadata.version,
+                        metadata.minimumVersion,
+                        metadata.writerVersion,
+                        metadata.metadata
+                );
     }
 
     /// Returns the ICC profile property payload for one item.

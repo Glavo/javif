@@ -13,14 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.internal.av1.image;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnmodifiableView;
 
 import java.nio.ShortBuffer;
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Immutable snapshot of one decoded image plane.
@@ -28,7 +27,7 @@ import java.util.Objects;
 /// Samples are stored as unsigned values in the low bits of each `short`. `stride` is measured in
 /// samples, not bytes.
 @NotNullByDefault
-public final class DecodedPlane {
+public final class PaddedPlane {
     /// The plane width in samples.
     private final int width;
 
@@ -42,7 +41,7 @@ public final class DecodedPlane {
     private final int storageHeight;
 
     /// The stored unsigned sample values in row-major order.
-    private final short @Unmodifiable [] samples;
+    private final @Unmodifiable ShortBuffer samples;
 
     /// Creates one immutable decoded-plane snapshot.
     ///
@@ -51,33 +50,20 @@ public final class DecodedPlane {
     /// @param stride the sample stride of one plane row
     /// @param samples the stored unsigned sample values in row-major order; the array may include
     ///                complete padded rows below the visible plane
-    public DecodedPlane(int width, int height, int stride, short[] samples) {
-        this(width, height, stride, samples, true);
+    public PaddedPlane(int width, int height, int stride, short[] samples) {
+        this(width, height, stride, immutableSamples(Objects.requireNonNull(samples, "samples")));
     }
 
-    /// Creates one immutable decoded plane by taking exclusive ownership of its sample storage.
+    /// Creates one immutable padded plane over immutable sample storage.
     ///
-    /// The caller must not access or modify `samples` after this method returns. This method exists
-    /// for decoder stages that have finished producing an otherwise unaliased output buffer;
-    /// callers that retain their array must use [#DecodedPlane(int, int, int, short[])].
+    /// The buffer is retained as a read-only slice without copying. The caller must not modify the
+    /// underlying storage after construction.
     ///
-    /// @param width the plane width in samples
-    /// @param height the plane height in samples
-    /// @param stride the sample stride of one plane row
-    /// @param samples the exclusively owned stored samples, including any complete padded rows
-    /// @return one immutable decoded plane backed by `samples`
-    public static DecodedPlane fromOwnedSamples(int width, int height, int stride, short[] samples) {
-        return new DecodedPlane(width, height, stride, samples, false);
-    }
-
-    /// Creates one immutable decoded plane with copied or exclusively transferred sample storage.
-    ///
-    /// @param width the plane width in samples
-    /// @param height the plane height in samples
-    /// @param stride the sample stride of one plane row
-    /// @param samples the stored unsigned sample values in row-major order
-    /// @param copySamples whether to copy the supplied storage
-    private DecodedPlane(int width, int height, int stride, short[] samples, boolean copySamples) {
+    /// @param width the visible plane width in samples
+    /// @param height the visible plane height in samples
+    /// @param stride the stored row stride in samples
+    /// @param samples the complete stored rows, including any bottom padding
+    public PaddedPlane(int width, int height, int stride, @Unmodifiable ShortBuffer samples) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -91,17 +77,35 @@ public final class DecodedPlane {
         if (requiredLength > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("plane storage is too large");
         }
-
-        short[] checkedSamples = Objects.requireNonNull(samples, "samples");
-        if (checkedSamples.length < (int) requiredLength || checkedSamples.length % stride != 0) {
+        ShortBuffer checkedSamples = Objects.requireNonNull(samples, "samples").slice().asReadOnlyBuffer();
+        if (checkedSamples.remaining() < (int) requiredLength || checkedSamples.remaining() % stride != 0) {
             throw new IllegalArgumentException("samples length does not contain complete stored rows");
         }
-
         this.width = width;
         this.height = height;
         this.stride = stride;
-        this.storageHeight = checkedSamples.length / stride;
-        this.samples = copySamples ? Arrays.copyOf(checkedSamples, checkedSamples.length) : checkedSamples;
+        this.storageHeight = checkedSamples.remaining() / stride;
+        this.samples = checkedSamples;
+    }
+
+    /// Creates one immutable decoded plane by taking exclusive ownership of its sample storage.
+    ///
+    /// The caller must not access or modify `samples` after this method returns. This method exists
+    /// for decoder stages that have finished producing an otherwise unaliased output buffer;
+    /// callers that retain their array must use [#PaddedPlane(int, int, int, short[])].
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param stride the sample stride of one plane row
+    /// @param samples the exclusively owned stored samples, including any complete padded rows
+    /// @return one immutable decoded plane backed by `samples`
+    public static PaddedPlane fromOwnedSamples(int width, int height, int stride, short[] samples) {
+        return new PaddedPlane(
+                width,
+                height,
+                stride,
+                ShortBuffer.wrap(Objects.requireNonNull(samples, "samples")).asReadOnlyBuffer()
+        );
     }
 
     /// Returns the plane width in samples.
@@ -136,7 +140,10 @@ public final class DecodedPlane {
     ///
     /// @return the stored unsigned sample values in row-major order
     public short @Unmodifiable [] samples() {
-        return Arrays.copyOf(samples, samples.length);
+        ShortBuffer buffer = samples.slice();
+        short[] result = new short[buffer.remaining()];
+        buffer.get(result);
+        return result;
     }
 
     /// Returns a read-only view of the visible stored rows.
@@ -146,7 +153,7 @@ public final class DecodedPlane {
     ///
     /// @return a read-only view of the stored unsigned sample values
     public @UnmodifiableView ShortBuffer sampleBuffer() {
-        return ShortBuffer.wrap(samples, 0, stride * height).slice().asReadOnlyBuffer();
+        return samples.slice(0, stride * height).asReadOnlyBuffer();
     }
 
     /// Returns one unsigned sample value.
@@ -161,7 +168,7 @@ public final class DecodedPlane {
         if (y < 0 || y >= height) {
             throw new IndexOutOfBoundsException("y out of range: " + y);
         }
-        return samples[y * stride + x] & 0xFFFF;
+        return samples.get(y * stride + x) & 0xFFFF;
     }
 
     /// Returns one stored sample, including right or bottom padding outside the visible plane.
@@ -176,6 +183,14 @@ public final class DecodedPlane {
         if (y < 0 || y >= storageHeight) {
             throw new IndexOutOfBoundsException("y out of stored range: " + y);
         }
-        return samples[y * stride + x] & 0xFFFF;
+        return samples.get(y * stride + x) & 0xFFFF;
+    }
+
+    /// Copies array input into immutable read-only buffer storage.
+    ///
+    /// @param samples the source samples
+    /// @return immutable copied sample storage
+    private static @Unmodifiable ShortBuffer immutableSamples(short[] samples) {
+        return ShortBuffer.wrap(samples.clone()).asReadOnlyBuffer();
     }
 }

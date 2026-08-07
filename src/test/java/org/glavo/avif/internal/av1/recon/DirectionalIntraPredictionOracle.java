@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -112,7 +112,7 @@ final class DirectionalIntraPredictionOracle {
     /// @param angleDelta the signed luma angle delta
     /// @return the expected luma prediction block in row-major form
     static int[][] predictLuma(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int bitDepth,
             int x,
             int y,
@@ -178,7 +178,7 @@ final class DirectionalIntraPredictionOracle {
     /// @param angleDelta the signed chroma angle delta
     /// @return the expected chroma prediction block in row-major form
     static int[][] predictChroma(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int bitDepth,
             int x,
             int y,

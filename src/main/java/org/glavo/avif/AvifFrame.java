@@ -136,6 +136,20 @@ public final class AvifFrame {
         if (intPixels == null && longPixels == null) {
             throw new IllegalArgumentException("At least one pixel representation is required");
         }
+        int pixelCount = checkedPixelCount(width, height);
+        if (intPixels != null && intPixels.remaining() != pixelCount) {
+            throw new IllegalArgumentException(
+                    "Int pixel count does not match dimensions: " + intPixels.remaining()
+            );
+        }
+        if (longPixels != null && longPixels.remaining() != pixelCount) {
+            throw new IllegalArgumentException(
+                    "Long pixel count does not match dimensions: " + longPixels.remaining()
+            );
+        }
+        if (frameIndex < 0) {
+            throw new IllegalArgumentException("frameIndex < 0: " + frameIndex);
+        }
         this.width = width;
         this.height = height;
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
@@ -186,24 +200,6 @@ public final class AvifFrame {
     /// @return the packed ARGB pixel format
     public AvifPixelFormat pixelFormat() {
         return pixelFormat;
-    }
-
-    /// Returns whether this frame already has native `IntBuffer` ARGB_8888 storage.
-    ///
-    /// This method does not trigger lazy conversion.
-    ///
-    /// @return whether native `IntBuffer` storage is present
-    public boolean hasIntPixelBuffer() {
-        return intPixels != null;
-    }
-
-    /// Returns whether this frame already has native `LongBuffer` ARGB_16161616 storage.
-    ///
-    /// This method does not trigger lazy conversion.
-    ///
-    /// @return whether native `LongBuffer` storage is present
-    public boolean hasLongPixelBuffer() {
-        return longPixels != null;
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
@@ -278,5 +274,24 @@ public final class AvifFrame {
             throw new IllegalStateException("Long pixels are unavailable");
         }
         return pixels;
+    }
+
+    /// Returns the exact pixel count for validated positive dimensions.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @return the pixel count
+    private static int checkedPixelCount(int width, int height) {
+        if (width <= 0) {
+            throw new IllegalArgumentException("width <= 0: " + width);
+        }
+        if (height <= 0) {
+            throw new IllegalArgumentException("height <= 0: " + height);
+        }
+        long pixelCount = (long) width * height;
+        if (pixelCount > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Frame dimensions are too large: " + width + "x" + height);
+        }
+        return (int) pixelCount;
     }
 }

@@ -15,20 +15,18 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// Immutable raw decoded AVIF color planes.
+/// Immutable decoded image planes.
 ///
-/// These planes expose the decoded AV1 color image before AVIF auxiliary alpha composition and
-/// AVIF item transforms such as `clap`, `irot`, and `imir` are applied. The render dimensions retain
-/// the AV1 display hint; they do not crop or resample the stored planes.
+/// The render dimensions retain the AV1 display hint; they do not crop or resample the stored
+/// planes. AVIF readers expose these planes before auxiliary alpha composition and item transforms
+/// such as `clap`, `irot`, and `imir` are applied.
 @NotNullByDefault
-public final class AvifPlanes {
+public final class DecodedPlanes {
     /// The decoded sample bit depth.
     private final AvifBitDepth bitDepth;
     /// The decoded AV1 chroma sampling layout.
@@ -37,38 +35,38 @@ public final class AvifPlanes {
     private final int codedWidth;
     /// The stored luma height in samples.
     private final int codedHeight;
-    /// The presentation render width before AVIF item transforms.
+    /// The presentation render width.
     private final int renderWidth;
-    /// The presentation render height before AVIF item transforms.
+    /// The presentation render height.
     private final int renderHeight;
     /// The decoded luma plane.
-    private final AvifPlane lumaPlane;
+    private final DecodedPlane lumaPlane;
     /// The decoded chroma U plane, or `null` for monochrome images.
-    private final @Nullable AvifPlane chromaUPlane;
+    private final @Nullable DecodedPlane chromaUPlane;
     /// The decoded chroma V plane, or `null` for monochrome images.
-    private final @Nullable AvifPlane chromaVPlane;
+    private final @Nullable DecodedPlane chromaVPlane;
 
-    /// Creates raw decoded AVIF color planes.
+    /// Creates decoded image planes.
     ///
     /// @param bitDepth the decoded sample bit depth
     /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param codedWidth the stored luma width in samples
     /// @param codedHeight the stored luma height in samples
-    /// @param renderWidth the presentation render width before AVIF item transforms
-    /// @param renderHeight the presentation render height before AVIF item transforms
+    /// @param renderWidth the presentation render width
+    /// @param renderHeight the presentation render height
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane, or `null` for monochrome images
     /// @param chromaVPlane the decoded chroma V plane, or `null` for monochrome images
-    public AvifPlanes(
+    public DecodedPlanes(
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
             int codedWidth,
             int codedHeight,
             int renderWidth,
             int renderHeight,
-            AvifPlane lumaPlane,
-            @Nullable AvifPlane chromaUPlane,
-            @Nullable AvifPlane chromaVPlane
+            DecodedPlane lumaPlane,
+            @Nullable DecodedPlane chromaUPlane,
+            @Nullable DecodedPlane chromaVPlane
     ) {
         if (codedWidth <= 0) {
             throw new IllegalArgumentException("codedWidth <= 0: " + codedWidth);
@@ -123,16 +121,16 @@ public final class AvifPlanes {
         return codedHeight;
     }
 
-    /// Returns the presentation render width before AVIF item transforms.
+    /// Returns the presentation render width.
     ///
-    /// @return the presentation render width before AVIF item transforms
+    /// @return the presentation render width
     public int renderWidth() {
         return renderWidth;
     }
 
-    /// Returns the presentation render height before AVIF item transforms.
+    /// Returns the presentation render height.
     ///
-    /// @return the presentation render height before AVIF item transforms
+    /// @return the presentation render height
     public int renderHeight() {
         return renderHeight;
     }
@@ -140,21 +138,21 @@ public final class AvifPlanes {
     /// Returns the decoded luma plane.
     ///
     /// @return the decoded luma plane
-    public AvifPlane lumaPlane() {
+    public DecodedPlane lumaPlane() {
         return lumaPlane;
     }
 
     /// Returns the decoded chroma U plane.
     ///
     /// @return the decoded chroma U plane, or `null` for monochrome images
-    public @Nullable AvifPlane chromaUPlane() {
+    public @Nullable DecodedPlane chromaUPlane() {
         return chromaUPlane;
     }
 
     /// Returns the decoded chroma V plane.
     ///
     /// @return the decoded chroma V plane, or `null` for monochrome images
-    public @Nullable AvifPlane chromaVPlane() {
+    public @Nullable DecodedPlane chromaVPlane() {
         return chromaVPlane;
     }
 
@@ -163,47 +161,6 @@ public final class AvifPlanes {
     /// @return whether chroma planes are present
     public boolean hasChroma() {
         return chromaUPlane != null && chromaVPlane != null;
-    }
-
-    /// Creates public raw planes from internal decoded planes.
-    ///
-    /// @param planes the internal decoded planes
-    /// @return public raw decoded planes
-    static AvifPlanes fromDecodedPlanes(DecodedPlanes planes) {
-        DecodedPlanes checkedPlanes = Objects.requireNonNull(planes, "planes");
-        return new AvifPlanes(
-                AvifBitDepth.fromBits(checkedPlanes.bitDepth()),
-                checkedPlanes.chromaFormat(),
-                checkedPlanes.codedWidth(),
-                checkedPlanes.codedHeight(),
-                checkedPlanes.renderWidth(),
-                checkedPlanes.renderHeight(),
-                fromDecodedPlane(checkedPlanes.lumaPlane()),
-                fromNullableDecodedPlane(checkedPlanes.chromaUPlane()),
-                fromNullableDecodedPlane(checkedPlanes.chromaVPlane())
-        );
-    }
-
-    /// Creates a public plane from one internal decoded plane.
-    ///
-    /// @param plane the internal decoded plane
-    /// @return the public plane
-    private static AvifPlane fromDecodedPlane(DecodedPlane plane) {
-        DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
-        return new AvifPlane(
-                checkedPlane.width(),
-                checkedPlane.height(),
-                checkedPlane.stride(),
-                checkedPlane.sampleBuffer()
-        );
-    }
-
-    /// Creates a public plane from one optional internal decoded plane.
-    ///
-    /// @param plane the internal decoded plane, or `null`
-    /// @return the public plane, or `null`
-    private static @Nullable AvifPlane fromNullableDecodedPlane(@Nullable DecodedPlane plane) {
-        return plane != null ? fromDecodedPlane(plane) : null;
     }
 
     /// Validates the plane layout against the chroma format.

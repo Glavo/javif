@@ -20,8 +20,8 @@ import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -94,8 +94,8 @@ public final class RestorationApplier {
     /// @param decodedPlanes the decoded planes after CDEF
     /// @param restoration the normalized frame-level restoration state
     /// @return the post-restoration planes
-    public DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader.RestorationInfo restoration) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+    public DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader.RestorationInfo restoration) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader.RestorationInfo checkedRestoration = Objects.requireNonNull(restoration, "restoration");
         if (hasActiveRestoration(checkedRestoration, checkedDecodedPlanes.hasChroma())) {
             throw new IllegalStateException("Active AV1 loop restoration requires decoded restoration unit syntax");
@@ -109,8 +109,8 @@ public final class RestorationApplier {
     /// @param restoration the normalized frame-level restoration state
     /// @param syntaxDecodeResult the decoded frame syntax that carries restoration units, or `null`
     /// @return the post-restoration planes
-    public DecodedPlanes apply(
-            DecodedPlanes decodedPlanes,
+    public DecodedSurface apply(
+            DecodedSurface decodedPlanes,
             FrameHeader.RestorationInfo restoration,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
@@ -124,14 +124,14 @@ public final class RestorationApplier {
     /// @param restoration the normalized frame-level restoration state
     /// @param syntaxDecodeResult the decoded frame syntax that carries restoration units, or `null`
     /// @return the post-restoration planes
-    public DecodedPlanes apply(
-            DecodedPlanes decodedPlanes,
-            DecodedPlanes boundaryPlanes,
+    public DecodedSurface apply(
+            DecodedSurface decodedPlanes,
+            DecodedSurface boundaryPlanes,
             FrameHeader.RestorationInfo restoration,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
-        DecodedPlanes checkedBoundaryPlanes = Objects.requireNonNull(boundaryPlanes, "boundaryPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedBoundaryPlanes = Objects.requireNonNull(boundaryPlanes, "boundaryPlanes");
         FrameHeader.RestorationInfo checkedRestoration = Objects.requireNonNull(restoration, "restoration");
         if (!hasActiveRestoration(checkedRestoration, checkedDecodedPlanes.hasChroma())) {
             return checkedDecodedPlanes;
@@ -146,7 +146,7 @@ public final class RestorationApplier {
 
         RestorationUnitMap unitMap = syntaxDecodeResult.restorationUnitMap();
         RestorationWorkspace workspace = new RestorationWorkspace();
-        DecodedPlane lumaPlane = applyPlane(
+        PaddedPlane lumaPlane = applyPlane(
                 checkedDecodedPlanes.lumaPlane(),
                 checkedBoundaryPlanes.lumaPlane(),
                 checkedDecodedPlanes.bitDepth(),
@@ -157,8 +157,8 @@ public final class RestorationApplier {
                 workspace
         );
 
-        @Nullable DecodedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
-        @Nullable DecodedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
+        @Nullable PaddedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
+        @Nullable PaddedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
         if (checkedDecodedPlanes.hasChroma()) {
             chromaUPlane = applyPlane(
                     Objects.requireNonNull(chromaUPlane, "chromaUPlane"),
@@ -187,7 +187,7 @@ public final class RestorationApplier {
                 && chromaVPlane == checkedDecodedPlanes.chromaVPlane()) {
             return checkedDecodedPlanes;
         }
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 checkedDecodedPlanes.bitDepth(),
                 checkedDecodedPlanes.chromaFormat(),
                 checkedDecodedPlanes.codedWidth(),
@@ -223,9 +223,9 @@ public final class RestorationApplier {
     /// @param planeIndex the plane index
     /// @param workspace the reusable per-frame restoration workspace
     /// @return the restored plane, or the original plane when all selected units are disabled
-    private static DecodedPlane applyPlane(
-            DecodedPlane plane,
-            DecodedPlane boundaryPlane,
+    private static PaddedPlane applyPlane(
+            PaddedPlane plane,
+            PaddedPlane boundaryPlane,
             int bitDepth,
             Av1ChromaFormat chromaFormat,
             FrameHeader.RestorationInfo restoration,
@@ -965,7 +965,7 @@ public final class RestorationApplier {
     @NotNullByDefault
     private static final class DecodedPlaneSource implements PlaneSampleSource {
         /// The immutable decoded plane.
-        private final DecodedPlane plane;
+        private final PaddedPlane plane;
 
         /// The decoded bit depth.
         private final int bitDepth;
@@ -974,7 +974,7 @@ public final class RestorationApplier {
         ///
         /// @param plane the immutable decoded plane
         /// @param bitDepth the decoded bit depth
-        private DecodedPlaneSource(DecodedPlane plane, int bitDepth) {
+        private DecodedPlaneSource(PaddedPlane plane, int bitDepth) {
             this.plane = Objects.requireNonNull(plane, "plane");
             this.bitDepth = bitDepth;
         }
@@ -1204,8 +1204,8 @@ public final class RestorationApplier {
         /// @param plane the decoded plane
         /// @param bitDepth the decoded bit depth
         /// @return a mutable copy of one decoded plane
-        public static PlaneBuffer create(DecodedPlane plane, int bitDepth) {
-            DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
+        public static PlaneBuffer create(PaddedPlane plane, int bitDepth) {
+            PaddedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
             return new PlaneBuffer(
                     checkedPlane.width(),
                     checkedPlane.height(),
@@ -1263,8 +1263,8 @@ public final class RestorationApplier {
         /// Returns one immutable decoded plane from the current samples.
         ///
         /// @return one immutable decoded plane from the current samples
-        public DecodedPlane toDecodedPlane() {
-            return DecodedPlane.fromOwnedSamples(width, height, stride, samples);
+        public PaddedPlane toDecodedPlane() {
+            return PaddedPlane.fromOwnedSamples(width, height, stride, samples);
         }
     }
 }

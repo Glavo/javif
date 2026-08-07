@@ -21,8 +21,7 @@ import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -36,7 +35,7 @@ final class OutputFrameFactoryTest {
     /// Verifies that 8-bit decoded planes produce one public `DecodedFrame`.
     @Test
     void createFrameReturnsDecodedFrameForEightBitPlanes() {
-        DecodedPlanes decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 73);
+        DecodedSurface decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 73);
         FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(3, 2, FrameType.KEY, true, 0x01);
 
         DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, frameHeader, false, 5L);
@@ -81,7 +80,7 @@ final class OutputFrameFactoryTest {
     /// Verifies that sequence color range metadata is used when creating public frames.
     @Test
     void createFrameUsesSequenceColorConfigForOutputTransform() {
-        DecodedPlanes decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 16);
+        DecodedSurface decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 16);
         Av1ColorConfig colorConfig = new Av1ColorConfig(
                 8,
                 true,

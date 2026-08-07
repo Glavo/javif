@@ -35,8 +35,8 @@ import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -54,7 +54,7 @@ final class PostfilterTestFixtures {
     /// @param chromaUSamples the chroma-U sample raster, or `null`
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one immutable decoded-plane snapshot
-    static DecodedPlanes createDecodedPlanes(
+    static DecodedSurface createDecodedPlanes(
             Av1ChromaFormat chromaFormat,
             int[][] lumaSamples,
             @Nullable int[][] chromaUSamples,
@@ -71,7 +71,7 @@ final class PostfilterTestFixtures {
     /// @param chromaUSamples the chroma-U sample raster, or `null`
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one immutable decoded-plane snapshot
-    static DecodedPlanes createDecodedPlanes(
+    static DecodedSurface createDecodedPlanes(
             int bitDepth,
             Av1ChromaFormat chromaFormat,
             int[][] lumaSamples,
@@ -80,7 +80,7 @@ final class PostfilterTestFixtures {
     ) {
         int width = lumaSamples[0].length;
         int height = lumaSamples.length;
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 bitDepth,
                 chromaFormat,
                 width,
@@ -543,7 +543,7 @@ final class PostfilterTestFixtures {
     ///
     /// @param samples the row-major integer samples
     /// @return one immutable decoded plane
-    private static DecodedPlane createPlane(int[][] samples) {
+    private static PaddedPlane createPlane(int[][] samples) {
         int height = samples.length;
         int width = samples[0].length;
         short[] packed = new short[width * height];
@@ -552,7 +552,7 @@ final class PostfilterTestFixtures {
                 packed[y * width + x] = (short) samples[y][x];
             }
         }
-        return new DecodedPlane(width, height, width, packed);
+        return new PaddedPlane(width, height, width, packed);
     }
 
     /// Creates one minimal reduced-still-picture sequence header for syntax-result fixtures.
@@ -595,7 +595,7 @@ final class PostfilterTestFixtures {
                 ),
                 new Av1ColorConfig(
                         8,
-                        false,
+                        true,
                         false,
                         2,
                         2,

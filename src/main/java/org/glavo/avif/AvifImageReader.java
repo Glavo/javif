@@ -17,19 +17,18 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.DecodeErrorCode;
+import org.glavo.avif.decode.Av1DecodedOutput;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
 import org.glavo.avif.internal.bmff.AvifImageSource;
 import org.glavo.avif.internal.bmff.AvifPayload;
 import org.glavo.avif.internal.bmff.SampleTransform;
-import org.glavo.avif.internal.io.BufferedInput;
 import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -225,7 +224,7 @@ public final class AvifImageReader implements AutoCloseable {
         );
         AvifImageSource alphaSource = container.alphaSource();
         if (alphaSource != null) {
-            AvifPlanes alphaPlanes = alphaPlanesFromDecodedImage(
+            DecodedPlanes alphaPlanes = alphaPlanesFromDecodedImage(
                     decodeImageSource(alphaSource, "Alpha auxiliary AV1 image").planes()
             );
             if (alphaPlanes.codedWidth() != rawFrame.width() || alphaPlanes.codedHeight() != rawFrame.height()) {
@@ -237,7 +236,7 @@ public final class AvifImageReader implements AutoCloseable {
             }
             rawFrame = combineFrameWithAlphaPlane(
                     rawFrame,
-                    toDecodedPlanes(alphaPlanes),
+                    alphaPlanes,
                     alphaPlanes.bitDepth(),
                     frameIndex,
                     container.info().alphaPremultiplied()
@@ -256,7 +255,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return raw decoded color planes
     /// @throws IOException if the frame cannot be decoded or the reader was opened from a
     ///                     forward-only stream or channel
-    public AvifPlanes readRawColorPlanes(int frameIndex) throws IOException {
+    public DecodedPlanes readRawColorPlanes(int frameIndex) throws IOException {
         ensureRandomAccess("readRawColorPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -284,7 +283,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return raw decoded alpha auxiliary planes, or `null` when no alpha auxiliary image is present
     /// @throws IOException if the alpha auxiliary image cannot be decoded or the reader was opened
     ///                     from a forward-only stream or channel
-    public @Nullable AvifPlanes readRawAlphaPlanes(int frameIndex) throws IOException {
+    public @Nullable DecodedPlanes readRawAlphaPlanes(int frameIndex) throws IOException {
         ensureRandomAccess("readRawAlphaPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -323,7 +322,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return raw decoded gain-map planes, or `null` when no gain-map image is present
     /// @throws IOException if the gain-map image cannot be decoded or the reader was opened from a
     ///                     forward-only stream or channel
-    public @Nullable AvifPlanes readRawGainMapPlanes(int frameIndex) throws IOException {
+    public @Nullable DecodedPlanes readRawGainMapPlanes(int frameIndex) throws IOException {
         ensureRandomAccess("readRawGainMapPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -404,7 +403,7 @@ public final class AvifImageReader implements AutoCloseable {
         if (metadata == null) {
             return null;
         }
-        @Nullable AvifPlanes gainMapPlanes = null;
+        @Nullable DecodedPlanes gainMapPlanes = null;
         if (AvifGainMapToneMapper.requiresGainMap(metadata, hdrHeadroom)) {
             gainMapPlanes = readRawGainMapPlanes(frameIndex);
             if (gainMapPlanes == null) {
@@ -436,7 +435,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return raw decoded depth auxiliary planes, or `null` when no depth auxiliary image is present
     /// @throws IOException if the depth auxiliary image cannot be decoded or the reader was opened
     ///                     from a forward-only stream or channel
-    public @Nullable AvifPlanes readRawDepthPlanes(int frameIndex) throws IOException {
+    public @Nullable DecodedPlanes readRawDepthPlanes(int frameIndex) throws IOException {
         ensureRandomAccess("readRawDepthPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -483,19 +482,19 @@ public final class AvifImageReader implements AutoCloseable {
             sequenceAv1FrameIndex = 0;
         }
         while (sequenceAv1FrameIndex < frameIndex) {
-            DecodedFrame skipped = sequenceAv1Reader.readFrame();
+            @Nullable Av1DecodedOutput skipped = sequenceAv1Reader.readOutput();
             if (skipped == null)
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence ended before frame " + frameIndex, null);
             sequenceAv1FrameIndex++;
         }
         try {
-            DecodedFrame decodedFrame = sequenceAv1Reader.readFrame();
-            if (decodedFrame == null)
+            @Nullable Av1DecodedOutput output = sequenceAv1Reader.readOutput();
+            if (output == null)
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence produced no frame: " + frameIndex, null);
             sequenceAv1FrameIndex++;
             AvifFrame rawFrame = adaptFrame(
-                    decodedFrame,
-                    sequenceAv1Reader.lastPlanes(),
+                    output.toFrame(),
+                    output.planes(),
                     container.info().colorInfo(),
                     frameIndex,
                     factory.outputPixelFormat()
@@ -513,7 +512,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded color planes
     /// @throws IOException if decoding fails
-    private AvifPlanes readSequenceRawColorPlanes(int frameIndex) throws IOException {
+    private DecodedPlanes readSequenceRawColorPlanes(int frameIndex) throws IOException {
         AvifPayload @Nullable [] payloads = container.samplePayloads();
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -528,7 +527,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param label the diagnostic label for failures
     /// @return raw decoded auxiliary planes
     /// @throws IOException if decoding fails
-    private AvifPlanes readSequenceRawAuxiliaryPlanes(
+    private DecodedPlanes readSequenceRawAuxiliaryPlanes(
             int frameIndex,
             AvifPayload @Unmodifiable [] payloads,
             String label
@@ -546,7 +545,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param label the diagnostic label for failures
     /// @return raw decoded planes
     /// @throws IOException if decoding fails
-    private AvifPlanes readSequenceRawPlanes(
+    private DecodedPlanes readSequenceRawPlanes(
             int frameIndex,
             AvifPayload @Unmodifiable [] payloads,
             String label
@@ -555,9 +554,10 @@ public final class AvifImageReader implements AutoCloseable {
                 AvifPayload.openInput(payloads),
                 factory.av1DecoderConfig()
         )) {
+            @Nullable Av1DecodedOutput output = null;
             for (int index = 0; index <= frameIndex; index++) {
-                DecodedFrame decodedFrame = rawReader.readFrame();
-                if (decodedFrame == null) {
+                output = rawReader.readOutput();
+                if (output == null) {
                     throw new AvifDecodeException(
                             AvifErrorCode.AV1_DECODE_FAILED,
                             "Sequence ended before frame " + frameIndex,
@@ -565,7 +565,7 @@ public final class AvifImageReader implements AutoCloseable {
                     );
                 }
             }
-            return lastRawColorPlanes(rawReader, label);
+            return Objects.requireNonNull(output, "output").planes();
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -595,26 +595,21 @@ public final class AvifImageReader implements AutoCloseable {
             @Nullable DecodedRawImage selectedImage = null;
             int highestSpatialId = -1;
             while (true) {
-                DecodedFrame decodedFrame = rawReader.readFrame();
-                if (decodedFrame == null) {
+                @Nullable Av1DecodedOutput output = rawReader.readOutput();
+                if (output == null) {
                     break;
                 }
                 boolean matchesSelection = selectedSpatialLayer == AvifImageSource.HIGHEST_SPATIAL_LAYER
-                        ? decodedFrame.spatialId() >= highestSpatialId
-                        : decodedFrame.spatialId() == selectedSpatialLayer;
+                        ? output.spatialId() >= highestSpatialId
+                        : output.spatialId() == selectedSpatialLayer;
                 if (!matchesSelection) {
                     continue;
                 }
-                Av1ColorConfig colorConfig = rawReader.lastColorConfig();
-                if (colorConfig == null) {
-                    throw new AvifDecodeException(
-                            AvifErrorCode.AV1_DECODE_FAILED,
-                            label + " has no active AV1 color configuration",
-                            null
-                    );
-                }
-                selectedImage = new DecodedRawImage(lastRawColorPlanes(rawReader, label), colorConfig);
-                highestSpatialId = decodedFrame.spatialId();
+                selectedImage = new DecodedRawImage(
+                        output.planes(),
+                        output.colorConfig()
+                );
+                highestSpatialId = output.spatialId();
                 if (selectedSpatialLayer != AvifImageSource.HIGHEST_SPATIAL_LAYER) {
                     break;
                 }
@@ -641,7 +636,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @throws IOException if one input image cannot be decoded
     private DecodedSampleTransform decodeSampleTransform(SampleTransform sampleTransform, boolean alpha)
             throws IOException {
-        AvifPlanes[] inputPlanes = new AvifPlanes[sampleTransform.inputCount()];
+        DecodedPlanes[] inputPlanes = new DecodedPlanes[sampleTransform.inputCount()];
         @Nullable Av1ColorConfig primaryColorConfig = null;
         for (int inputIndex = 0; inputIndex < sampleTransform.inputCount(); inputIndex++) {
             SampleTransform.Input input = sampleTransform.input(inputIndex);
@@ -668,7 +663,7 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         try {
-            AvifPlanes reconstructed = alpha
+            DecodedPlanes reconstructed = alpha
                     ? sampleTransform.applyAlpha(inputPlanes)
                     : sampleTransform.apply(inputPlanes);
             return new DecodedSampleTransform(reconstructed, primaryColorConfig);
@@ -708,7 +703,7 @@ public final class AvifImageReader implements AutoCloseable {
                     null
             );
         }
-        AvifPlanes[] cellPlanes = new AvifPlanes[cellPayloads.length];
+        DecodedPlanes[] cellPlanes = new DecodedPlanes[cellPayloads.length];
         @Nullable Av1ColorConfig colorConfig = null;
         for (int cellIndex = 0; cellIndex < cellPayloads.length; cellIndex++) {
             DecodedRawImage decoded = decodeRawImage(
@@ -737,7 +732,7 @@ public final class AvifImageReader implements AutoCloseable {
                 label
         );
         assert colorConfig != null;
-        AvifPlanes composed = composeGridRawColorPlanes(
+        DecodedPlanes composed = composeGridRawColorPlanes(
                 cellPlanes,
                 source.rows(),
                 source.columns(),
@@ -778,7 +773,7 @@ public final class AvifImageReader implements AutoCloseable {
     private static void validateDecodedItemDimensions(
             AvifImageSource source,
             int itemIndex,
-            AvifPlanes planes,
+            DecodedPlanes planes,
             String label
     ) throws AvifDecodeException {
         int expectedWidth = source.itemWidth(itemIndex);
@@ -809,7 +804,7 @@ public final class AvifImageReader implements AutoCloseable {
                 factory.outputPixelFormat()
         );
         if (container.info().alphaPresent()) {
-            AvifPlanes alphaPlanes = decodeSampleTransform(sampleTransform, true).planes();
+            DecodedPlanes alphaPlanes = decodeSampleTransform(sampleTransform, true).planes();
             if (alphaPlanes.codedWidth() != rawFrame.width() || alphaPlanes.codedHeight() != rawFrame.height()) {
                 throw new AvifDecodeException(
                         AvifErrorCode.AV1_DECODE_FAILED,
@@ -817,16 +812,15 @@ public final class AvifImageReader implements AutoCloseable {
                         null
                 );
             }
-            DecodedPlanes decodedAlphaPlanes = toDecodedPlanes(alphaPlanes);
             validateAlphaLumaPlane(
-                    decodedAlphaPlanes.lumaPlane(),
+                    alphaPlanes.lumaPlane(),
                     rawFrame.width(),
                     rawFrame.height(),
                     "Sample Transform alpha"
             );
             rawFrame = combineFrameWithAlphaPlane(
                     rawFrame,
-                    decodedAlphaPlanes,
+                    alphaPlanes,
                     alphaPlanes.bitDepth(),
                     frameIndex,
                     container.info().alphaPremultiplied()
@@ -848,7 +842,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the rendered AVIF frame
     /// @throws AvifDecodeException if the selected color conversion is unsupported
     private static AvifFrame adaptRawPlanes(
-            AvifPlanes planes,
+            DecodedPlanes planes,
             Av1ColorConfig av1ColorConfig,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
@@ -861,7 +855,7 @@ public final class AvifImageReader implements AutoCloseable {
             YuvToRgbTransform transform = colorInfo != null
                     ? YuvToRgbTransform.fromColorInfo(colorInfo, planes.chromaFormat() == Av1ChromaFormat.MONOCHROME)
                     : YuvToRgbTransform.fromColorConfig(av1ColorConfig);
-            DecodedPlanes decodedPlanes = toDecodedPlanes(planes);
+            DecodedSurface decodedPlanes = toDecodedPlanes(planes);
             if (pixelFormat == AvifPixelFormat.ARGB_8888) {
                 return new AvifFrame(
                         planes.codedWidth(),
@@ -892,8 +886,8 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param planes the public raw planes
     /// @return equivalent internal decoded planes
-    private static DecodedPlanes toDecodedPlanes(AvifPlanes planes) {
-        return new DecodedPlanes(
+    private static DecodedSurface toDecodedPlanes(DecodedPlanes planes) {
+        return new DecodedSurface(
                 planes.bitDepth().bits(),
                 planes.chromaFormat(),
                 planes.codedWidth(),
@@ -910,38 +904,24 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param plane the public plane
     /// @return the equivalent internal plane
-    private static DecodedPlane toDecodedPlane(AvifPlane plane) {
-        return new DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.samples());
+    private static PaddedPlane toDecodedPlane(DecodedPlane plane) {
+        return new PaddedPlane(plane.width(), plane.height(), plane.stride(), plane.sampleBuffer());
     }
 
     /// Converts one optional public plane to the internal output-conversion representation.
     ///
     /// @param plane the public plane, or `null`
     /// @return the equivalent internal plane, or `null`
-    private static @Nullable DecodedPlane toNullableDecodedPlane(@Nullable AvifPlane plane) {
+    private static @Nullable PaddedPlane toNullableDecodedPlane(@Nullable DecodedPlane plane) {
         return plane != null ? toDecodedPlane(plane) : null;
-    }
-
-    /// Returns the last decoded raw color planes from one AV1 reader.
-    ///
-    /// @param reader the AV1 reader
-    /// @param label the diagnostic label for failures
-    /// @return raw decoded color planes
-    /// @throws AvifDecodeException if the reader has no decoded plane snapshot
-    private static AvifPlanes lastRawColorPlanes(Av1ImageReader reader, String label) throws AvifDecodeException {
-        DecodedPlanes planes = reader.lastPlanes();
-        if (planes == null) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " planes are not available", null);
-        }
-        return AvifPlanes.fromDecodedPlanes(planes);
     }
 
     /// Creates alpha-only public planes from a decoded auxiliary image.
     ///
     /// @param planes the decoded auxiliary image planes
     /// @return alpha-only public planes exposing only the luma plane
-    private static AvifPlanes alphaPlanesFromDecodedImage(AvifPlanes planes) {
-        return new AvifPlanes(
+    private static DecodedPlanes alphaPlanesFromDecodedImage(DecodedPlanes planes) {
+        return new DecodedPlanes(
                 planes.bitDepth(),
                 Av1ChromaFormat.MONOCHROME,
                 planes.codedWidth(),
@@ -976,8 +956,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param outputWidth the output luma width
     /// @param outputHeight the output luma height
     /// @return composed raw color planes
-    private static AvifPlanes composeGridRawColorPlanes(
-            AvifPlanes[] cellPlanes,
+    private static DecodedPlanes composeGridRawColorPlanes(
+            DecodedPlanes[] cellPlanes,
             int rows,
             int columns,
             int outputWidth,
@@ -986,34 +966,34 @@ public final class AvifImageReader implements AutoCloseable {
         if (cellPlanes.length != rows * columns) {
             throw new IllegalArgumentException("grid cell count does not match rows * columns");
         }
-        AvifPlanes firstCell = cellPlanes[0];
+        DecodedPlanes firstCell = cellPlanes[0];
         AvifBitDepth bitDepth = firstCell.bitDepth();
         Av1ChromaFormat chromaFormat = gridRawPlaneChromaFormat(cellPlanes);
         validateGridRawPlaneCells(cellPlanes, bitDepth, chromaFormat);
 
-        AvifPlane lumaPlane = composeGridPlane(lumaPlanes(cellPlanes), rows, columns, outputWidth, outputHeight);
+        DecodedPlane lumaPlane = composeGridPlane(lumaPlanes(cellPlanes), rows, columns, outputWidth, outputHeight);
         if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
-            return new AvifPlanes(bitDepth, chromaFormat, outputWidth, outputHeight, outputWidth, outputHeight,
+            return new DecodedPlanes(bitDepth, chromaFormat, outputWidth, outputHeight, outputWidth, outputHeight,
                     lumaPlane, null, null);
         }
 
         int chromaWidth = expectedChromaWidth(chromaFormat, outputWidth);
         int chromaHeight = expectedChromaHeight(chromaFormat, outputHeight);
-        AvifPlane chromaUPlane = composeGridPlane(
+        DecodedPlane chromaUPlane = composeGridPlane(
                 chromaPlanes(cellPlanes, chromaFormat, bitDepth, true),
                 rows,
                 columns,
                 chromaWidth,
                 chromaHeight
         );
-        AvifPlane chromaVPlane = composeGridPlane(
+        DecodedPlane chromaVPlane = composeGridPlane(
                 chromaPlanes(cellPlanes, chromaFormat, bitDepth, false),
                 rows,
                 columns,
                 chromaWidth,
                 chromaHeight
         );
-        return new AvifPlanes(bitDepth, chromaFormat, outputWidth, outputHeight, outputWidth, outputHeight,
+        return new DecodedPlanes(bitDepth, chromaFormat, outputWidth, outputHeight, outputWidth, outputHeight,
                 lumaPlane, chromaUPlane, chromaVPlane);
     }
 
@@ -1027,7 +1007,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param label the diagnostic image label
     /// @throws AvifDecodeException if the cells or canvas violate grid requirements
     private static void validateGridGeometry(
-            AvifPlanes[] cellPlanes,
+            DecodedPlanes[] cellPlanes,
             int rows,
             int columns,
             int outputWidth,
@@ -1037,11 +1017,11 @@ public final class AvifImageReader implements AutoCloseable {
         if (cellPlanes.length != rows * columns || cellPlanes.length == 0) {
             throw invalidImageGrid(label + " grid cell count does not match its row and column counts");
         }
-        AvifPlanes firstCell = cellPlanes[0];
+        DecodedPlanes firstCell = cellPlanes[0];
         int tileWidth = firstCell.codedWidth();
         int tileHeight = firstCell.codedHeight();
         for (int cellIndex = 1; cellIndex < cellPlanes.length; cellIndex++) {
-            AvifPlanes cell = cellPlanes[cellIndex];
+            DecodedPlanes cell = cellPlanes[cellIndex];
             if (cell.codedWidth() != tileWidth || cell.codedHeight() != tileHeight) {
                 throw invalidImageGrid(
                         label + " grid cell " + cellIndex + " dimensions "
@@ -1079,9 +1059,9 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param cellPlanes the decoded cell planes
     /// @return the grid chroma format
-    private static Av1ChromaFormat gridRawPlaneChromaFormat(AvifPlanes[] cellPlanes) {
+    private static Av1ChromaFormat gridRawPlaneChromaFormat(DecodedPlanes[] cellPlanes) {
         Av1ChromaFormat chromaFormat = Av1ChromaFormat.MONOCHROME;
-        for (AvifPlanes cellPlane : cellPlanes) {
+        for (DecodedPlanes cellPlane : cellPlanes) {
             Av1ChromaFormat cellChromaFormat = cellPlane.chromaFormat();
             if (cellChromaFormat == Av1ChromaFormat.MONOCHROME) {
                 continue;
@@ -1101,11 +1081,11 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param bitDepth the expected bit depth
     /// @param chromaFormat the expected output chroma format
     private static void validateGridRawPlaneCells(
-            AvifPlanes[] cellPlanes,
+            DecodedPlanes[] cellPlanes,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat
     ) {
-        for (AvifPlanes cellPlane : cellPlanes) {
+        for (DecodedPlanes cellPlane : cellPlanes) {
             if (cellPlane.bitDepth() != bitDepth) {
                 throw new IllegalArgumentException("grid cell bit depth mismatch");
             }
@@ -1120,8 +1100,8 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param cellPlanes the decoded cell planes
     /// @return luma planes in row-major order
-    private static AvifPlane[] lumaPlanes(AvifPlanes[] cellPlanes) {
-        AvifPlane[] result = new AvifPlane[cellPlanes.length];
+    private static DecodedPlane[] lumaPlanes(DecodedPlanes[] cellPlanes) {
+        DecodedPlane[] result = new DecodedPlane[cellPlanes.length];
         for (int i = 0; i < cellPlanes.length; i++) {
             result[i] = cellPlanes[i].lumaPlane();
         }
@@ -1135,16 +1115,16 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param bitDepth the output bit depth
     /// @param chromaU whether to return U instead of V
     /// @return chroma planes in row-major order
-    private static AvifPlane[] chromaPlanes(
-            AvifPlanes[] cellPlanes,
+    private static DecodedPlane[] chromaPlanes(
+            DecodedPlanes[] cellPlanes,
             Av1ChromaFormat chromaFormat,
             AvifBitDepth bitDepth,
             boolean chromaU
     ) {
-        AvifPlane[] result = new AvifPlane[cellPlanes.length];
+        DecodedPlane[] result = new DecodedPlane[cellPlanes.length];
         for (int i = 0; i < cellPlanes.length; i++) {
-            AvifPlanes cellPlane = cellPlanes[i];
-            AvifPlane plane = chromaU ? cellPlane.chromaUPlane() : cellPlane.chromaVPlane();
+            DecodedPlanes cellPlane = cellPlanes[i];
+            DecodedPlane plane = chromaU ? cellPlane.chromaUPlane() : cellPlane.chromaVPlane();
             result[i] = plane != null ? plane : neutralChromaPlane(cellPlane, chromaFormat, bitDepth);
         }
         return result;
@@ -1156,8 +1136,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param chromaFormat the output chroma format
     /// @param bitDepth the output bit depth
     /// @return a neutral chroma plane matching the cell's target chroma dimensions
-    private static AvifPlane neutralChromaPlane(
-            AvifPlanes cellPlane,
+    private static DecodedPlane neutralChromaPlane(
+            DecodedPlanes cellPlane,
             Av1ChromaFormat chromaFormat,
             AvifBitDepth bitDepth
     ) {
@@ -1165,7 +1145,7 @@ public final class AvifImageReader implements AutoCloseable {
         int height = expectedChromaHeight(chromaFormat, cellPlane.codedHeight());
         short[] samples = new short[width * height];
         Arrays.fill(samples, (short) (1 << (bitDepth.bits() - 1)));
-        return new AvifPlane(width, height, width, samples);
+        return new DecodedPlane(width, height, width, samples);
     }
 
     /// Composes one plane from row-major grid cell planes.
@@ -1176,8 +1156,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param outputWidth the output plane width
     /// @param outputHeight the output plane height
     /// @return composed plane
-    private static AvifPlane composeGridPlane(
-            AvifPlane[] cellPlanes,
+    private static DecodedPlane composeGridPlane(
+            DecodedPlane[] cellPlanes,
             int rows,
             int columns,
             int outputWidth,
@@ -1189,7 +1169,7 @@ public final class AvifImageReader implements AutoCloseable {
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < columns; col++) {
                 int cellIndex = row * columns + col;
-                AvifPlane cellPlane = cellPlanes[cellIndex];
+                DecodedPlane cellPlane = cellPlanes[cellIndex];
                 if (cellPlane.width() != cellWidth || cellPlane.height() != cellHeight) {
                     throw new IllegalArgumentException("grid cell plane dimensions mismatch");
                 }
@@ -1203,7 +1183,7 @@ public final class AvifImageReader implements AutoCloseable {
                 );
             }
         }
-        return new AvifPlane(outputWidth, outputHeight, outputWidth, samples);
+        return new DecodedPlane(outputWidth, outputHeight, outputWidth, samples);
     }
 
     /// Copies one grid cell plane into the destination plane canvas.
@@ -1218,7 +1198,7 @@ public final class AvifImageReader implements AutoCloseable {
             short[] destination,
             int outputWidth,
             int outputHeight,
-            AvifPlane cellPlane,
+            DecodedPlane cellPlane,
             int xOffset,
             int yOffset
     ) {
@@ -1275,10 +1255,10 @@ public final class AvifImageReader implements AutoCloseable {
                 AvifPayload.openInput(payloads),
                 factory.av1DecoderConfig()
         )) {
-            DecodedFrame decodedFrame = null;
+            @Nullable Av1DecodedOutput output = null;
             for (int index = 0; index <= frameIndex; index++) {
-                decodedFrame = randomAccessReader.readFrame();
-                if (decodedFrame == null) {
+                output = randomAccessReader.readOutput();
+                if (output == null) {
                     throw new AvifDecodeException(
                             AvifErrorCode.AV1_DECODE_FAILED,
                             "Sequence ended before frame " + frameIndex,
@@ -1286,9 +1266,10 @@ public final class AvifImageReader implements AutoCloseable {
                     );
                 }
             }
+            Av1DecodedOutput requiredOutput = Objects.requireNonNull(output, "output");
             AvifFrame rawFrame = adaptFrame(
-                    decodedFrame,
-                    randomAccessReader.lastPlanes(),
+                    requiredOutput.toFrame(),
+                    requiredOutput.planes(),
                     container.info().colorInfo(),
                     frameIndex,
                     factory.outputPixelFormat()
@@ -1395,7 +1376,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the transformed frame, or the same frame when no transforms are present
     private AvifFrame applyTransforms(AvifFrame frame) {
         AvifImageInfo info = container.info();
-        if (!info.hasCleanApertureCrop() && info.rotationCode() <= 0 && info.mirrorAxis() < 0) {
+        @Nullable AvifImageTransformInfo transformInfo = info.transformInfo();
+        if (transformInfo == null) {
             return frame;
         }
         if (frame.pixelFormat() == AvifPixelFormat.ARGB_8888) {
@@ -1403,16 +1385,16 @@ public final class AvifImageReader implements AutoCloseable {
             int width = frame.width();
             int height = frame.height();
 
-            if (info.hasCleanApertureCrop()) {
+            if (transformInfo.hasCleanApertureCrop()) {
                 int[] cropped = applyClapCropInt(pixels, width, height,
-                        info.cleanApertureCropX(), info.cleanApertureCropY(),
-                        info.cleanApertureCropWidth(), info.cleanApertureCropHeight());
+                        transformInfo.cleanApertureCropX(), transformInfo.cleanApertureCropY(),
+                        transformInfo.cleanApertureCropWidth(), transformInfo.cleanApertureCropHeight());
                 pixels = cropped;
-                width = info.cleanApertureCropWidth();
-                height = info.cleanApertureCropHeight();
+                width = transformInfo.cleanApertureCropWidth();
+                height = transformInfo.cleanApertureCropHeight();
             }
 
-            int rotation = info.rotationCode();
+            int rotation = transformInfo.rotationCode();
             if (rotation > 0) {
                 int[] rotated = applyRotationInt(pixels, width, height, rotation);
                 pixels = rotated;
@@ -1423,7 +1405,7 @@ public final class AvifImageReader implements AutoCloseable {
                 }
             }
 
-            int mirror = info.mirrorAxis();
+            int mirror = transformInfo.mirrorAxis();
             if (mirror >= 0) {
                 pixels = applyMirrorInt(pixels, width, height, mirror);
             }
@@ -1436,16 +1418,16 @@ public final class AvifImageReader implements AutoCloseable {
             int width = frame.width();
             int height = frame.height();
 
-            if (info.hasCleanApertureCrop()) {
+            if (transformInfo.hasCleanApertureCrop()) {
                 long[] cropped = applyClapCropLong(pixels, width, height,
-                        info.cleanApertureCropX(), info.cleanApertureCropY(),
-                        info.cleanApertureCropWidth(), info.cleanApertureCropHeight());
+                        transformInfo.cleanApertureCropX(), transformInfo.cleanApertureCropY(),
+                        transformInfo.cleanApertureCropWidth(), transformInfo.cleanApertureCropHeight());
                 pixels = cropped;
-                width = info.cleanApertureCropWidth();
-                height = info.cleanApertureCropHeight();
+                width = transformInfo.cleanApertureCropWidth();
+                height = transformInfo.cleanApertureCropHeight();
             }
 
-            int rotation = info.rotationCode();
+            int rotation = transformInfo.rotationCode();
             if (rotation > 0) {
                 long[] rotated = applyRotationLong(pixels, width, height, rotation);
                 pixels = rotated;
@@ -1456,7 +1438,7 @@ public final class AvifImageReader implements AutoCloseable {
                 }
             }
 
-            int mirror = info.mirrorAxis();
+            int mirror = transformInfo.mirrorAxis();
             if (mirror >= 0) {
                 pixels = applyMirrorLong(pixels, width, height, mirror);
             }
@@ -1721,6 +1703,7 @@ public final class AvifImageReader implements AutoCloseable {
                 colorInfo,
                 frame.chromaFormat() == Av1ChromaFormat.MONOCHROME
         );
+        DecodedSurface decodedSurface = toDecodedPlanes(planes);
         if (pixelFormat == AvifPixelFormat.ARGB_8888) {
             return new AvifFrame(
                     frame.width(),
@@ -1728,7 +1711,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.bitDepth(),
                     frame.chromaFormat(),
                     frameIndex,
-                    ArgbOutput.toOpaqueArgbPixels(planes, transform)
+                    ArgbOutput.toOpaqueArgbPixels(decodedSurface, transform)
             );
         }
         if (pixelFormat == AvifPixelFormat.ARGB_16161616) {
@@ -1738,7 +1721,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.bitDepth(),
                     frame.chromaFormat(),
                     frameIndex,
-                    ArgbOutput.toOpaqueArgbLongPixels(planes, transform)
+                    ArgbOutput.toOpaqueArgbLongPixels(decodedSurface, transform)
             );
         }
         throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
@@ -1770,7 +1753,7 @@ public final class AvifImageReader implements AutoCloseable {
             sequenceAlphaAv1FrameIndex = 0;
         }
         while (sequenceAlphaAv1FrameIndex < frameIndex) {
-            DecodedFrame skipped = sequenceAlphaAv1Reader.readFrame();
+            @Nullable Av1DecodedOutput skipped = sequenceAlphaAv1Reader.readOutput();
             if (skipped == null) {
                 throw new AvifDecodeException(
                         AvifErrorCode.AV1_DECODE_FAILED,
@@ -1780,8 +1763,8 @@ public final class AvifImageReader implements AutoCloseable {
             }
             sequenceAlphaAv1FrameIndex++;
         }
-        DecodedFrame alphaFrame = sequenceAlphaAv1Reader.readFrame();
-        if (alphaFrame == null) {
+        @Nullable Av1DecodedOutput alphaOutput = sequenceAlphaAv1Reader.readOutput();
+        if (alphaOutput == null) {
             throw new AvifDecodeException(
                     AvifErrorCode.AV1_DECODE_FAILED,
                     "Sequence alpha produced no frame: " + frameIndex,
@@ -1790,7 +1773,7 @@ public final class AvifImageReader implements AutoCloseable {
         }
         sequenceAlphaAv1FrameIndex++;
         return combineFrameWithDecodedAlpha(
-                colorFrame, alphaFrame, sequenceAlphaAv1Reader.lastPlanes(), frameIndex
+                colorFrame, alphaOutput.toFrame(), alphaOutput.planes(), frameIndex
         );
     }
 
@@ -1810,10 +1793,10 @@ public final class AvifImageReader implements AutoCloseable {
                 AvifPayload.openInput(alphaPayloads),
                 factory.av1DecoderConfig()
         )) {
-            DecodedFrame alphaFrame = null;
+            @Nullable Av1DecodedOutput alphaOutput = null;
             for (int index = 0; index <= frameIndex; index++) {
-                alphaFrame = alphaReader.readFrame();
-                if (alphaFrame == null) {
+                alphaOutput = alphaReader.readOutput();
+                if (alphaOutput == null) {
                     throw new AvifDecodeException(
                             AvifErrorCode.AV1_DECODE_FAILED,
                             "Sequence alpha ended before frame " + frameIndex,
@@ -1821,7 +1804,13 @@ public final class AvifImageReader implements AutoCloseable {
                     );
                 }
             }
-            return combineFrameWithDecodedAlpha(colorFrame, alphaFrame, alphaReader.lastPlanes(), frameIndex);
+            Av1DecodedOutput requiredOutput = Objects.requireNonNull(alphaOutput, "alphaOutput");
+            return combineFrameWithDecodedAlpha(
+                    colorFrame,
+                    requiredOutput.toFrame(),
+                    requiredOutput.planes(),
+                    frameIndex
+            );
         }
     }
 
@@ -2091,7 +2080,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param planes the decoded raw planes
     /// @param colorConfig the active AV1 sequence-header color configuration
     @NotNullByDefault
-    private record DecodedRawImage(AvifPlanes planes, Av1ColorConfig colorConfig) {
+    private record DecodedRawImage(DecodedPlanes planes, Av1ColorConfig colorConfig) {
     }
 
     /// Reconstructed Sample Transform planes and the primary input's AV1 color configuration.
@@ -2100,7 +2089,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param primaryColorConfig the primary input's AV1 sequence-header color configuration
     @NotNullByDefault
     private record DecodedSampleTransform(
-            AvifPlanes planes,
+            DecodedPlanes planes,
             Av1ColorConfig primaryColorConfig
     ) {
     }

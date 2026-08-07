@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -42,7 +42,7 @@ final class MutablePlaneBufferTest {
         assertEquals(77, plane.sampleOrFallback(-1, 0, 77));
         assertEquals(77, plane.sampleOrFallback(0, 3, 77));
 
-        DecodedPlane snapshot = plane.toDecodedPlane();
+        PaddedPlane snapshot = plane.toDecodedPlane();
         plane.setSample(0, 1, 1);
 
         assertEquals(2, snapshot.width());
@@ -67,7 +67,7 @@ final class MutablePlaneBufferTest {
         assertThrows(IndexOutOfBoundsException.class, () -> plane.sample(7, 2));
         assertThrows(IllegalStateException.class, plane::toDecodedPlane);
 
-        DecodedPlane retained = plane.takeStoredDecodedPlane(3, 4);
+        PaddedPlane retained = plane.takeStoredDecodedPlane(3, 4);
         assertEquals(3, retained.width());
         assertEquals(4, retained.height());
         assertEquals(11, retained.sample(0, 0));

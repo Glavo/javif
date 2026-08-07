@@ -27,41 +27,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `Av1DecoderConfig`.
 @NotNullByDefault
 final class Av1DecoderConfigTest {
-    /// Verifies the default builder settings.
+    /// Verifies the default settings.
     @Test
-    void builderUsesExpectedDefaults() {
-        Av1DecoderConfig config = Av1DecoderConfig.builder().build();
+    void defaultUsesExpectedSettings() {
+        Av1DecoderConfig config = Av1DecoderConfig.DEFAULT;
 
         assertTrue(config.applyFilmGrain());
         assertFalse(config.strictStdCompliance());
         assertFalse(config.outputInvisibleFrames());
         assertFalse(config.outputAllLayers());
         assertFalse(config.largeScaleTileMode());
-        assertEquals(DecodeFrameType.ALL, config.decodeFrameType());
+        assertEquals(Av1FrameSelection.ALL, config.frameSelection());
         assertEquals(0, config.operatingPoint());
         assertEquals(0, config.frameSizeLimit());
     }
 
     /// Verifies that invalid operating points are rejected.
     @Test
-    void builderRejectsInvalidOperatingPoint() {
-        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.builder().operatingPoint(-1).build());
-        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.builder().operatingPoint(32).build());
+    void withOperatingPointRejectsInvalidValue() {
+        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.DEFAULT.withOperatingPoint(-1));
+        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.DEFAULT.withOperatingPoint(32));
     }
 
     /// Verifies that changing only the operating point retains every other decoder option.
     @Test
     void withOperatingPointRetainsOtherSettings() {
-        Av1DecoderConfig config = Av1DecoderConfig.builder()
-                .applyFilmGrain(false)
-                .strictStdCompliance(true)
-                .outputInvisibleFrames(true)
-                .outputAllLayers(true)
-                .largeScaleTileMode(true)
-                .decodeFrameType(DecodeFrameType.REFERENCE)
-                .operatingPoint(2)
-                .frameSizeLimit(1234)
-                .build();
+        Av1DecoderConfig config = Av1DecoderConfig.DEFAULT
+                .withApplyFilmGrain(false)
+                .withStrictStdCompliance(true)
+                .withOutputInvisibleFrames(true)
+                .withOutputAllLayers(true)
+                .withLargeScaleTileMode(true)
+                .withFrameSelection(Av1FrameSelection.REFERENCE)
+                .withOperatingPoint(2)
+                .withFrameSizeLimit(1234);
 
         assertSame(config, config.withOperatingPoint(2));
         Av1DecoderConfig changed = config.withOperatingPoint(7);
@@ -70,7 +69,7 @@ final class Av1DecoderConfigTest {
         assertTrue(changed.outputInvisibleFrames());
         assertTrue(changed.outputAllLayers());
         assertTrue(changed.largeScaleTileMode());
-        assertEquals(DecodeFrameType.REFERENCE, changed.decodeFrameType());
+        assertEquals(Av1FrameSelection.REFERENCE, changed.frameSelection());
         assertEquals(7, changed.operatingPoint());
         assertEquals(1234, changed.frameSizeLimit());
         assertThrows(IllegalArgumentException.class, () -> config.withOperatingPoint(32));
@@ -78,7 +77,7 @@ final class Av1DecoderConfigTest {
 
     /// Verifies that negative frame size limits are rejected.
     @Test
-    void builderRejectsNegativeFrameSizeLimit() {
-        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.builder().frameSizeLimit(-1).build());
+    void withFrameSizeLimitRejectsNegativeValue() {
+        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.DEFAULT.withFrameSizeLimit(-1));
     }
 }

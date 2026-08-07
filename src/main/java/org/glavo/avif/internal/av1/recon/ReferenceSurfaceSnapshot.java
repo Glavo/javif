@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.ReferenceFrameSyntaxState;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -35,7 +35,7 @@ public final class ReferenceSurfaceSnapshot {
     private final ReferenceFrameSyntaxState frameSyntaxState;
 
     /// The stored post-filter, post-super-resolution, pre-grain decoded planes.
-    private final DecodedPlanes decodedPlanes;
+    private final DecodedSurface decodedPlanes;
 
     /// Creates one immutable reference-surface snapshot.
     ///
@@ -45,7 +45,7 @@ public final class ReferenceSurfaceSnapshot {
     public ReferenceSurfaceSnapshot(
             FrameHeader frameHeader,
             FrameSyntaxDecodeResult frameSyntaxDecodeResult,
-            DecodedPlanes decodedPlanes
+            DecodedSurface decodedPlanes
     ) {
         this(
                 frameHeader,
@@ -62,7 +62,7 @@ public final class ReferenceSurfaceSnapshot {
     public ReferenceSurfaceSnapshot(
             FrameHeader frameHeader,
             ReferenceFrameSyntaxState frameSyntaxState,
-            DecodedPlanes decodedPlanes
+            DecodedSurface decodedPlanes
     ) {
         this.frameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         this.frameSyntaxState = Objects.requireNonNull(frameSyntaxState, "frameSyntaxState");
@@ -89,7 +89,7 @@ public final class ReferenceSurfaceSnapshot {
     /// Returns the stored post-filter, post-super-resolution, pre-grain decoded planes.
     ///
     /// @return the stored post-filter, post-super-resolution, pre-grain decoded planes
-    public DecodedPlanes decodedPlanes() {
+    public DecodedSurface decodedPlanes() {
         return decodedPlanes;
     }
 }

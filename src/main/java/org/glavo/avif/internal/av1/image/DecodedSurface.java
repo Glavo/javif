@@ -13,9 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.internal.av1.image;
 
 import org.glavo.avif.Av1ChromaFormat;
+import org.glavo.avif.AvifBitDepth;
+import org.glavo.avif.DecodedPlane;
+import org.glavo.avif.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,7 +29,7 @@ import java.util.Objects;
 /// Stored planes contain the postprocessed presentation samples. The render dimensions are AV1
 /// display hints and do not crop or resample the stored planes.
 @NotNullByDefault
-public final class DecodedPlanes {
+public final class DecodedSurface {
     /// The decoded bit depth.
     private final int bitDepth;
 
@@ -46,13 +49,13 @@ public final class DecodedPlanes {
     private final int renderHeight;
 
     /// The decoded luma plane.
-    private final DecodedPlane lumaPlane;
+    private final PaddedPlane lumaPlane;
 
     /// The decoded chroma U plane, or `null` for monochrome output.
-    private final @Nullable DecodedPlane chromaUPlane;
+    private final @Nullable PaddedPlane chromaUPlane;
 
     /// The decoded chroma V plane, or `null` for monochrome output.
-    private final @Nullable DecodedPlane chromaVPlane;
+    private final @Nullable PaddedPlane chromaVPlane;
 
     /// Creates one immutable decoded-plane snapshot.
     ///
@@ -65,16 +68,16 @@ public final class DecodedPlanes {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane, or `null` for monochrome output
     /// @param chromaVPlane the decoded chroma V plane, or `null` for monochrome output
-    public DecodedPlanes(
+    public DecodedSurface(
             int bitDepth,
             Av1ChromaFormat chromaFormat,
             int codedWidth,
             int codedHeight,
             int renderWidth,
             int renderHeight,
-            DecodedPlane lumaPlane,
-            @Nullable DecodedPlane chromaUPlane,
-            @Nullable DecodedPlane chromaVPlane
+            PaddedPlane lumaPlane,
+            @Nullable PaddedPlane chromaUPlane,
+            @Nullable PaddedPlane chromaVPlane
     ) {
         if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12 && bitDepth != 16) {
             throw new IllegalArgumentException("Unsupported bitDepth: " + bitDepth);
@@ -154,21 +157,21 @@ public final class DecodedPlanes {
     /// Returns the decoded luma plane.
     ///
     /// @return the decoded luma plane
-    public DecodedPlane lumaPlane() {
+    public PaddedPlane lumaPlane() {
         return lumaPlane;
     }
 
     /// Returns the decoded chroma U plane, or `null` for monochrome output.
     ///
     /// @return the decoded chroma U plane, or `null` for monochrome output
-    public @Nullable DecodedPlane chromaUPlane() {
+    public @Nullable PaddedPlane chromaUPlane() {
         return chromaUPlane;
     }
 
     /// Returns the decoded chroma V plane, or `null` for monochrome output.
     ///
     /// @return the decoded chroma V plane, or `null` for monochrome output
-    public @Nullable DecodedPlane chromaVPlane() {
+    public @Nullable PaddedPlane chromaVPlane() {
         return chromaVPlane;
     }
 
@@ -177,6 +180,42 @@ public final class DecodedPlanes {
     /// @return whether this decoded snapshot contains chroma planes
     public boolean hasChroma() {
         return chromaUPlane != null && chromaVPlane != null;
+    }
+
+    /// Creates the public visible-plane view of this internal padded surface.
+    ///
+    /// The returned plane buffers share immutable sample storage with this surface but exclude
+    /// internal rows below the visible plane height.
+    ///
+    /// @return the public decoded planes
+    public DecodedPlanes toDecodedPlanes() {
+        return new DecodedPlanes(
+                AvifBitDepth.fromBits(bitDepth),
+                chromaFormat,
+                codedWidth,
+                codedHeight,
+                renderWidth,
+                renderHeight,
+                toDecodedPlane(lumaPlane),
+                toNullableDecodedPlane(chromaUPlane),
+                toNullableDecodedPlane(chromaVPlane)
+        );
+    }
+
+    /// Creates a public visible plane over one internal padded plane.
+    ///
+    /// @param plane the internal padded plane
+    /// @return the public visible plane
+    private static DecodedPlane toDecodedPlane(PaddedPlane plane) {
+        return new DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.sampleBuffer());
+    }
+
+    /// Creates a public visible plane over one optional internal padded plane.
+    ///
+    /// @param plane the internal padded plane, or `null`
+    /// @return the public visible plane, or `null`
+    private static @Nullable DecodedPlane toNullableDecodedPlane(@Nullable PaddedPlane plane) {
+        return plane == null ? null : toDecodedPlane(plane);
     }
 
     /// Validates the stored chroma-plane arrangement against the chroma format.

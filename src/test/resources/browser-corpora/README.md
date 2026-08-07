@@ -33,7 +33,7 @@ policy, and Chromium task-pool behavior are not part of this library's API and a
 Two compatibility policies intentionally differ from Blink. Alpha items without `ispe` inherit the
 master image dimensions for compatibility with legacy libavif files, and valid nonzero-origin clean
 apertures are exposed rather than ignored. Sequences without an edit list report
-`AvifImageInfo.REPETITION_COUNT_UNKNOWN`; browser presentation code may map that state to an
+`AvifSequenceInfo.REPETITION_COUNT_UNKNOWN`; browser presentation code may map that state to an
 infinite loop.
 
 Individual Chromium fixtures can carry additional provenance or licensing recorded in the upstream

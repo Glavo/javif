@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
@@ -37,7 +37,6 @@ import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
-import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -315,7 +314,7 @@ public final class FrameReconstructor {
     ///
     /// @param syntaxDecodeResult the structural frame result to reconstruct
     /// @return one decoded-plane snapshot
-    public DecodedPlanes reconstruct(FrameSyntaxDecodeResult syntaxDecodeResult) {
+    public DecodedSurface reconstruct(FrameSyntaxDecodeResult syntaxDecodeResult) {
         return reconstruct(syntaxDecodeResult, new ReferenceSurfaceSnapshot[0]);
     }
 
@@ -325,7 +324,7 @@ public final class FrameReconstructor {
     /// @param syntaxDecodeResult the structural frame result to reconstruct
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @return one decoded-plane snapshot
-    public DecodedPlanes reconstruct(
+    public DecodedSurface reconstruct(
             FrameSyntaxDecodeResult syntaxDecodeResult,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
@@ -339,7 +338,7 @@ public final class FrameReconstructor {
     /// @param strictStdCompliance whether malformed transform values must be rejected
     /// @return one decoded-plane snapshot
     /// @throws InvalidFrameReconstructionException if strict reconstruction detects a nonconformant value
-    public DecodedPlanes reconstruct(
+    public DecodedSurface reconstruct(
             FrameSyntaxDecodeResult syntaxDecodeResult,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             boolean strictStdCompliance
@@ -360,7 +359,7 @@ public final class FrameReconstructor {
     /// @return compact decoded planes containing only the selected tile
     /// @throws IllegalArgumentException if `tileIndex` is outside the decoded frame's tile range
     /// @throws InvalidFrameReconstructionException if strict reconstruction detects a nonconformant value
-    public DecodedPlanes reconstructTile(
+    public DecodedSurface reconstructTile(
             FrameSyntaxDecodeResult syntaxDecodeResult,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             int tileIndex,
@@ -376,7 +375,7 @@ public final class FrameReconstructor {
     /// @param strictStdCompliance whether malformed transform values must be rejected
     /// @param selectedTileIndex the selected tile index, or `-1` for the complete frame
     /// @return the reconstructed complete-frame or compact tile planes
-    private DecodedPlanes reconstructRegion(
+    private DecodedSurface reconstructRegion(
             FrameSyntaxDecodeResult syntaxDecodeResult,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             boolean strictStdCompliance,
@@ -417,7 +416,7 @@ public final class FrameReconstructor {
         int storageEndY = selectedTileBounds != null
                 ? paddedTileStorageEnd(selectedTileBounds.lumaEndY(), frameBoundaryHeight, alignedLumaHeight)
                 : alignedLumaHeight;
-        int bitDepth = sequenceHeader.colorConfig().bitDepth();
+        int bitDepth = sequenceHeader.colorConfig().bitDepth().bits();
         MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(
                 alignedLumaWidth,
                 alignedLumaHeight,
@@ -495,15 +494,15 @@ public final class FrameReconstructor {
                 : frameSize.height();
         int outputChromaWidth = chromaWidth(chromaFormat, outputLumaWidth);
         int outputChromaHeight = chromaHeight(chromaFormat, outputLumaHeight);
-        DecodedPlane decodedLumaPlane = lumaPlane.takeStoredDecodedPlane(outputLumaWidth, outputLumaHeight);
-        @Nullable DecodedPlane decodedChromaUPlane = chromaUPlane != null
+        PaddedPlane decodedLumaPlane = lumaPlane.takeStoredDecodedPlane(outputLumaWidth, outputLumaHeight);
+        @Nullable PaddedPlane decodedChromaUPlane = chromaUPlane != null
                 ? chromaUPlane.takeStoredDecodedPlane(outputChromaWidth, outputChromaHeight)
                 : null;
-        @Nullable DecodedPlane decodedChromaVPlane = chromaVPlane != null
+        @Nullable PaddedPlane decodedChromaVPlane = chromaVPlane != null
                 ? chromaVPlane.takeStoredDecodedPlane(outputChromaWidth, outputChromaHeight)
                 : null;
 
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 bitDepth,
                 chromaFormat,
                 outputLumaWidth,
@@ -581,14 +580,6 @@ public final class FrameReconstructor {
             SequenceHeader sequenceHeader,
             FrameHeader frameHeader
     ) {
-        if (sequenceHeader.colorConfig().bitDepth() != 8
-                && sequenceHeader.colorConfig().bitDepth() != 10
-                && sequenceHeader.colorConfig().bitDepth() != 12) {
-            throw new IllegalStateException(
-                    "Pixel reconstruction requires 8-bit, 10-bit, or 12-bit samples: "
-                            + sequenceHeader.colorConfig().bitDepth()
-            );
-        }
         if (sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.MONOCHROME
                 && sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.YUV420
                 && sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.YUV422
@@ -1888,7 +1879,7 @@ public final class FrameReconstructor {
                 destinationPlane.bitDepth(),
                 neighborHeader.referenceFrame0()
         );
-        DecodedPlane referencePlane;
+        PaddedPlane referencePlane;
         if (chromaPlane == null) {
             referencePlane = referenceSurfaceSnapshot.decodedPlanes().lumaPlane();
         } else if (chromaPlane == ChromaPlane.U) {
@@ -2215,7 +2206,7 @@ public final class FrameReconstructor {
                         lumaPlane.bitDepth(),
                         header.referenceFrame0()
         );
-        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        DecodedSurface referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         ReferenceScale referenceScale = referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot);
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
@@ -2519,7 +2510,7 @@ public final class FrameReconstructor {
         int denominatorY = 8 << subsamplingY;
         FrameHeader.InterpolationFilter horizontalFilter = resolveHorizontalInterpolationFilter(sourceHeader, frameHeader);
         FrameHeader.InterpolationFilter verticalFilter = resolveVerticalInterpolationFilter(sourceHeader, frameHeader);
-        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        DecodedSurface referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         ReferenceScale referenceScale = referenceScale(
                 frameHeader.frameSize().codedWidth(),
                 frameHeader.frameSize().height(),
@@ -2721,7 +2712,7 @@ public final class FrameReconstructor {
                         lumaPlane.bitDepth(),
                         header.referenceFrame0()
         );
-        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        DecodedSurface referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         WarpedMotion.Model model = estimateLocalWarpModel(header, decodedBlockMap, tileBounds);
         if (!model.affine()) {
             reconstructSingleReferenceInterPrediction(
@@ -2771,7 +2762,7 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
-            DecodedPlanes referencePlanes,
+            DecodedSurface referencePlanes,
             WarpedMotion.Model model
     ) {
         int lumaX = header.position().x4() << 2;
@@ -2806,11 +2797,11 @@ public final class FrameReconstructor {
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int codedChromaWidth = codedChromaBlockWidth(header, chromaSubsamplingX);
         int codedChromaHeight = codedChromaBlockHeight(header, chromaSubsamplingY);
-        DecodedPlane referenceChromaUPlane = Objects.requireNonNull(
+        PaddedPlane referenceChromaUPlane = Objects.requireNonNull(
                 referencePlanes.chromaUPlane(),
                 "referencePlanes.chromaUPlane()"
         );
-        DecodedPlane referenceChromaVPlane = Objects.requireNonNull(
+        PaddedPlane referenceChromaVPlane = Objects.requireNonNull(
                 referencePlanes.chromaVPlane(),
                 "referencePlanes.chromaVPlane()"
         );
@@ -3467,8 +3458,8 @@ public final class FrameReconstructor {
                         lumaPlane.bitDepth(),
                         header.referenceFrame1()
                 );
-        DecodedPlanes referencePlanes0 = referenceSurfaceSnapshot0.decodedPlanes();
-        DecodedPlanes referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
+        DecodedSurface referencePlanes0 = referenceSurfaceSnapshot0.decodedPlanes();
+        DecodedSurface referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
         ReferenceScale referenceScale0 = referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot0);
         ReferenceScale referenceScale1 = referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot1);
         MotionVector motionVector0 = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
@@ -3680,7 +3671,7 @@ public final class FrameReconstructor {
     /// @param verticalFilterMode the effective vertical interpolation filter mode
     private void reconstructInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int framePlaneWidth,
             int framePlaneHeight,
             int destinationX,
@@ -3785,7 +3776,7 @@ public final class FrameReconstructor {
     /// @param verticalFilterMode the effective vertical interpolation filter
     private void reconstructUnscaledInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int width,
@@ -3951,7 +3942,7 @@ public final class FrameReconstructor {
     /// @param phaseY the vertical interpolation phase in `[0, 15]`
     private void reconstructUnscaledBilinearInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int sourceX0,
@@ -4044,8 +4035,8 @@ public final class FrameReconstructor {
     /// @param segmentMaskHeight the luma-domain segment mask height
     private void reconstructCompoundInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane0,
-            DecodedPlane referencePlane1,
+            PaddedPlane referencePlane0,
+            PaddedPlane referencePlane1,
             int destinationX,
             int destinationY,
             int width,
@@ -4272,7 +4263,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
     /// @param destination predictor storage with room for at least `width * height` samples
     private void reconstructUnscaledCompoundInterPlanePrediction(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int width,
@@ -4428,7 +4419,7 @@ public final class FrameReconstructor {
     /// @param postRoundBits the fractional bits retained for compound blending
     /// @param destination predictor storage with room for at least `width * height` samples
     private void reconstructUnscaledBilinearCompoundInterPlanePrediction(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceX0,
             int sourceY0,
             int width,
@@ -4481,7 +4472,7 @@ public final class FrameReconstructor {
 
     /// Returns one compound inter predictor while retaining the AV1 post-filter fractional bits.
     ///
-    /// Unlike [#sampleInterPlaneValue(DecodedPlane, int, int, int, int, int, int, int, int,
+    /// Unlike [#sampleInterPlaneValue(PaddedPlane , int, int, int, int, int, int, int, int,
     /// ReferenceScale, int, int, FrameHeader.InterpolationFilter,
     /// FrameHeader.InterpolationFilter, int)], this method neither rounds to sample precision nor
     /// clips the predictor. Compound blending performs both operations after combining the two
@@ -4504,7 +4495,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
     /// @return one signed predictor with the AV1 compound post-filter fractional bits retained
     private int sampleCompoundInterPlaneValue(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int sampleX,
@@ -4585,7 +4576,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
     /// @return one signed predictor retaining the AV1 compound post-filter fractional bits
     private int filteredCompoundInterpolateAt(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -4677,7 +4668,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
     /// @return one signed predictor retaining the AV1 compound post-filter fractional bits
     private int bilinearCompoundInterpolateAt(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -4728,7 +4719,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one predicted plane sample
     private int sampleInterPlaneValue(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int sampleX,
@@ -4806,7 +4797,7 @@ public final class FrameReconstructor {
     /// @param height the copied height in samples
     private void copyReferencePlaneBlock(
             MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int destinationX,
             int destinationY,
             int sourceX,
@@ -4842,7 +4833,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one fixed-filter interpolated unsigned sample
     private int filteredInterpolateAt(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -4930,7 +4921,7 @@ public final class FrameReconstructor {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one bilinearly interpolated unsigned sample
     private int bilinearInterpolateAt(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -4983,7 +4974,7 @@ public final class FrameReconstructor {
     /// @param filter the selected AV1 subpel filter taps
     /// @return one filtered horizontal interpolation sum before normalization
     private long horizontalInterpolate(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceX0,
             int sourceY,
             int[] filter
@@ -5005,7 +4996,7 @@ public final class FrameReconstructor {
     /// @param filter the selected AV1 subpel filter taps
     /// @return one filtered vertical interpolation sum before normalization
     private long verticalInterpolate(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceX,
             int sourceY0,
             int[] filter
@@ -5483,7 +5474,7 @@ public final class FrameReconstructor {
             throw new IllegalStateException("Inter reconstruction requires one populated stored reference surface");
         }
 
-        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        DecodedSurface referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         if (referencePlanes.bitDepth() != bitDepth) {
             throw new IllegalStateException(
                     "Inter reconstruction requires a stored reference surface whose bit depth matches the current frame"

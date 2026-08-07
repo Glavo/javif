@@ -27,11 +27,6 @@ import java.util.Objects;
 /// Immutable metadata for one parsed AVIF image.
 @NotNullByDefault
 public final class AvifImageInfo {
-    /// Repetition count value used when an animated sequence has no edit list.
-    public static final int REPETITION_COUNT_UNKNOWN = -1;
-    /// Repetition count value used when an animated sequence repeats indefinitely.
-    public static final int REPETITION_COUNT_INFINITE = -2;
-
     /// The display width in pixels.
     private final int width;
     /// The display height in pixels.
@@ -42,6 +37,8 @@ public final class AvifImageInfo {
     private final Av1ChromaFormat chromaFormat;
     /// Whether an alpha auxiliary image is present.
     private final boolean alphaPresent;
+    /// Whether alpha presence was declared independently of auxiliary image metadata.
+    private final boolean explicitAlphaPresent;
     /// Whether color samples are premultiplied by the alpha auxiliary image.
     private final boolean alphaPremultiplied;
     /// The typed sequence descriptor for animated inputs, or `null` for still images.
@@ -65,46 +62,74 @@ public final class AvifImageInfo {
     /// Opaque item properties associated with the primary image item.
     private final AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties;
 
-    /// Creates immutable image metadata.
+    /// Creates image metadata without optional container metadata.
     ///
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
     /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param sequenceInfo the sequence descriptor, or `null` for a still image
-    /// @param transformInfo the image-transform descriptor, or `null` when no transform is present
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null` to derive
-    /// them from `auxiliaryImages`
-    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null` when absent
-    /// @param alphaPresent whether an alpha image is present; alpha auxiliary metadata also implies this value
-    /// @param alphaPremultiplied whether color samples are premultiplied by an alpha auxiliary image; ignored when no
-    /// alpha auxiliary image is present
-    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`; the array is copied
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`; the array
-    /// is copied
-    /// @param xmp the embedded XMP metadata payload, or `null`; the array is copied
-    /// @param opaqueItemProperties opaque item properties associated with the primary image item, or `null` when
-    /// absent; the array is copied
-    @SuppressWarnings("checkstyle:ParameterNumber")
     public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            Av1ChromaFormat chromaFormat
+    ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                chromaFormat,
+                null,
+                null,
+                new String[0],
+                new AvifAuxiliaryImageInfo[0],
+                false,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                new AvifOpaqueItemProperty[0]
+        );
+    }
+
+    /// Creates image metadata from normalized immutable component storage.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param chromaFormat the AV1 chroma sampling layout
+    /// @param sequenceInfo the sequence descriptor, or `null`
+    /// @param transformInfo the image-transform descriptor, or `null`
+    /// @param auxiliaryImageTypes immutable auxiliary image type storage
+    /// @param auxiliaryImages immutable auxiliary image descriptor storage
+    /// @param explicitAlphaPresent whether alpha presence was declared independently of auxiliary metadata
+    /// @param alphaPremultiplied whether color samples are premultiplied by alpha
+    /// @param gainMapInfo the gain-map descriptor, or `null`
+    /// @param colorInfo the color descriptor, or `null`
+    /// @param iccProfile immutable ICC profile storage, or `null`
+    /// @param exif immutable Exif storage, or `null`
+    /// @param xmp immutable XMP storage, or `null`
+    /// @param opaqueItemProperties immutable opaque-property storage
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    private AvifImageInfo(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
             @Nullable AvifSequenceInfo sequenceInfo,
             @Nullable AvifImageTransformInfo transformInfo,
-            String @Nullable [] auxiliaryImageTypes,
-            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
-            boolean alphaPresent,
+            String @Unmodifiable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages,
+            boolean explicitAlphaPresent,
             boolean alphaPremultiplied,
             @Nullable AvifGainMapInfo gainMapInfo,
             @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            AvifOpaqueItemProperty @Nullable [] opaqueItemProperties
+            @Nullable @Unmodifiable ByteBuffer iccProfile,
+            @Nullable @Unmodifiable ByteBuffer exif,
+            @Nullable @Unmodifiable ByteBuffer xmp,
+            AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties
     ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
@@ -118,21 +143,136 @@ public final class AvifImageInfo {
         this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.sequenceInfo = sequenceInfo;
         this.transformInfo = transformInfo;
-        AvifAuxiliaryImageInfo @Unmodifiable [] checkedAuxiliaryImages = immutableAuxiliaryImages(auxiliaryImages);
-        this.auxiliaryImageTypes = auxiliaryImageTypes != null
-                ? immutableAuxiliaryImageTypes(auxiliaryImageTypes)
-                : auxiliaryImageTypesFromDescriptors(checkedAuxiliaryImages);
-        this.auxiliaryImages = checkedAuxiliaryImages;
-        this.alphaPresent = alphaPresent
-                || containsAuxiliaryImageType(this.auxiliaryImageTypes, AvifAuxiliaryImageInfo.ALPHA_TYPE)
-                || containsAlphaAuxiliaryImage(checkedAuxiliaryImages);
+        this.auxiliaryImageTypes = auxiliaryImageTypes;
+        this.auxiliaryImages = auxiliaryImages;
+        this.explicitAlphaPresent = explicitAlphaPresent;
+        this.alphaPresent = explicitAlphaPresent
+                || containsAuxiliaryImageType(auxiliaryImageTypes, AvifAuxiliaryImageInfo.ALPHA_TYPE)
+                || containsAlphaAuxiliaryImage(auxiliaryImages);
         this.alphaPremultiplied = this.alphaPresent && alphaPremultiplied;
         this.gainMapInfo = gainMapInfo;
         this.colorInfo = colorInfo;
-        this.iccProfile = immutableBytes(iccProfile);
-        this.exif = immutableBytes(exif);
-        this.xmp = immutableBytes(xmp);
-        this.opaqueItemProperties = immutableOpaqueItemProperties(opaqueItemProperties);
+        this.iccProfile = iccProfile;
+        this.exif = exif;
+        this.xmp = xmp;
+        this.opaqueItemProperties = opaqueItemProperties;
+    }
+
+    /// Returns metadata with the requested sequence descriptor.
+    ///
+    /// @param sequenceInfo the sequence descriptor, or `null` for a still image
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifImageInfo withSequenceInfo(@Nullable AvifSequenceInfo sequenceInfo) {
+        return this.sequenceInfo == sequenceInfo ? this : copy(sequenceInfo, transformInfo, auxiliaryImageTypes,
+                auxiliaryImages, explicitAlphaPresent, alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif,
+                xmp, opaqueItemProperties);
+    }
+
+    /// Returns metadata with the requested image-transform descriptor.
+    ///
+    /// @param transformInfo the image-transform descriptor, or `null` when absent
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifImageInfo withTransformInfo(@Nullable AvifImageTransformInfo transformInfo) {
+        return this.transformInfo == transformInfo ? this : copy(sequenceInfo, transformInfo, auxiliaryImageTypes,
+                auxiliaryImages, explicitAlphaPresent, alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif,
+                xmp, opaqueItemProperties);
+    }
+
+    /// Returns metadata with the requested auxiliary image information.
+    ///
+    /// When `auxiliaryImageTypes` is `null`, the type strings are derived from `auxiliaryImages`.
+    /// Both arrays are copied, and `null` arrays are treated as empty.
+    ///
+    /// @param auxiliaryImageTypes the auxiliary image type strings, or `null` to derive them
+    /// @param auxiliaryImages the auxiliary image descriptors, or `null` when absent
+    /// @return a new metadata value
+    public AvifImageInfo withAuxiliaryImages(
+            String @Nullable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages
+    ) {
+        AvifAuxiliaryImageInfo @Unmodifiable [] checkedImages = immutableAuxiliaryImages(auxiliaryImages);
+        String @Unmodifiable [] checkedTypes = auxiliaryImageTypes == null
+                ? auxiliaryImageTypesFromDescriptors(checkedImages)
+                : immutableAuxiliaryImageTypes(auxiliaryImageTypes);
+        return copy(sequenceInfo, transformInfo, checkedTypes, checkedImages, explicitAlphaPresent,
+                alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif, xmp, opaqueItemProperties);
+    }
+
+    /// Returns metadata with explicitly declared alpha semantics.
+    ///
+    /// Auxiliary alpha metadata continues to imply alpha presence even when `alphaPresent` is `false`.
+    /// Premultiplication is disabled when the resulting metadata has no alpha channel.
+    ///
+    /// @param alphaPresent whether alpha is present independently of auxiliary metadata
+    /// @param alphaPremultiplied whether source color samples are premultiplied by alpha
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifImageInfo withAlpha(boolean alphaPresent, boolean alphaPremultiplied) {
+        boolean normalizedPremultiplied = (alphaPresent || containsAlphaMetadata()) && alphaPremultiplied;
+        if (explicitAlphaPresent == alphaPresent && this.alphaPremultiplied == normalizedPremultiplied) {
+            return this;
+        }
+        return copy(sequenceInfo, transformInfo, auxiliaryImageTypes, auxiliaryImages, alphaPresent,
+                normalizedPremultiplied, gainMapInfo, colorInfo, iccProfile, exif, xmp, opaqueItemProperties);
+    }
+
+    /// Returns metadata with the requested gain-map descriptor.
+    ///
+    /// @param gainMapInfo the gain-map descriptor, or `null` when absent
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifImageInfo withGainMapInfo(@Nullable AvifGainMapInfo gainMapInfo) {
+        return this.gainMapInfo == gainMapInfo ? this : copy(sequenceInfo, transformInfo, auxiliaryImageTypes,
+                auxiliaryImages, explicitAlphaPresent, alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif,
+                xmp, opaqueItemProperties);
+    }
+
+    /// Returns metadata with the requested color descriptor.
+    ///
+    /// @param colorInfo the color descriptor, or `null` when absent
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifImageInfo withColorInfo(@Nullable AvifColorInfo colorInfo) {
+        return this.colorInfo == colorInfo ? this : copy(sequenceInfo, transformInfo, auxiliaryImageTypes,
+                auxiliaryImages, explicitAlphaPresent, alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif,
+                xmp, opaqueItemProperties);
+    }
+
+    /// Returns metadata with an embedded ICC profile.
+    ///
+    /// @param iccProfile the profile payload, or `null` to remove it; the array is copied
+    /// @return a new metadata value
+    public AvifImageInfo withIccProfile(byte @Nullable [] iccProfile) {
+        return copy(sequenceInfo, transformInfo, auxiliaryImageTypes, auxiliaryImages, explicitAlphaPresent,
+                alphaPremultiplied, gainMapInfo, colorInfo, immutableBytes(iccProfile), exif, xmp,
+                opaqueItemProperties);
+    }
+
+    /// Returns metadata with embedded Exif data.
+    ///
+    /// @param exif the payload excluding the AVIF Exif header offset field, or `null` to remove it; the array is copied
+    /// @return a new metadata value
+    public AvifImageInfo withExif(byte @Nullable [] exif) {
+        return copy(sequenceInfo, transformInfo, auxiliaryImageTypes, auxiliaryImages, explicitAlphaPresent,
+                alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, immutableBytes(exif), xmp,
+                opaqueItemProperties);
+    }
+
+    /// Returns metadata with embedded XMP data.
+    ///
+    /// @param xmp the XMP payload, or `null` to remove it; the array is copied
+    /// @return a new metadata value
+    public AvifImageInfo withXmp(byte @Nullable [] xmp) {
+        return copy(sequenceInfo, transformInfo, auxiliaryImageTypes, auxiliaryImages, explicitAlphaPresent,
+                alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif, immutableBytes(xmp),
+                opaqueItemProperties);
+    }
+
+    /// Returns metadata with opaque primary-item properties.
+    ///
+    /// @param opaqueItemProperties the property descriptors, or `null` when absent; the array is copied
+    /// @return a new metadata value
+    public AvifImageInfo withOpaqueItemProperties(AvifOpaqueItemProperty @Nullable [] opaqueItemProperties) {
+        return copy(sequenceInfo, transformInfo, auxiliaryImageTypes, auxiliaryImages, explicitAlphaPresent,
+                alphaPremultiplied, gainMapInfo, colorInfo, iccProfile, exif, xmp,
+                immutableOpaqueItemProperties(opaqueItemProperties));
     }
 
     /// Returns the display width in pixels.
@@ -194,36 +334,6 @@ public final class AvifImageInfo {
         return sequenceInfo == null ? 1 : sequenceInfo.frameCount();
     }
 
-    /// Returns the media timescale for animated sequences.
-    ///
-    /// A value of zero means the container did not expose sequence timing.
-    ///
-    /// @return the media timescale, or zero when absent
-    public int mediaTimescale() {
-        return sequenceInfo == null ? 0 : sequenceInfo.mediaTimescale();
-    }
-
-    /// Returns the total media duration for animated sequences.
-    ///
-    /// The value is expressed in `mediaTimescale()` units. A value of zero means the container did
-    /// not expose sequence timing.
-    ///
-    /// @return the total media duration, or zero when absent
-    public long mediaDuration() {
-        return sequenceInfo == null ? 0 : sequenceInfo.mediaDuration();
-    }
-
-    /// Returns the animated-sequence repetition count.
-    ///
-    /// A non-negative value is the number of repetitions after the first playback. Zero means the
-    /// sequence should play once. `REPETITION_COUNT_UNKNOWN` means the container did not expose an
-    /// edit list, and `REPETITION_COUNT_INFINITE` means the sequence repeats indefinitely.
-    ///
-    /// @return the repetition count, `REPETITION_COUNT_UNKNOWN`, or `REPETITION_COUNT_INFINITE`
-    public int repetitionCount() {
-        return sequenceInfo == null ? REPETITION_COUNT_UNKNOWN : sequenceInfo.repetitionCount();
-    }
-
     /// Returns the typed animated-sequence descriptor.
     ///
     /// Still images return `null`.
@@ -231,79 +341,6 @@ public final class AvifImageInfo {
     /// @return the sequence descriptor, or `null`
     public @Nullable AvifSequenceInfo sequenceInfo() {
         return sequenceInfo;
-    }
-
-    /// Returns per-frame durations for animated sequences.
-    ///
-    /// Values are expressed in `mediaTimescale()` units. Still images and inputs without timing
-    /// metadata return an empty array.
-    ///
-    /// @return per-frame durations in media timescale units
-    public int @Unmodifiable [] frameDurations() {
-        return sequenceInfo == null ? new int[0] : sequenceInfo.frameDurations();
-    }
-
-    /// Returns whether a clean-aperture crop is present.
-    ///
-    /// @return whether a clean-aperture crop is present
-    public boolean hasCleanApertureCrop() {
-        return transformInfo != null && transformInfo.hasCleanApertureCrop();
-    }
-
-    /// Returns the clean-aperture crop x coordinate.
-    ///
-    /// A value of -1 means no clean-aperture crop is present.
-    ///
-    /// @return the clean-aperture crop x coordinate, or -1 when absent
-    public int cleanApertureCropX() {
-        return transformInfo == null ? -1 : transformInfo.cleanApertureCropX();
-    }
-
-    /// Returns the clean-aperture crop y coordinate.
-    ///
-    /// A value of -1 means no clean-aperture crop is present.
-    ///
-    /// @return the clean-aperture crop y coordinate, or -1 when absent
-    public int cleanApertureCropY() {
-        return transformInfo == null ? -1 : transformInfo.cleanApertureCropY();
-    }
-
-    /// Returns the clean-aperture crop width.
-    ///
-    /// A value of -1 means no clean-aperture crop is present.
-    ///
-    /// @return the clean-aperture crop width, or -1 when absent
-    public int cleanApertureCropWidth() {
-        return transformInfo == null ? -1 : transformInfo.cleanApertureCropWidth();
-    }
-
-    /// Returns the clean-aperture crop height.
-    ///
-    /// A value of -1 means no clean-aperture crop is present.
-    ///
-    /// @return the clean-aperture crop height, or -1 when absent
-    public int cleanApertureCropHeight() {
-        return transformInfo == null ? -1 : transformInfo.cleanApertureCropHeight();
-    }
-
-    /// Returns the AVIF `irot` rotation code.
-    ///
-    /// Values 0 through 3 represent 0, 90, 180, and 270 degrees counter-clockwise.
-    /// A value of -1 means the property is absent.
-    ///
-    /// @return the rotation code, or -1 when absent
-    public int rotationCode() {
-        return transformInfo == null ? -1 : transformInfo.rotationCode();
-    }
-
-    /// Returns the AVIF `imir` mirror axis.
-    ///
-    /// A value of 0 mirrors over the horizontal axis, 1 mirrors over the vertical axis,
-    /// and -1 means the property is absent.
-    ///
-    /// @return the mirror axis, or -1 when absent
-    public int mirrorAxis() {
-        return transformInfo == null ? -1 : transformInfo.mirrorAxis();
     }
 
     /// Returns the typed AVIF image-transform descriptor.
@@ -383,6 +420,49 @@ public final class AvifImageInfo {
     /// @return opaque item properties associated with the primary image item
     public AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties() {
         return opaqueItemProperties.clone();
+    }
+
+    /// Creates a copy with normalized immutable component storage.
+    ///
+    /// @param sequenceInfo the sequence descriptor, or `null`
+    /// @param transformInfo the image-transform descriptor, or `null`
+    /// @param auxiliaryImageTypes immutable auxiliary image type storage
+    /// @param auxiliaryImages immutable auxiliary image descriptor storage
+    /// @param explicitAlphaPresent whether alpha presence was declared independently of auxiliary metadata
+    /// @param alphaPremultiplied whether source color samples are premultiplied by alpha
+    /// @param gainMapInfo the gain-map descriptor, or `null`
+    /// @param colorInfo the color descriptor, or `null`
+    /// @param iccProfile immutable ICC profile storage, or `null`
+    /// @param exif immutable Exif storage, or `null`
+    /// @param xmp immutable XMP storage, or `null`
+    /// @param opaqueItemProperties immutable opaque-property storage
+    /// @return the copied metadata
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    private AvifImageInfo copy(
+            @Nullable AvifSequenceInfo sequenceInfo,
+            @Nullable AvifImageTransformInfo transformInfo,
+            String @Unmodifiable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages,
+            boolean explicitAlphaPresent,
+            boolean alphaPremultiplied,
+            @Nullable AvifGainMapInfo gainMapInfo,
+            @Nullable AvifColorInfo colorInfo,
+            @Nullable @Unmodifiable ByteBuffer iccProfile,
+            @Nullable @Unmodifiable ByteBuffer exif,
+            @Nullable @Unmodifiable ByteBuffer xmp,
+            AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties
+    ) {
+        return new AvifImageInfo(width, height, bitDepth, chromaFormat, sequenceInfo, transformInfo,
+                auxiliaryImageTypes, auxiliaryImages, explicitAlphaPresent, alphaPremultiplied, gainMapInfo,
+                colorInfo, iccProfile, exif, xmp, opaqueItemProperties);
+    }
+
+    /// Returns whether the current auxiliary metadata identifies an alpha image.
+    ///
+    /// @return whether auxiliary alpha metadata is present
+    private boolean containsAlphaMetadata() {
+        return containsAuxiliaryImageType(auxiliaryImageTypes, AvifAuxiliaryImageInfo.ALPHA_TYPE)
+                || containsAlphaAuxiliaryImage(auxiliaryImages);
     }
 
     /// Creates immutable byte-buffer storage for one optional payload.

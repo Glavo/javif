@@ -1583,7 +1583,7 @@ public final class TileBlockHeaderReader {
         int[] palette = new int[paletteSize];
         int insertIndex = usedCacheSize;
         if (insertIndex < paletteSize) {
-            int bitDepth = tileContext.sequenceHeader().colorConfig().bitDepth();
+            int bitDepth = tileContext.sequenceHeader().colorConfig().bitDepth().bits();
             int max = (1 << bitDepth) - 1;
             int step = plane == 0 ? 1 : 0;
             int previous = tileContext.msacDecoder().decodeBools(bitDepth);
@@ -1630,7 +1630,7 @@ public final class TileBlockHeaderReader {
     /// @return the decoded V chroma palette entries
     private int[] readChromaVPalette(int paletteSize) {
         int[] palette = new int[paletteSize];
-        int bitDepth = tileContext.sequenceHeader().colorConfig().bitDepth();
+        int bitDepth = tileContext.sequenceHeader().colorConfig().bitDepth().bits();
         int max = (1 << bitDepth) - 1;
         if (tileContext.msacDecoder().decodeBooleanEqui()) {
             int bits = bitDepth - 4 + tileContext.msacDecoder().decodeBools(2);

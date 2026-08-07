@@ -55,14 +55,14 @@ final class SampleTransformIntegrationTest {
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
 
-            AvifPlanes planes = reader.readRawColorPlanes(0);
+            DecodedPlanes planes = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, planes.bitDepth());
             assertEquals(Av1ChromaFormat.YUV444, planes.chromaFormat());
             assertEquals(1024, planes.codedWidth());
             assertEquals(684, planes.codedHeight());
             assertEquals(11519, planes.lumaPlane().sample(0, 0));
-            AvifPlane chromaU = planes.chromaUPlane();
-            AvifPlane chromaV = planes.chromaVPlane();
+            DecodedPlane chromaU = planes.chromaUPlane();
+            DecodedPlane chromaV = planes.chromaVPlane();
             assertNotNull(chromaU);
             assertNotNull(chromaV);
             assertEquals(32643, chromaU.sample(0, 0));
@@ -73,8 +73,6 @@ final class SampleTransformIntegrationTest {
             assertNotNull(frame);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, frame.bitDepth());
             assertEquals(AvifPixelFormat.ARGB_16161616, frame.pixelFormat());
-            assertTrue(frame.hasLongPixelBuffer());
-            assertFalse(frame.hasIntPixelBuffer());
             assertEquals(1024 * 684, frame.longPixelBuffer().remaining());
             assertNull(reader.readFrame());
         }
@@ -87,7 +85,7 @@ final class SampleTransformIntegrationTest {
     /// @param chromaV the decoded V plane
     /// @return the uppercase SHA-256 digest
     /// @throws NoSuchAlgorithmException if the required SHA-256 implementation is unavailable
-    private static String hashPlanes(AvifPlanes planes, AvifPlane chromaU, AvifPlane chromaV)
+    private static String hashPlanes(DecodedPlanes planes, DecodedPlane chromaU, DecodedPlane chromaV)
             throws NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         updateDigest(digest, planes.lumaPlane());
@@ -100,7 +98,7 @@ final class SampleTransformIntegrationTest {
     ///
     /// @param digest the digest to update
     /// @param plane the plane to hash
-    private static void updateDigest(MessageDigest digest, AvifPlane plane) {
+    private static void updateDigest(MessageDigest digest, DecodedPlane plane) {
         for (int y = 0; y < plane.height(); y++) {
             for (int x = 0; x < plane.width(); x++) {
                 int sample = plane.sample(x, y);

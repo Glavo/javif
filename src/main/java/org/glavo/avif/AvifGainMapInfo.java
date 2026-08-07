@@ -64,12 +64,46 @@ public final class AvifGainMapInfo {
     private final int metadataMinimumVersion;
     /// The writer metadata version from the `tmap` payload.
     private final int metadataWriterVersion;
-    /// Whether this implementation can parse the advertised gain-map metadata version.
-    private final boolean metadataSupported;
     /// The parsed gain-map metadata, or `null` when the metadata version is unsupported.
     private final @Nullable AvifGainMapMetadata metadata;
 
-    /// Creates gain-map metadata.
+    /// Creates gain-map association metadata without optional image and payload descriptors.
+    ///
+    /// @param toneMappedImageItemId the `tmap` derived image item id
+    /// @param baseImageItemId the base image item id referenced by the `tmap` item
+    /// @param gainMapImageItemId the gain-map image item id referenced by the `tmap` item
+    /// @param toneMappedItemType the BMFF item type for the tone-mapped item
+    /// @param gainMapItemType the BMFF item type for the gain-map image item
+    public AvifGainMapInfo(
+            int toneMappedImageItemId,
+            int baseImageItemId,
+            int gainMapImageItemId,
+            String toneMappedItemType,
+            String gainMapItemType
+    ) {
+        this(
+                toneMappedImageItemId,
+                baseImageItemId,
+                gainMapImageItemId,
+                toneMappedItemType,
+                gainMapItemType,
+                -1,
+                -1,
+                -1,
+                -1,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                0,
+                0,
+                null
+        );
+    }
+
+    /// Creates normalized gain-map association metadata.
     ///
     /// @param toneMappedImageItemId the `tmap` derived image item id
     /// @param baseImageItemId the base image item id referenced by the `tmap` item
@@ -82,15 +116,15 @@ public final class AvifGainMapInfo {
     /// @param gainMapHeight the gain-map image height in pixels, or -1 when unknown
     /// @param gainMapBitDepth the gain-map AV1 bit depth, or `null` when unknown
     /// @param gainMapChromaFormat the gain-map AV1 chroma sampling layout, or `null` when unknown
-    /// @param toneMappedColorInfo the tone-mapped item CICP color information, or `null` when absent
-    /// @param toneMappedIccProfile the tone-mapped item ICC profile payload, or `null` when absent
-    /// @param gainMapColorInfo the gain-map image item CICP color information, or `null` when absent
-    /// @param metadataVersion the gain-map metadata version field from the `tmap` payload
-    /// @param metadataMinimumVersion the minimum metadata version required by the `tmap` payload
-    /// @param metadataWriterVersion the writer metadata version from the `tmap` payload
-    /// @param metadataSupported whether this implementation can parse the advertised metadata version
-    /// @param metadata the parsed gain-map metadata, or `null` when unsupported
-    public AvifGainMapInfo(
+    /// @param toneMappedColorInfo the tone-mapped color information, or `null`
+    /// @param toneMappedIccProfile immutable tone-mapped ICC profile storage, or `null`
+    /// @param gainMapColorInfo the gain-map color information, or `null`
+    /// @param metadataVersion the metadata version field
+    /// @param metadataMinimumVersion the minimum metadata version field
+    /// @param metadataWriterVersion the writer metadata version field
+    /// @param metadata parsed metadata, or `null`
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    private AvifGainMapInfo(
             int toneMappedImageItemId,
             int baseImageItemId,
             int gainMapImageItemId,
@@ -103,12 +137,11 @@ public final class AvifGainMapInfo {
             @Nullable AvifBitDepth gainMapBitDepth,
             @Nullable Av1ChromaFormat gainMapChromaFormat,
             @Nullable AvifColorInfo toneMappedColorInfo,
-            byte @Nullable [] toneMappedIccProfile,
+            @Nullable @Unmodifiable ByteBuffer toneMappedIccProfile,
             @Nullable AvifColorInfo gainMapColorInfo,
             int metadataVersion,
             int metadataMinimumVersion,
             int metadataWriterVersion,
-            boolean metadataSupported,
             @Nullable AvifGainMapMetadata metadata
     ) {
         if (toneMappedImageItemId <= 0) {
@@ -132,10 +165,6 @@ public final class AvifGainMapInfo {
         if (metadataVersion < 0 || metadataMinimumVersion < 0 || metadataWriterVersion < 0) {
             throw new IllegalArgumentException("metadata version fields must be non-negative");
         }
-        if (metadataSupported != (metadata != null)) {
-            throw new IllegalArgumentException("metadataSupported must match metadata presence");
-        }
-
         this.toneMappedImageItemId = toneMappedImageItemId;
         this.baseImageItemId = baseImageItemId;
         this.gainMapImageItemId = gainMapImageItemId;
@@ -148,13 +177,106 @@ public final class AvifGainMapInfo {
         this.gainMapBitDepth = gainMapBitDepth;
         this.gainMapChromaFormat = gainMapChromaFormat;
         this.toneMappedColorInfo = toneMappedColorInfo;
-        this.toneMappedIccProfile = immutableBytes(toneMappedIccProfile);
+        this.toneMappedIccProfile = toneMappedIccProfile;
         this.gainMapColorInfo = gainMapColorInfo;
         this.metadataVersion = metadataVersion;
         this.metadataMinimumVersion = metadataMinimumVersion;
         this.metadataWriterVersion = metadataWriterVersion;
-        this.metadataSupported = metadataSupported;
         this.metadata = metadata;
+    }
+
+    /// Returns metadata with the requested tone-mapped image dimensions.
+    ///
+    /// Both dimensions must be positive, or both must be `-1` to represent an unknown size.
+    ///
+    /// @param width the image width in pixels, or `-1`
+    /// @param height the image height in pixels, or `-1`
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifGainMapInfo withToneMappedSize(int width, int height) {
+        return width == toneMappedWidth && height == toneMappedHeight ? this : copy(
+                width, height, gainMapWidth, gainMapHeight, gainMapBitDepth, gainMapChromaFormat,
+                toneMappedColorInfo, toneMappedIccProfile, gainMapColorInfo, metadataVersion,
+                metadataMinimumVersion, metadataWriterVersion, metadata
+        );
+    }
+
+    /// Returns metadata with the requested gain-map image description.
+    ///
+    /// Both dimensions must be positive, or both must be `-1`. Bit depth and chroma format must
+    /// either both be present or both be `null`.
+    ///
+    /// @param width the image width in pixels, or `-1`
+    /// @param height the image height in pixels, or `-1`
+    /// @param bitDepth the gain-map bit depth, or `null` when unknown
+    /// @param chromaFormat the gain-map chroma format, or `null` when unknown
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifGainMapInfo withGainMapImage(
+            int width,
+            int height,
+            @Nullable AvifBitDepth bitDepth,
+            @Nullable Av1ChromaFormat chromaFormat
+    ) {
+        if (width == gainMapWidth && height == gainMapHeight
+                && bitDepth == gainMapBitDepth && chromaFormat == gainMapChromaFormat) {
+            return this;
+        }
+        return copy(toneMappedWidth, toneMappedHeight, width, height, bitDepth, chromaFormat,
+                toneMappedColorInfo, toneMappedIccProfile, gainMapColorInfo, metadataVersion,
+                metadataMinimumVersion, metadataWriterVersion, metadata);
+    }
+
+    /// Returns metadata with the requested tone-mapped color information.
+    ///
+    /// @param colorInfo the color information, or `null` when absent
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifGainMapInfo withToneMappedColorInfo(@Nullable AvifColorInfo colorInfo) {
+        return colorInfo == toneMappedColorInfo ? this : copy(toneMappedWidth, toneMappedHeight,
+                gainMapWidth, gainMapHeight, gainMapBitDepth, gainMapChromaFormat, colorInfo,
+                toneMappedIccProfile, gainMapColorInfo, metadataVersion, metadataMinimumVersion,
+                metadataWriterVersion, metadata);
+    }
+
+    /// Returns metadata with the requested tone-mapped ICC profile.
+    ///
+    /// @param iccProfile the ICC profile payload, or `null` to remove it; the array is copied
+    /// @return a new metadata value
+    public AvifGainMapInfo withToneMappedIccProfile(byte @Nullable [] iccProfile) {
+        return copy(toneMappedWidth, toneMappedHeight, gainMapWidth, gainMapHeight, gainMapBitDepth,
+                gainMapChromaFormat, toneMappedColorInfo, immutableBytes(iccProfile), gainMapColorInfo,
+                metadataVersion, metadataMinimumVersion, metadataWriterVersion, metadata);
+    }
+
+    /// Returns metadata with the requested gain-map color information.
+    ///
+    /// @param colorInfo the gain-map color information, or `null` when absent
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifGainMapInfo withGainMapColorInfo(@Nullable AvifColorInfo colorInfo) {
+        return colorInfo == gainMapColorInfo ? this : copy(toneMappedWidth, toneMappedHeight,
+                gainMapWidth, gainMapHeight, gainMapBitDepth, gainMapChromaFormat,
+                toneMappedColorInfo, toneMappedIccProfile, colorInfo, metadataVersion,
+                metadataMinimumVersion, metadataWriterVersion, metadata);
+    }
+
+    /// Returns metadata with the requested version fields and parsed payload.
+    ///
+    /// @param version the metadata version field
+    /// @param minimumVersion the minimum required metadata version field
+    /// @param writerVersion the writer metadata version field
+    /// @param metadata the parsed metadata, or `null` when the version is unsupported
+    /// @return this metadata when unchanged, otherwise a new metadata value
+    public AvifGainMapInfo withMetadata(
+            int version,
+            int minimumVersion,
+            int writerVersion,
+            @Nullable AvifGainMapMetadata metadata
+    ) {
+        if (version == metadataVersion && minimumVersion == metadataMinimumVersion
+                && writerVersion == metadataWriterVersion && metadata == this.metadata) {
+            return this;
+        }
+        return copy(toneMappedWidth, toneMappedHeight, gainMapWidth, gainMapHeight, gainMapBitDepth,
+                gainMapChromaFormat, toneMappedColorInfo, toneMappedIccProfile, gainMapColorInfo,
+                version, minimumVersion, writerVersion, metadata);
     }
 
     /// Returns the `tmap` derived image item id.
@@ -289,7 +411,7 @@ public final class AvifGainMapInfo {
     ///
     /// @return whether the gain-map metadata version is supported
     public boolean metadataSupported() {
-        return metadataSupported;
+        return metadata != null;
     }
 
     /// Returns the parsed gain-map metadata.
@@ -297,6 +419,45 @@ public final class AvifGainMapInfo {
     /// @return the parsed gain-map metadata, or `null` when unsupported
     public @Nullable AvifGainMapMetadata metadata() {
         return metadata;
+    }
+
+    /// Creates a copy with the requested optional descriptors.
+    ///
+    /// @param toneMappedWidth the tone-mapped width
+    /// @param toneMappedHeight the tone-mapped height
+    /// @param gainMapWidth the gain-map width
+    /// @param gainMapHeight the gain-map height
+    /// @param gainMapBitDepth the gain-map bit depth, or `null`
+    /// @param gainMapChromaFormat the gain-map chroma format, or `null`
+    /// @param toneMappedColorInfo the tone-mapped color information, or `null`
+    /// @param toneMappedIccProfile immutable tone-mapped ICC profile storage, or `null`
+    /// @param gainMapColorInfo the gain-map color information, or `null`
+    /// @param metadataVersion the metadata version
+    /// @param metadataMinimumVersion the minimum metadata version
+    /// @param metadataWriterVersion the writer metadata version
+    /// @param metadata the parsed metadata, or `null`
+    /// @return the copied metadata
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    private AvifGainMapInfo copy(
+            int toneMappedWidth,
+            int toneMappedHeight,
+            int gainMapWidth,
+            int gainMapHeight,
+            @Nullable AvifBitDepth gainMapBitDepth,
+            @Nullable Av1ChromaFormat gainMapChromaFormat,
+            @Nullable AvifColorInfo toneMappedColorInfo,
+            @Nullable @Unmodifiable ByteBuffer toneMappedIccProfile,
+            @Nullable AvifColorInfo gainMapColorInfo,
+            int metadataVersion,
+            int metadataMinimumVersion,
+            int metadataWriterVersion,
+            @Nullable AvifGainMapMetadata metadata
+    ) {
+        return new AvifGainMapInfo(toneMappedImageItemId, baseImageItemId, gainMapImageItemId,
+                toneMappedItemType, gainMapItemType, toneMappedWidth, toneMappedHeight, gainMapWidth,
+                gainMapHeight, gainMapBitDepth, gainMapChromaFormat, toneMappedColorInfo,
+                toneMappedIccProfile, gainMapColorInfo, metadataVersion, metadataMinimumVersion,
+                metadataWriterVersion, metadata);
     }
 
     /// Returns whether the supplied dimensions represent a known image size.

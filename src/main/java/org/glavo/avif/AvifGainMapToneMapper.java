@@ -49,7 +49,7 @@ final class AvifGainMapToneMapper {
     /// @return the tone-mapped frame, or the original frame when no pixel transform is needed
     static AvifFrame apply(
             AvifFrame baseFrame,
-            @Nullable AvifPlanes gainMapPlanes,
+            @Nullable DecodedPlanes gainMapPlanes,
             AvifGainMapMetadata metadata,
             @Nullable AvifColorInfo baseColorInfo,
             @Nullable AvifColorInfo toneMappedColorInfo,
@@ -448,7 +448,7 @@ final class AvifGainMapToneMapper {
     @NotNullByDefault
     private static final class GainMapSampler {
         /// The decoded gain-map planes.
-        private final AvifPlanes planes;
+        private final DecodedPlanes planes;
         /// The base frame width in pixels.
         private final int baseWidth;
         /// The base frame height in pixels.
@@ -471,7 +471,7 @@ final class AvifGainMapToneMapper {
         /// @param baseHeight the base frame height in pixels
         /// @param gainMapColorInfo the gain-map image item CICP color information, or `null`
         private GainMapSampler(
-                AvifPlanes planes,
+                DecodedPlanes planes,
                 int baseWidth,
                 int baseHeight,
                 @Nullable AvifColorInfo gainMapColorInfo
@@ -518,8 +518,8 @@ final class AvifGainMapToneMapper {
             if (x == cachedX && y == cachedY) {
                 return cachedRgb;
             }
-            @Nullable AvifPlane chromaUPlane = planes.chromaUPlane();
-            @Nullable AvifPlane chromaVPlane = planes.chromaVPlane();
+            @Nullable DecodedPlane chromaUPlane = planes.chromaUPlane();
+            @Nullable DecodedPlane chromaVPlane = planes.chromaVPlane();
             if (chromaUPlane == null || chromaVPlane == null) {
                 throw new IllegalArgumentException("Gain-map chroma planes are missing");
             }

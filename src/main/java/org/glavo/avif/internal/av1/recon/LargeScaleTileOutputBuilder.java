@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -105,13 +105,13 @@ public final class LargeScaleTileOutputBuilder {
     /// @param sourceTileRow the source tile row
     /// @param outputTileIndex the zero-based destination tile index in raster order
     public void copyTile(
-            DecodedPlanes source,
+            DecodedSurface source,
             int sourceTileColumn,
             int sourceTileRow,
             int outputTileIndex
     ) {
         ensureMutable();
-        DecodedPlanes checkedSource = Objects.requireNonNull(source, "source");
+        DecodedSurface checkedSource = Objects.requireNonNull(source, "source");
         if (checkedSource.bitDepth() != bitDepth || checkedSource.chromaFormat() != chromaFormat) {
             throw new IllegalArgumentException("Source tile color configuration differs from the output");
         }
@@ -239,29 +239,29 @@ public final class LargeScaleTileOutputBuilder {
     /// This builder must not be used after this method returns.
     ///
     /// @return the assembled output frame
-    public DecodedPlanes build() {
+    public DecodedSurface build() {
         ensureMutable();
         built = true;
-        DecodedPlane luma = DecodedPlane.fromOwnedSamples(outputWidth, outputHeight, outputWidth, lumaSamples);
-        @Nullable DecodedPlane chromaU = null;
-        @Nullable DecodedPlane chromaV = null;
+        PaddedPlane luma = PaddedPlane.fromOwnedSamples(outputWidth, outputHeight, outputWidth, lumaSamples);
+        @Nullable PaddedPlane chromaU = null;
+        @Nullable PaddedPlane chromaV = null;
         if (chromaFormat != Av1ChromaFormat.MONOCHROME) {
             int width = chromaWidth(chromaFormat, outputWidth);
             int height = chromaHeight(chromaFormat, outputHeight);
-            chromaU = DecodedPlane.fromOwnedSamples(
+            chromaU = PaddedPlane.fromOwnedSamples(
                     width,
                     height,
                     width,
                     Objects.requireNonNull(chromaUSamples, "chromaUSamples")
             );
-            chromaV = DecodedPlane.fromOwnedSamples(
+            chromaV = PaddedPlane.fromOwnedSamples(
                     width,
                     height,
                     width,
                     Objects.requireNonNull(chromaVSamples, "chromaVSamples")
             );
         }
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 bitDepth,
                 chromaFormat,
                 outputWidth,
@@ -286,7 +286,7 @@ public final class LargeScaleTileOutputBuilder {
     /// @param destinationX the destination-region X coordinate
     /// @param destinationY the destination-region Y coordinate
     private static void copyPlane(
-            DecodedPlane source,
+            PaddedPlane source,
             int sourceX,
             int sourceY,
             int width,

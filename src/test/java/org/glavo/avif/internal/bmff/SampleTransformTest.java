@@ -17,8 +17,8 @@ package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.AvifPlane;
-import org.glavo.avif.AvifPlanes;
+import org.glavo.avif.DecodedPlane;
+import org.glavo.avif.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -143,7 +143,7 @@ final class SampleTransformTest {
                 inputs(1),
                 0
         );
-        AvifPlanes lowColor = lowTransform.apply(new AvifPlanes[]{threeComponentPlanes()});
+        DecodedPlanes lowColor = lowTransform.apply(new DecodedPlanes[]{threeComponentPlanes()});
         assertEquals(64, lowColor.lumaPlane().sample(0, 0));
         assertEquals(64, Objects.requireNonNull(lowColor.chromaUPlane(), "lowColor.chromaUPlane").sample(0, 0));
         assertEquals(64, Objects.requireNonNull(lowColor.chromaVPlane(), "lowColor.chromaVPlane").sample(0, 0));
@@ -157,11 +157,11 @@ final class SampleTransformTest {
                 inputs(1),
                 0
         );
-        AvifPlanes highColor = highTransform.apply(new AvifPlanes[]{threeComponentPlanes()});
+        DecodedPlanes highColor = highTransform.apply(new DecodedPlanes[]{threeComponentPlanes()});
         assertEquals(940, highColor.lumaPlane().sample(0, 0));
         assertEquals(960, Objects.requireNonNull(highColor.chromaUPlane(), "highColor.chromaUPlane").sample(0, 0));
         assertEquals(960, Objects.requireNonNull(highColor.chromaVPlane(), "highColor.chromaVPlane").sample(0, 0));
-        assertEquals(1_023, highTransform.applyAlpha(new AvifPlanes[]{monochromePlanes(0)})
+        assertEquals(1_023, highTransform.applyAlpha(new DecodedPlanes[]{monochromePlanes(0)})
                 .lumaPlane().sample(0, 0));
         assertFalse(highTransform.fullRange());
     }
@@ -260,7 +260,7 @@ final class SampleTransformTest {
                 constantValues,
                 inputSamples.length
         );
-        AvifPlanes[] planes = new AvifPlanes[inputSamples.length];
+        DecodedPlanes[] planes = new DecodedPlanes[inputSamples.length];
         for (int i = 0; i < inputSamples.length; i++) {
             planes[i] = monochromePlanes(inputSamples[i]);
         }
@@ -321,15 +321,15 @@ final class SampleTransformTest {
     ///
     /// @param sample the unsigned input sample
     /// @return the decoded plane set
-    private static AvifPlanes monochromePlanes(int sample) {
-        return new AvifPlanes(
+    private static DecodedPlanes monochromePlanes(int sample) {
+        return new DecodedPlanes(
                 AvifBitDepth.SIXTEEN_BITS,
                 Av1ChromaFormat.MONOCHROME,
                 1,
                 1,
                 1,
                 1,
-                new AvifPlane(1, 1, 1, new short[]{(short) sample}),
+                new DecodedPlane(1, 1, 1, new short[]{(short) sample}),
                 null,
                 null
         );
@@ -338,9 +338,9 @@ final class SampleTransformTest {
     /// Creates one-pixel three-component input planes for constant-only expressions.
     ///
     /// @return the decoded plane set
-    private static AvifPlanes threeComponentPlanes() {
-        AvifPlane plane = new AvifPlane(1, 1, 1, new short[]{0});
-        return new AvifPlanes(
+    private static DecodedPlanes threeComponentPlanes() {
+        DecodedPlane plane = new DecodedPlane(1, 1, 1, new short[]{0});
+        return new DecodedPlanes(
                 AvifBitDepth.EIGHT_BITS,
                 Av1ChromaFormat.YUV444,
                 1,

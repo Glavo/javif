@@ -17,8 +17,8 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.decode.Av1ColorConfig;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -84,12 +84,12 @@ public final class FilmGrainSynthesizer {
     /// @param frameHeader the normalized frame header that owns the grain parameters
     /// @param colorConfig the active sequence color configuration
     /// @return the grain-applied presentation planes
-    public DecodedPlanes apply(
-            DecodedPlanes decodedPlanes,
+    public DecodedSurface apply(
+            DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             Av1ColorConfig colorConfig
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         FrameHeader.FilmGrainParams filmGrain = checkedFrameHeader.filmGrain();
@@ -100,21 +100,21 @@ public final class FilmGrainSynthesizer {
         int bitDepth = checkedDecodedPlanes.bitDepth();
         int[] lumaScaling = generateScaling(bitDepth, filmGrain.yPoints());
         int[][] lumaGrain = generateLumaGrain(bitDepth, filmGrain);
-        DecodedPlane lumaPlane = filmGrain.yPoints().length != 0
+        PaddedPlane lumaPlane = filmGrain.yPoints().length != 0
                 ? applyLumaGrain(checkedDecodedPlanes.lumaPlane(), bitDepth, filmGrain, lumaScaling, lumaGrain)
                 : copyPlane(checkedDecodedPlanes.lumaPlane());
 
-        @Nullable DecodedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
-        @Nullable DecodedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
+        @Nullable PaddedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
+        @Nullable PaddedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
         if (checkedDecodedPlanes.hasChroma()) {
             Av1ChromaFormat chromaFormat = checkedDecodedPlanes.chromaFormat();
             int subsamplingX = chromaSubsamplingX(chromaFormat);
             int subsamplingY = chromaSubsamplingY(chromaFormat);
             boolean identityMatrixCoefficients = checkedColorConfig.matrixCoefficients() == MATRIX_IDENTITY;
-            DecodedPlane sourceLumaPlane = checkedDecodedPlanes.lumaPlane();
+            PaddedPlane sourceLumaPlane = checkedDecodedPlanes.lumaPlane();
 
-            DecodedPlane sourceChromaUPlane = Objects.requireNonNull(chromaUPlane, "chromaUPlane");
-            DecodedPlane sourceChromaVPlane = Objects.requireNonNull(chromaVPlane, "chromaVPlane");
+            PaddedPlane sourceChromaUPlane = Objects.requireNonNull(chromaUPlane, "chromaUPlane");
+            PaddedPlane sourceChromaVPlane = Objects.requireNonNull(chromaVPlane, "chromaVPlane");
             chromaUPlane = applyChromaPlaneIfNeeded(
                     sourceChromaUPlane,
                     sourceLumaPlane,
@@ -141,7 +141,7 @@ public final class FilmGrainSynthesizer {
             );
         }
 
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 bitDepth,
                 checkedDecodedPlanes.chromaFormat(),
                 checkedDecodedPlanes.codedWidth(),
@@ -167,9 +167,9 @@ public final class FilmGrainSynthesizer {
     /// @param subsamplingY the vertical chroma subsampling shift
     /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
     /// @return the grain-applied chroma plane, or an unchanged copy when the plane has no active grain
-    private static DecodedPlane applyChromaPlaneIfNeeded(
-            DecodedPlane chromaPlane,
-            DecodedPlane lumaPlane,
+    private static PaddedPlane applyChromaPlaneIfNeeded(
+            PaddedPlane chromaPlane,
+            PaddedPlane lumaPlane,
             int bitDepth,
             FrameHeader.FilmGrainParams filmGrain,
             int[] lumaScaling,
@@ -219,8 +219,8 @@ public final class FilmGrainSynthesizer {
     /// @param scaling the generated luma scaling table
     /// @param grainLookup the generated luma grain lookup table
     /// @return the grain-applied luma plane
-    private static DecodedPlane applyLumaGrain(
-            DecodedPlane lumaPlane,
+    private static PaddedPlane applyLumaGrain(
+            PaddedPlane lumaPlane,
             int bitDepth,
             FrameHeader.FilmGrainParams filmGrain,
             int[] scaling,
@@ -231,7 +231,7 @@ public final class FilmGrainSynthesizer {
         for (int row = 0; row < rowCount; row++) {
             applyLumaGrainRow(lumaPlane, outputSamples, bitDepth, filmGrain, scaling, grainLookup, row);
         }
-        return new DecodedPlane(lumaPlane.width(), lumaPlane.height(), lumaPlane.stride(), outputSamples);
+        return new PaddedPlane(lumaPlane.width(), lumaPlane.height(), lumaPlane.stride(), outputSamples);
     }
 
     /// Applies generated grain to one luma film-grain block row.
@@ -244,7 +244,7 @@ public final class FilmGrainSynthesizer {
     /// @param grainLookup the generated luma grain lookup table
     /// @param rowNumber the zero-based film-grain block row
     private static void applyLumaGrainRow(
-            DecodedPlane lumaPlane,
+            PaddedPlane lumaPlane,
             short[] outputSamples,
             int bitDepth,
             FrameHeader.FilmGrainParams filmGrain,
@@ -325,9 +325,9 @@ public final class FilmGrainSynthesizer {
     /// @param subsamplingY the vertical chroma subsampling shift
     /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
     /// @return the grain-applied chroma plane
-    private static DecodedPlane applyChromaGrain(
-            DecodedPlane chromaPlane,
-            DecodedPlane lumaPlane,
+    private static PaddedPlane applyChromaGrain(
+            PaddedPlane chromaPlane,
+            PaddedPlane lumaPlane,
             int bitDepth,
             FrameHeader.FilmGrainParams filmGrain,
             int[] scaling,
@@ -355,7 +355,7 @@ public final class FilmGrainSynthesizer {
                     row
             );
         }
-        return new DecodedPlane(chromaPlane.width(), chromaPlane.height(), chromaPlane.stride(), outputSamples);
+        return new PaddedPlane(chromaPlane.width(), chromaPlane.height(), chromaPlane.stride(), outputSamples);
     }
 
     /// Applies generated grain to one chroma film-grain block row.
@@ -373,8 +373,8 @@ public final class FilmGrainSynthesizer {
     /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
     /// @param rowNumber the zero-based film-grain block row
     private static void applyChromaGrainRow(
-            DecodedPlane chromaPlane,
-            DecodedPlane lumaPlane,
+            PaddedPlane chromaPlane,
+            PaddedPlane lumaPlane,
             short[] outputSamples,
             int bitDepth,
             FrameHeader.FilmGrainParams filmGrain,
@@ -483,7 +483,7 @@ public final class FilmGrainSynthesizer {
     /// @param minimumSample the inclusive output minimum
     /// @param maximumSample the inclusive output maximum
     private static void addLumaNoise(
-            DecodedPlane lumaPlane,
+            PaddedPlane lumaPlane,
             short[] outputSamples,
             int blockX,
             int blockY,
@@ -520,8 +520,8 @@ public final class FilmGrainSynthesizer {
     /// @param maximumSample the inclusive output maximum
     /// @param bitDepth the decoded bit depth
     private static void addChromaNoise(
-            DecodedPlane chromaPlane,
-            DecodedPlane lumaPlane,
+            PaddedPlane chromaPlane,
+            PaddedPlane lumaPlane,
             short[] outputSamples,
             int blockX,
             int blockY,
@@ -871,8 +871,8 @@ public final class FilmGrainSynthesizer {
     ///
     /// @param plane the source plane
     /// @return one copied plane
-    private static DecodedPlane copyPlane(DecodedPlane plane) {
-        return new DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.samples());
+    private static PaddedPlane copyPlane(PaddedPlane plane) {
+        return new PaddedPlane(plane.width(), plane.height(), plane.stride(), plane.samples());
     }
 
     /// Returns the horizontal chroma subsampling shift for one chroma format.

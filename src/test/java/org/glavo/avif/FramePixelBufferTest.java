@@ -25,6 +25,7 @@ import java.nio.LongBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for shared parent-frame pixel-buffer storage and lazy conversion.
@@ -104,5 +105,44 @@ final class FramePixelBufferTest {
 
         assertEquals(0xFFFF_0000_8080_FFFFL, intFrame.longPixelBuffer().get(0));
         assertEquals(0x80FF_4020, longFrame.intPixelBuffer().get(0));
+        assertEquals(AvifPixelFormat.ARGB_8888, intFrame.pixelFormat());
+        assertEquals(AvifPixelFormat.ARGB_16161616, longFrame.pixelFormat());
+    }
+
+    /// Verifies that AVIF frames reject dimensions, pixel counts, and frame indexes that cannot
+    /// describe one complete image.
+    @Test
+    void avifFrameRejectsInvalidImageState() {
+        assertThrows(IllegalArgumentException.class, () -> new AvifFrame(
+                0, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME, 0, new int[0]
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new AvifFrame(
+                2, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME, 0, new int[1]
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new AvifFrame(
+                1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME, -1, new int[1]
+        ));
+    }
+
+    /// Verifies that raw AV1 frames reject invalid presentation and layer state.
+    @Test
+    void decodedFrameRejectsInvalidPresentationState() {
+        IntBuffer pixel = IntBuffer.wrap(new int[1]).asReadOnlyBuffer();
+        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+                1, 0, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
+                FrameType.KEY, true, 0, pixel
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+                1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
+                FrameType.KEY, true, -1, pixel
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+                1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
+                FrameType.KEY, true, 0, 8, 0, pixel
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+                1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
+                FrameType.KEY, true, 0, 0, 4, pixel
+        ));
     }
 }

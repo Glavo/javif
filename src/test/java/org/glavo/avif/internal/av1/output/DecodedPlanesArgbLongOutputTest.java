@@ -19,8 +19,8 @@ import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +50,7 @@ final class DecodedPlanesArgbLongOutputTest {
     /// pixels and ignore stride padding.
     @Test
     void convertsTenBitI400SamplesIntoOpaqueArgbLongPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 10,
                 Av1ChromaFormat.MONOCHROME,
                 3,
@@ -85,7 +85,7 @@ final class DecodedPlanesArgbLongOutputTest {
     /// `0xAAAA_RRRR_GGGG_BBBB` lane order and per-pixel chroma sampling.
     @Test
     void convertsTwelveBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbLongPixels() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 12,
                 Av1ChromaFormat.YUV444,
                 4,
@@ -119,7 +119,7 @@ final class DecodedPlanesArgbLongOutputTest {
     /// `DecodedFrame`.
     @Test
     void returnsDecodedFrameMetadataForTwelveBitI444Output() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 12,
                 Av1ChromaFormat.YUV444,
                 2,
@@ -151,7 +151,7 @@ final class DecodedPlanesArgbLongOutputTest {
     /// Verifies that long-output entry points expand `8-bit` samples into 16-bit lanes.
     @Test
     void expandsEightBitDecodedPlanesForLongOutputEntryPoints() {
-        DecodedPlanes planes = new DecodedPlanes(
+        DecodedSurface planes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 3,
@@ -187,7 +187,7 @@ final class DecodedPlanesArgbLongOutputTest {
     ///
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
-    private static void assertFrameMetadata(DecodedFrame frame, DecodedPlanes planes) {
+    private static void assertFrameMetadata(DecodedFrame frame, DecodedSurface planes) {
         assertEquals(planes.codedWidth(), frame.width());
         assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
@@ -213,12 +213,12 @@ final class DecodedPlanesArgbLongOutputTest {
     /// @param stride the plane stride in samples
     /// @param values the unsigned sample values in row-major order
     /// @return one immutable decoded plane
-    private static DecodedPlane plane(int width, int height, int stride, int... values) {
+    private static PaddedPlane plane(int width, int height, int stride, int... values) {
         short[] samples = new short[values.length];
         for (int i = 0; i < values.length; i++) {
             samples[i] = (short) values[i];
         }
-        return new DecodedPlane(width, height, stride, samples);
+        return new PaddedPlane(width, height, stride, samples);
     }
 
     /// Returns the packed alpha lane from one `0xAAAA_RRRR_GGGG_BBBB` pixel.

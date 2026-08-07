@@ -21,6 +21,7 @@ import org.glavo.avif.testutil.ImagePixelAssertions.PixelTolerance;
 import org.glavo.avif.testutil.ImagePixelAssertions.PixelTransform;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -332,7 +333,7 @@ final class LibavifImageIoReferenceTest {
     void drawPointsIdatFixtureDecodesReferenceAlphaSample() throws IOException {
         BufferedImage source = TestResources.readImage("libavif-test-data/draw_points.png");
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/draw_points_idat.avif"))) {
-            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            DecodedPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertEquals(source.getRGB(22, 0) >>> 24, alphaPlanes.lumaPlane().sample(22, 0));
         }
@@ -345,7 +346,7 @@ final class LibavifImageIoReferenceTest {
     void circleCustomPropertiesFixtureDecodesReferenceAlphaPlane() throws IOException {
         BufferedImage source = TestResources.readImage("libavif-test-data/circle-trns-after-plte.png");
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/circle_custom_properties.avif"))) {
-            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            DecodedPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertAlphaPlaneMatchesReference("libavif-test-data/circle_custom_properties.avif", source, alphaPlanes.lumaPlane());
         }
@@ -368,29 +369,27 @@ final class LibavifImageIoReferenceTest {
             AvifImageInfo info = reader.info();
             assertEquals(34, info.width());
             assertEquals(12, info.height());
-            assertEquals(1, info.rotationCode());
-            assertEquals(-1, info.mirrorAxis());
-            AvifImageTransformInfo transformInfo = info.transformInfo();
+            @Nullable AvifImageTransformInfo transformInfo = info.transformInfo();
             assertNotNull(transformInfo);
             assertFalse(transformInfo.hasCleanApertureCrop());
             assertTrue(transformInfo.hasRotation());
             assertEquals(1, transformInfo.rotationCode());
             assertFalse(transformInfo.hasMirror());
 
-            AvifPlanes colorPlanes = reader.readRawColorPlanes(0);
+            DecodedPlanes colorPlanes = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.TEN_BITS, colorPlanes.bitDepth());
             assertEquals(Av1ChromaFormat.YUV444, colorPlanes.chromaFormat());
             assertEquals(12, colorPlanes.renderWidth());
             assertEquals(34, colorPlanes.renderHeight());
             assertGradientPlaneClose("Y", colorPlanes.lumaPlane(), 12, 34, 10, 32, 40.0);
-            AvifPlane chromaUPlane = colorPlanes.chromaUPlane();
+            DecodedPlane chromaUPlane = colorPlanes.chromaUPlane();
             assertNotNull(chromaUPlane);
             assertGradientPlaneClose("U", chromaUPlane, 12, 34, 10, 32, 40.0);
-            AvifPlane chromaVPlane = colorPlanes.chromaVPlane();
+            DecodedPlane chromaVPlane = colorPlanes.chromaVPlane();
             assertNotNull(chromaVPlane);
             assertGradientPlaneClose("V", chromaVPlane, 12, 34, 10, 32, 40.0);
 
-            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            DecodedPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertEquals(AvifBitDepth.TEN_BITS, alphaPlanes.bitDepth());
             assertEquals(Av1ChromaFormat.MONOCHROME, alphaPlanes.chromaFormat());
@@ -416,7 +415,7 @@ final class LibavifImageIoReferenceTest {
     /// @param minPsnr the minimum accepted PSNR in decibels
     private static void assertGradientPlaneClose(
             String label,
-            AvifPlane plane,
+            DecodedPlane plane,
             int width,
             int height,
             int bitDepth,
@@ -481,13 +480,16 @@ final class LibavifImageIoReferenceTest {
         BufferedImage source = TestResources.readImage(pair.sourceResource());
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(pair.avifResource()))) {
             AvifImageInfo info = reader.info();
-            int expectedWidth = info.hasCleanApertureCrop()
-                    ? info.cleanApertureCropWidth()
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            boolean hasCrop = transformInfo != null && transformInfo.hasCleanApertureCrop();
+            int expectedWidth = hasCrop
+                    ? transformInfo.cleanApertureCropWidth()
                     : source.getWidth();
-            int expectedHeight = info.hasCleanApertureCrop()
-                    ? info.cleanApertureCropHeight()
+            int expectedHeight = hasCrop
+                    ? transformInfo.cleanApertureCropHeight()
                     : source.getHeight();
-            if (info.rotationCode() == 1 || info.rotationCode() == 3) {
+            int rotationCode = transformInfo == null ? -1 : transformInfo.rotationCode();
+            if (rotationCode == 1 || rotationCode == 3) {
                 int temporary = expectedWidth;
                 expectedWidth = expectedHeight;
                 expectedHeight = temporary;
@@ -541,7 +543,7 @@ final class LibavifImageIoReferenceTest {
     private static void assertAlphaPlaneReference(AlphaPlaneReference reference) throws IOException {
         BufferedImage expected = TestResources.readImage(reference.sourceResource());
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.avifResource()))) {
-            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            DecodedPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertAlphaPlaneMatchesReference(reference.avifResource(), expected, alphaPlanes.lumaPlane());
         }
@@ -552,7 +554,7 @@ final class LibavifImageIoReferenceTest {
     /// @param label the diagnostic label
     /// @param expected the expected ImageIO-decoded image
     /// @param actual the decoded alpha plane
-    private static void assertAlphaPlaneMatchesReference(String label, BufferedImage expected, AvifPlane actual) {
+    private static void assertAlphaPlaneMatchesReference(String label, BufferedImage expected, DecodedPlane actual) {
         assertEquals(expected.getWidth(), actual.width());
         assertEquals(expected.getHeight(), actual.height());
         for (int y = 0; y < expected.getHeight(); y++) {

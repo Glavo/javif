@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -32,7 +32,7 @@ final class LargeScaleTileOutputBuilderTest {
     /// Verifies luma and subsampled chroma copies from arbitrary camera-frame tile coordinates.
     @Test
     void copiesSelectedTilesInOutputRasterOrder() {
-        DecodedPlanes source = sourcePlanes();
+        DecodedSurface source = sourcePlanes();
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
                 Av1ChromaFormat.YUV420,
@@ -44,7 +44,7 @@ final class LargeScaleTileOutputBuilderTest {
 
         builder.copyTile(source, 1, 0, 0);
         builder.copyTile(source, 0, 1, 1);
-        DecodedPlanes output = builder.build();
+        DecodedSurface output = builder.build();
 
         assertEquals(8, output.codedWidth());
         assertEquals(8, output.codedHeight());
@@ -55,10 +55,10 @@ final class LargeScaleTileOutputBuilderTest {
         assertEquals(0, output.lumaPlane().sample(0, 4));
         assertEquals(0, output.lumaPlane().sample(7, 7));
 
-        DecodedPlane sourceU = Objects.requireNonNull(source.chromaUPlane(), "source.chromaUPlane");
-        DecodedPlane sourceV = Objects.requireNonNull(source.chromaVPlane(), "source.chromaVPlane");
-        DecodedPlane outputU = Objects.requireNonNull(output.chromaUPlane(), "output.chromaUPlane");
-        DecodedPlane outputV = Objects.requireNonNull(output.chromaVPlane(), "output.chromaVPlane");
+        PaddedPlane sourceU = Objects.requireNonNull(source.chromaUPlane(), "source.chromaUPlane");
+        PaddedPlane sourceV = Objects.requireNonNull(source.chromaVPlane(), "source.chromaVPlane");
+        PaddedPlane outputU = Objects.requireNonNull(output.chromaUPlane(), "output.chromaUPlane");
+        PaddedPlane outputV = Objects.requireNonNull(output.chromaVPlane(), "output.chromaVPlane");
         assertEquals(sourceU.sample(2, 0), outputU.sample(0, 0));
         assertEquals(sourceV.sample(0, 2), outputV.sample(2, 0));
         assertEquals(0, outputU.sample(0, 2));
@@ -68,7 +68,7 @@ final class LargeScaleTileOutputBuilderTest {
     /// Verifies that a previously assembled tile can be reused without the camera-frame source.
     @Test
     void copiesPreviouslyWrittenOutputTile() {
-        DecodedPlanes source = sourcePlanes();
+        DecodedSurface source = sourcePlanes();
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
                 Av1ChromaFormat.YUV420,
@@ -80,15 +80,15 @@ final class LargeScaleTileOutputBuilderTest {
 
         builder.copyTile(source, 1, 0, 0);
         builder.copyOutputTile(0, 3);
-        DecodedPlanes output = builder.build();
+        DecodedSurface output = builder.build();
 
         for (int y = 0; y < 4; y++) {
             for (int x = 0; x < 4; x++) {
                 assertEquals(output.lumaPlane().sample(x, y), output.lumaPlane().sample(x + 4, y + 4));
             }
         }
-        DecodedPlane outputU = Objects.requireNonNull(output.chromaUPlane(), "output.chromaUPlane");
-        DecodedPlane outputV = Objects.requireNonNull(output.chromaVPlane(), "output.chromaVPlane");
+        PaddedPlane outputU = Objects.requireNonNull(output.chromaUPlane(), "output.chromaUPlane");
+        PaddedPlane outputV = Objects.requireNonNull(output.chromaVPlane(), "output.chromaVPlane");
         for (int y = 0; y < 2; y++) {
             for (int x = 0; x < 2; x++) {
                 assertEquals(outputU.sample(x, y), outputU.sample(x + 2, y + 2));
@@ -116,7 +116,7 @@ final class LargeScaleTileOutputBuilderTest {
     /// Verifies that ownership transfer permanently closes the mutable builder lifecycle.
     @Test
     void rejectsMutationAndRepeatedBuildAfterOwnershipTransfer() {
-        DecodedPlanes source = sourcePlanes();
+        DecodedSurface source = sourcePlanes();
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
                 Av1ChromaFormat.YUV420,
@@ -136,8 +136,8 @@ final class LargeScaleTileOutputBuilderTest {
     /// Creates deterministic 8x8 YUV420 camera-frame planes.
     ///
     /// @return the synthetic camera-frame planes
-    private static DecodedPlanes sourcePlanes() {
-        return new DecodedPlanes(
+    private static DecodedSurface sourcePlanes() {
+        return new DecodedSurface(
                 10,
                 Av1ChromaFormat.YUV420,
                 8,
@@ -156,11 +156,11 @@ final class LargeScaleTileOutputBuilderTest {
     /// @param height the plane height
     /// @param base the first sample value
     /// @return the deterministic plane
-    private static DecodedPlane sequentialPlane(int width, int height, int base) {
+    private static PaddedPlane sequentialPlane(int width, int height, int base) {
         short[] samples = new short[width * height];
         for (int i = 0; i < samples.length; i++) {
             samples[i] = (short) (base + i);
         }
-        return new DecodedPlane(width, height, width, samples);
+        return new PaddedPlane(width, height, width, samples);
     }
 }

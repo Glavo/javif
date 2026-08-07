@@ -19,8 +19,8 @@ import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -65,7 +65,7 @@ public final class CdefApplier {
     /// @param decodedPlanes the decoded planes after loop filtering
     /// @param cdef the normalized frame-level CDEF state
     /// @return the post-CDEF planes
-    public DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader.CdefInfo cdef) {
+    public DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader.CdefInfo cdef) {
         return apply(decodedPlanes, cdef, null);
     }
 
@@ -75,8 +75,8 @@ public final class CdefApplier {
     /// @param cdef the normalized frame-level CDEF state
     /// @param syntaxDecodeResult the decoded block syntax that carries CDEF indices, or `null`
     /// @return the post-CDEF planes
-    public DecodedPlanes apply(
-            DecodedPlanes decodedPlanes,
+    public DecodedSurface apply(
+            DecodedSurface decodedPlanes,
             FrameHeader.CdefInfo cdef,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
@@ -111,7 +111,7 @@ public final class CdefApplier {
                 workspace
         );
 
-        DecodedPlane lumaPlane = applyPlane(
+        PaddedPlane lumaPlane = applyPlane(
                 decodedPlanes.lumaPlane(),
                 bitDepthShift,
                 damping,
@@ -125,8 +125,8 @@ public final class CdefApplier {
                 true,
                 false
         );
-        @Nullable DecodedPlane chromaUPlane = decodedPlanes.chromaUPlane();
-        @Nullable DecodedPlane chromaVPlane = decodedPlanes.chromaVPlane();
+        @Nullable PaddedPlane chromaUPlane = decodedPlanes.chromaUPlane();
+        @Nullable PaddedPlane chromaVPlane = decodedPlanes.chromaVPlane();
         if (decodedPlanes.hasChroma()) {
             int chromaUnitWidth = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingX(decodedPlanes.chromaFormat()));
             int chromaUnitHeight = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingY(decodedPlanes.chromaFormat()));
@@ -166,7 +166,7 @@ public final class CdefApplier {
                 && chromaVPlane == decodedPlanes.chromaVPlane()) {
             return decodedPlanes;
         }
-        return new DecodedPlanes(
+        return new DecodedSurface(
                 decodedPlanes.bitDepth(),
                 decodedPlanes.chromaFormat(),
                 decodedPlanes.codedWidth(),
@@ -287,7 +287,7 @@ public final class CdefApplier {
     /// @param workspace the reusable per-frame CDEF workspace
     /// @return the row-major luma-derived CDEF direction map
     private static CdefDirectionMap buildDirectionMap(
-            DecodedPlane lumaPlane,
+            PaddedPlane lumaPlane,
             int bitDepth,
             int[] yStrengths,
             int[] uvStrengths,
@@ -386,8 +386,8 @@ public final class CdefApplier {
     /// @param luma whether this invocation filters the luma plane
     /// @param i422Chroma whether this invocation filters an `YUV422` chroma plane
     /// @return the filtered plane, or the original plane when all selected units are inactive
-    private static DecodedPlane applyPlane(
-            DecodedPlane plane,
+    private static PaddedPlane applyPlane(
+            PaddedPlane plane,
             int bitDepthShift,
             int damping,
             int[] strengths,
@@ -461,7 +461,7 @@ public final class CdefApplier {
             }
         }
         return changed
-                ? DecodedPlane.fromOwnedSamples(plane.width(), plane.height(), plane.stride(), outputSamples)
+                ? PaddedPlane.fromOwnedSamples(plane.width(), plane.height(), plane.stride(), outputSamples)
                 : plane;
     }
 
@@ -519,7 +519,7 @@ public final class CdefApplier {
     /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
     /// @param maximumSample the maximum legal output sample value
     private static void filterUnit(
-            DecodedPlane plane,
+            PaddedPlane plane,
             short[] outputSamples,
             int startX,
             int startY,
@@ -615,7 +615,7 @@ public final class CdefApplier {
     /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
     /// @return the dominant direction and its directional variance
     private static CdefDirection detectDirection(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int startX,
             int startY,
             int processingWidth,
@@ -645,7 +645,7 @@ public final class CdefApplier {
     /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
     /// @param workspace the reusable per-frame CDEF workspace that receives the result
     private static void detectDirection(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int startX,
             int startY,
             int processingWidth,
@@ -802,7 +802,7 @@ public final class CdefApplier {
     /// @param processingHeight the exclusive CDEF-grid processing boundary in Y
     /// @return one source sample or `MISSING_SAMPLE`
     private static int sampleOrMissing(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int x,
             int y,
             int processingWidth,
@@ -823,7 +823,7 @@ public final class CdefApplier {
     /// @param processingHeight the available CDEF-grid processing height
     /// @return one edge-extended source sample
     private static int samplePaddedOrClamped(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int x,
             int y,
             int processingWidth,

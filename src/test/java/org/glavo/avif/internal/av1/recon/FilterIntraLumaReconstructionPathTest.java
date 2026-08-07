@@ -16,8 +16,8 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -85,7 +85,7 @@ final class FilterIntraLumaReconstructionPathTest {
                 LumaIntraPredictionMode.HORIZONTAL
         );
 
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+        DecodedSurface planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(8, 4, leftLeaf, rightLeaf)
         );
 
@@ -104,7 +104,7 @@ final class FilterIntraLumaReconstructionPathTest {
                 LumaIntraPredictionMode.VERTICAL
         );
 
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+        DecodedSurface planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(4, 8, topLeaf, bottomLeaf)
         );
 
@@ -129,10 +129,10 @@ final class FilterIntraLumaReconstructionPathTest {
                 LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT
         );
 
-        DecodedPlane baseline = new FrameReconstructor().reconstruct(
+        PaddedPlane baseline = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(12, 4, topLeftLeaf, topMiddleLeaf, topRightLeaf)
         ).lumaPlane();
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+        DecodedSurface planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(12, 8, topLeftLeaf, topMiddleLeaf, topRightLeaf, bottomDirectionalLeaf)
         );
 
@@ -195,10 +195,10 @@ final class FilterIntraLumaReconstructionPathTest {
                 new ResidualLayout(origin.offset(1, 0), BlockSize.SIZE_4X4, new TransformResidualUnit[]{rightResidual})
         );
 
-        DecodedPlane splitPlane = new FrameReconstructor().reconstruct(
+        PaddedPlane splitPlane = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(8, 4, splitLeaf)
         ).lumaPlane();
-        DecodedPlane separatePlane = new FrameReconstructor().reconstruct(
+        PaddedPlane separatePlane = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(8, 4, leftLeaf, rightLeaf)
         ).lumaPlane();
 
@@ -403,7 +403,7 @@ final class FilterIntraLumaReconstructionPathTest {
                         Av1ChromaFormat.MONOCHROME,
                         0,
                         true,
-                        false,
+                        true,
                         false
                 )
         );
@@ -607,7 +607,7 @@ final class FilterIntraLumaReconstructionPathTest {
     /// @param height the expected block height
     /// @param expectedSample the expected sample value at every coordinate
     private static void assertDecodedBlockFilled(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int x,
             int y,
             int width,
@@ -627,7 +627,7 @@ final class FilterIntraLumaReconstructionPathTest {
     /// @param x the block origin X coordinate
     /// @param y the block origin Y coordinate
     /// @param expected the expected sample raster
-    private static void assertDecodedBlockEquals(DecodedPlane plane, int x, int y, int[][] expected) {
+    private static void assertDecodedBlockEquals(PaddedPlane plane, int x, int y, int[][] expected) {
         for (int row = 0; row < expected.length; row++) {
             for (int column = 0; column < expected[row].length; column++) {
                 assertEquals(expected[row][column], plane.sample(x + column, y + row));
@@ -639,7 +639,7 @@ final class FilterIntraLumaReconstructionPathTest {
     ///
     /// @param expected the expected decoded plane
     /// @param actual the actual decoded plane
-    private static void assertDecodedPlaneEquals(DecodedPlane expected, DecodedPlane actual) {
+    private static void assertDecodedPlaneEquals(PaddedPlane expected, PaddedPlane actual) {
         assertEquals(expected.width(), actual.width());
         assertEquals(expected.height(), actual.height());
         for (int row = 0; row < expected.height(); row++) {

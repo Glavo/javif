@@ -21,8 +21,8 @@ import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.TransformSize;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -62,7 +62,7 @@ final class FramePostprocessorTest {
     /// Verifies that inactive in-loop filters preserve samples while freezing stage order.
     @Test
     void postprocessPreservesDecodedSamplesWhenInLoopFiltersAreInactive() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.YUV420,
                 new int[][]{
                         {120, 121, 122, 123, 124, 125, 126, 127},
@@ -112,7 +112,7 @@ final class FramePostprocessorTest {
                 PostfilterTestFixtures.disabledFilmGrain()
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader);
 
         assertSame(decodedPlanes, postprocessed);
         assertEquals(120, postprocessed.lumaPlane().sample(0, 0));
@@ -124,7 +124,7 @@ final class FramePostprocessorTest {
     /// Verifies that active CDEF applies a pixel-changing pass using decoded block CDEF indices.
     @Test
     void postprocessAppliesActiveCdefFromDecodedBlockIndex() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -165,7 +165,7 @@ final class FramePostprocessorTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 64);
@@ -175,7 +175,7 @@ final class FramePostprocessorTest {
     /// Verifies that skipped blocks that omit CDEF side syntax use the AV1 default CDEF index.
     @Test
     void postprocessUsesDefaultCdefIndexWhenBlockIndexIsOmitted() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -216,7 +216,7 @@ final class FramePostprocessorTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, -1);
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 64);
@@ -226,7 +226,7 @@ final class FramePostprocessorTest {
     /// Verifies that CDEF preserves units that contain no non-skipped blocks.
     @Test
     void postprocessSkipsFullySkippedCdefUnit() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -268,7 +268,7 @@ final class FramePostprocessorTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0, true);
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertSame(decodedPlanes, postprocessed);
         assertEquals(64, postprocessed.lumaPlane().sample(3, 3));
@@ -277,7 +277,7 @@ final class FramePostprocessorTest {
     /// Verifies that CDEF strength and output range honor high-bit-depth planes.
     @Test
     void postprocessAppliesCdefToHighBitDepthSamples() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 10,
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
@@ -319,7 +319,7 @@ final class FramePostprocessorTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int filteredCenter = postprocessed.lumaPlane().sample(3, 3);
         assertNotSame(decodedPlanes, postprocessed);
@@ -331,7 +331,7 @@ final class FramePostprocessorTest {
     /// Verifies that active CDEF fails explicitly when decoded block indices are unavailable.
     @Test
     void postprocessRejectsActiveCdefWithoutDecodedBlockIndex() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -373,7 +373,7 @@ final class FramePostprocessorTest {
     /// Verifies that active loop filtering uses decoded block and transform edges.
     @Test
     void postprocessAppliesActiveLoopFilterFromDecodedEdges() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {40, 40, 40, 40, 44, 44, 44, 44},
@@ -415,7 +415,7 @@ final class FramePostprocessorTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(frameHeader, 0, 0);
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) > decodedPlanes.lumaPlane().sample(3, 3));
@@ -427,7 +427,7 @@ final class FramePostprocessorTest {
     /// Verifies that active loop filtering ignores 4x4-grid lines that are neither block nor transform edges.
     @Test
     void postprocessDoesNotApplyLoopFilterAwayFromDecodedEdges() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {40, 40, 40, 40, 40, 40, 40, 40},
@@ -469,7 +469,7 @@ final class FramePostprocessorTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
             for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
@@ -481,7 +481,7 @@ final class FramePostprocessorTest {
     /// Verifies the exact AV1 8-tap luma loop filter on flat 8x8 transform edges.
     @Test
     void postprocessAppliesEightTapLumaLoopFilterOnFlatEdges() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 repeatedRows(new int[]{40, 40, 40, 40, 40, 40, 40, 40, 48, 48, 48, 48, 48, 48, 48, 48}, 8),
                 null,
@@ -520,7 +520,7 @@ final class FramePostprocessorTest {
                 null
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedRow = new int[]{40, 40, 40, 40, 40, 41, 42, 43, 45, 46, 47, 48, 48, 48, 48, 48};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
@@ -533,7 +533,7 @@ final class FramePostprocessorTest {
     /// Verifies that loop filtering extends frame-edge samples instead of reducing the filter width.
     @Test
     void postprocessExtendsFrameEdgeSamplesForLoopFiltering() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 repeatedRows(new int[]{164, 164, 164, 164, 164, 164, 165, 165, 162, 162, 162}, 8),
                 null,
@@ -570,7 +570,7 @@ final class FramePostprocessorTest {
                 null
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedRow = new int[]{164, 164, 164, 164, 164, 164, 164, 164, 163, 163, 162};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
@@ -583,7 +583,7 @@ final class FramePostprocessorTest {
     /// Verifies the exact AV1 16-tap luma loop filter on flat 16x16 transform edges.
     @Test
     void postprocessAppliesSixteenTapLumaLoopFilterOnFlatEdges() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 repeatedRows(
                         new int[]{
@@ -630,7 +630,7 @@ final class FramePostprocessorTest {
                 null
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedRow = new int[]{
                 40, 40, 40, 40, 40, 40, 40, 40,
@@ -648,7 +648,7 @@ final class FramePostprocessorTest {
     /// Verifies the exact AV1 6-tap chroma loop filter on flat 8x8 transform edges.
     @Test
     void postprocessAppliesSixTapChromaLoopFilterOnFlatEdges() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.YUV444,
                 repeatedRows(new int[]{100, 100, 100, 100, 100, 100, 100, 100,
                         100, 100, 100, 100, 100, 100, 100, 100}, 8),
@@ -686,7 +686,7 @@ final class FramePostprocessorTest {
                 TransformSize.TX_8X8
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedChromaRow = new int[]{60, 60, 60, 60, 60, 60, 61, 63, 65, 67, 68, 68, 68, 68, 68, 68};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
@@ -714,16 +714,16 @@ final class FramePostprocessorTest {
                 chromaVSamples[y * 8 + x] = 90;
             }
         }
-        DecodedPlanes decodedPlanes = new DecodedPlanes(
+        DecodedSurface decodedPlanes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.YUV420,
                 16,
                 5,
                 16,
                 5,
-                new DecodedPlane(16, 5, 16, lumaSamples),
-                new DecodedPlane(8, 3, 8, chromaUSamples),
-                new DecodedPlane(8, 3, 8, chromaVSamples)
+                new PaddedPlane(16, 5, 16, lumaSamples),
+                new PaddedPlane(8, 3, 8, chromaUSamples),
+                new PaddedPlane(8, 3, 8, chromaVSamples)
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
                 Av1ChromaFormat.YUV420,
@@ -758,7 +758,7 @@ final class FramePostprocessorTest {
                 TransformSize.TX_4X4
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedPaddingRow = new int[]{60, 60, 62, 63, 65, 66, 68, 68};
         short[] filteredChroma = postprocessed.chromaUPlane().samples();
@@ -772,7 +772,7 @@ final class FramePostprocessorTest {
     /// Verifies that active loop filtering fails explicitly when decoded block edges are unavailable.
     @Test
     void postprocessRejectsActiveLoopFilter() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32},
@@ -810,7 +810,7 @@ final class FramePostprocessorTest {
     /// Verifies that active Wiener loop restoration uses decoded restoration-unit coefficients.
     @Test
     void postprocessAppliesActiveWienerRestorationFromDecodedUnit() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -849,7 +849,7 @@ final class FramePostprocessorTest {
                 })
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 96);
@@ -867,8 +867,8 @@ final class FramePostprocessorTest {
                 35, 39, 43, 47, 51, 777, 777, 777,
                 40, 44, 48, 52, 56, 777, 777, 777
         };
-        DecodedPlane lumaPlane = new DecodedPlane(5, 5, 8, samples);
-        DecodedPlanes decodedPlanes = new DecodedPlanes(
+        PaddedPlane lumaPlane = new PaddedPlane(5, 5, 8, samples);
+        DecodedSurface decodedPlanes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 5,
@@ -913,7 +913,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.wiener(wienerCoefficients)
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertEquals(8, postprocessed.lumaPlane().stride());
@@ -929,7 +929,7 @@ final class FramePostprocessorTest {
     /// Verifies that active self-guided loop restoration uses decoded restoration-unit coefficients.
     @Test
     void postprocessAppliesActiveSelfGuidedRestorationFromDecodedUnit() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -965,7 +965,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.selfGuided(0, new int[]{31, 31})
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 96);
@@ -983,8 +983,8 @@ final class FramePostprocessorTest {
                 156, 164, 172, 180, 188, 777, 777, 777,
                 168, 176, 184, 192, 200, 777, 777, 777
         };
-        DecodedPlane lumaPlane = new DecodedPlane(5, 5, 8, samples);
-        DecodedPlanes decodedPlanes = new DecodedPlanes(
+        PaddedPlane lumaPlane = new PaddedPlane(5, 5, 8, samples);
+        DecodedSurface decodedPlanes = new DecodedSurface(
                 10,
                 Av1ChromaFormat.MONOCHROME,
                 5,
@@ -1026,7 +1026,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.selfGuided(0, projectionCoefficients)
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertEquals(8, postprocessed.lumaPlane().stride());
@@ -1050,7 +1050,7 @@ final class FramePostprocessorTest {
                 sourceSamples[y][x] = 24 + (x * 17 + y * 29 + x * y * 3) % 208;
             }
         }
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 sourceSamples,
                 null,
@@ -1081,7 +1081,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.wiener(wienerCoefficients)
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertWienerRestoredPlaneEquals(
                 decodedPlanes.lumaPlane(),
@@ -1102,7 +1102,7 @@ final class FramePostprocessorTest {
                 sourceSamples[y][x] = 16 + (x * 13 + y * 31 + x * y * 5) % 224;
             }
         }
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 sourceSamples,
                 null,
@@ -1130,7 +1130,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.selfGuided(0, projectionCoefficients)
         );
 
-        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertSelfGuidedRestoredPlaneEquals(
                 decodedPlanes.lumaPlane(),
@@ -1144,7 +1144,7 @@ final class FramePostprocessorTest {
     /// Verifies that active loop restoration fails explicitly when decoded restoration units are unavailable.
     @Test
     void postprocessRejectsActiveRestoration() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32},
@@ -1200,8 +1200,8 @@ final class FramePostprocessorTest {
     /// @param set the self-guided restoration parameter set
     /// @param projectionCoefficients the decoded self-guided projection coefficients
     private static void assertSelfGuidedRestoredPlaneEquals(
-            DecodedPlane source,
-            DecodedPlane actual,
+            PaddedPlane source,
+            PaddedPlane actual,
             int bitDepth,
             int set,
             int @Unmodifiable [] projectionCoefficients
@@ -1232,7 +1232,7 @@ final class FramePostprocessorTest {
     /// @param localY the sample Y coordinate relative to the restoration unit
     /// @return one expected AV1 self-guided-restored sample
     private static int expectedSelfGuidedSample(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int set,
             int @Unmodifiable [] projectionCoefficients,
@@ -1278,7 +1278,7 @@ final class FramePostprocessorTest {
     /// @param sourceSample the original source sample
     /// @return one expected 3x3 self-guided residual
     private static int expectedSelfGuidedResidual3(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int strength,
             int x,
@@ -1301,7 +1301,7 @@ final class FramePostprocessorTest {
     /// @param sourceSample the original source sample
     /// @return one expected 5x5 self-guided residual
     private static int expectedSelfGuidedResidual5(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int strength,
             int x,
@@ -1330,7 +1330,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return the weighted projection sum
     private static int eightNeighborProjectionWeight(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int radius,
             int strength,
@@ -1359,7 +1359,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return the weighted projection sum
     private static int sixNeighborPairProjectionWeight(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int strength,
             boolean aComponent,
@@ -1386,7 +1386,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return the weighted projection sum
     private static int sixNeighborSingleProjectionWeight(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int strength,
             boolean aComponent,
@@ -1409,7 +1409,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return one expected self-guided projection component
     private static int expectedSelfGuidedProjectionComponent(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int radius,
             int strength,
@@ -1431,7 +1431,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return one expected self-guided projection
     private static ExpectedProjection expectedSelfGuidedProjection(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int radius,
             int strength,
@@ -1458,7 +1458,7 @@ final class FramePostprocessorTest {
     /// @param x the sample X coordinate
     /// @param y the sample Y coordinate
     /// @return one expected self-guided box sum
-    private static ExpectedBoxSum expectedSelfGuidedBoxSum(DecodedPlane source, int radius, int x, int y) {
+    private static ExpectedBoxSum expectedSelfGuidedBoxSum(PaddedPlane source, int radius, int x, int y) {
         int sum = 0;
         int sumSquares = 0;
         for (int dy = -radius; dy <= radius; dy++) {
@@ -1502,8 +1502,8 @@ final class FramePostprocessorTest {
     /// @param bitDepth the decoded bit depth
     /// @param coefficients the decoded Wiener coefficients
     private static void assertWienerRestoredPlaneEquals(
-            DecodedPlane source,
-            DecodedPlane actual,
+            PaddedPlane source,
+            PaddedPlane actual,
             int bitDepth,
             int @Unmodifiable [] @Unmodifiable [] coefficients
     ) {
@@ -1530,7 +1530,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return one expected AV1 Wiener-restored sample
     private static int expectedWienerSample(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int @Unmodifiable [] horizontalKernel,
             int @Unmodifiable [] verticalKernel,
@@ -1573,7 +1573,7 @@ final class FramePostprocessorTest {
     /// @param y the sample Y coordinate
     /// @return one expected horizontally filtered AV1 Wiener intermediate sample
     private static int expectedWienerHorizontalSample(
-            DecodedPlane source,
+            PaddedPlane source,
             int bitDepth,
             int @Unmodifiable [] horizontalKernel,
             int x,

@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 
 /// Mutable decoded-plane buffer used while reconstruction is still in progress.
@@ -196,9 +196,9 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     ///
     /// @return one immutable decoded-plane snapshot
     /// @throws IllegalStateException if this buffer retains only a plane subregion
-    DecodedPlane toDecodedPlane() {
+    PaddedPlane toDecodedPlane() {
         requireCompletePlaneStorage();
-        return new DecodedPlane(width, height, width, samples);
+        return new PaddedPlane(width, height, width, samples);
     }
 
     /// Converts the top-left crop of this mutable buffer into one immutable decoded-plane snapshot.
@@ -208,7 +208,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @return one immutable decoded-plane snapshot containing the requested top-left crop and
     ///         retaining internal right and bottom padding
     /// @throws IllegalStateException if this buffer retains only a plane subregion
-    DecodedPlane toDecodedPlane(int croppedWidth, int croppedHeight) {
+    PaddedPlane toDecodedPlane(int croppedWidth, int croppedHeight) {
         requireCompletePlaneStorage();
         if (croppedWidth <= 0 || croppedWidth > width) {
             throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
@@ -219,7 +219,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         if (croppedWidth == width && croppedHeight == height) {
             return toDecodedPlane();
         }
-        return new DecodedPlane(croppedWidth, croppedHeight, width, samples);
+        return new PaddedPlane(croppedWidth, croppedHeight, width, samples);
     }
 
     /// Transfers this buffer's sample storage into one immutable decoded plane.
@@ -230,7 +230,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param croppedHeight the visible plane height in samples
     /// @return one immutable plane that owns this buffer's sample storage
     /// @throws IllegalStateException if this buffer retains only a plane subregion
-    DecodedPlane takeDecodedPlane(int croppedWidth, int croppedHeight) {
+    PaddedPlane takeDecodedPlane(int croppedWidth, int croppedHeight) {
         requireCompletePlaneStorage();
         if (croppedWidth <= 0 || croppedWidth > width) {
             throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
@@ -238,7 +238,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         if (croppedHeight <= 0 || croppedHeight > height) {
             throw new IllegalArgumentException("croppedHeight out of range: " + croppedHeight);
         }
-        return DecodedPlane.fromOwnedSamples(croppedWidth, croppedHeight, width, samples);
+        return PaddedPlane.fromOwnedSamples(croppedWidth, croppedHeight, width, samples);
     }
 
     /// Transfers the retained storage region into one immutable coordinate-local decoded plane.
@@ -249,14 +249,14 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param croppedWidth the visible retained-region width in samples
     /// @param croppedHeight the visible retained-region height in samples
     /// @return one immutable plane that owns the retained sample storage
-    DecodedPlane takeStoredDecodedPlane(int croppedWidth, int croppedHeight) {
+    PaddedPlane takeStoredDecodedPlane(int croppedWidth, int croppedHeight) {
         if (croppedWidth <= 0 || croppedWidth > storageWidth) {
             throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
         }
         if (croppedHeight <= 0 || croppedHeight > storageHeight) {
             throw new IllegalArgumentException("croppedHeight out of range: " + croppedHeight);
         }
-        return DecodedPlane.fromOwnedSamples(croppedWidth, croppedHeight, storageWidth, samples);
+        return PaddedPlane.fromOwnedSamples(croppedWidth, croppedHeight, storageWidth, samples);
     }
 
     /// Creates an independent mutable copy of this plane buffer.

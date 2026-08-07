@@ -19,8 +19,8 @@ import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -48,7 +48,7 @@ public final class ArgbOutput {
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @return packed opaque non-premultiplied ARGB pixels in presentation order
-    public static int[] toOpaqueArgbPixels(DecodedPlanes decodedPlanes) {
+    public static int[] toOpaqueArgbPixels(DecodedSurface decodedPlanes) {
         return toOpaqueArgbPixels(decodedPlanes, DEFAULT_TRANSFORM);
     }
 
@@ -57,8 +57,8 @@ public final class ArgbOutput {
     /// @param decodedPlanes the decoded planes to convert
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return packed opaque non-premultiplied ARGB pixels in presentation order
-    public static int[] toOpaqueArgbPixels(DecodedPlanes decodedPlanes, YuvToRgbTransform transform) {
-        DecodedPlanes checkedDecodedPlanes = requireIntOutputDecodedPlanes(decodedPlanes);
+    public static int[] toOpaqueArgbPixels(DecodedSurface decodedPlanes, YuvToRgbTransform transform) {
+        DecodedSurface checkedDecodedPlanes = requireIntOutputDecodedPlanes(decodedPlanes);
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
 
         int outputWidth = checkedDecodedPlanes.codedWidth();
@@ -117,7 +117,7 @@ public final class ArgbOutput {
     /// @param decodedPlanes the decoded planes to convert
     /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
     /// @return one opaque decoded frame backed by ARGB_8888 storage
-    public static DecodedFrame toOpaqueArgb8Frame(DecodedPlanes decodedPlanes, OutputFrameMetadata metadata) {
+    public static DecodedFrame toOpaqueArgb8Frame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
         return toOpaqueArgb8Frame(decodedPlanes, metadata, DEFAULT_TRANSFORM);
     }
 
@@ -132,7 +132,7 @@ public final class ArgbOutput {
     /// @param presentationIndex the zero-based presentation index of the frame
     /// @return one opaque decoded frame backed by ARGB_8888 storage
     public static DecodedFrame toOpaqueArgb8Frame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             FrameType frameType,
             boolean visible,
             long presentationIndex
@@ -149,7 +149,7 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque decoded frame backed by ARGB_8888 storage
     public static DecodedFrame toOpaqueArgb8Frame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -169,11 +169,11 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque decoded frame backed by ARGB_8888 storage
     public static DecodedFrame toOpaqueArgb8Frame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             OutputFrameMetadata metadata,
             YuvToRgbTransform transform
     ) {
-        DecodedPlanes checkedDecodedPlanes = requireIntOutputDecodedPlanes(decodedPlanes);
+        DecodedSurface checkedDecodedPlanes = requireIntOutputDecodedPlanes(decodedPlanes);
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         int[] pixels = toOpaqueArgbPixels(checkedDecodedPlanes, transform);
         return new DecodedFrame(
@@ -196,7 +196,7 @@ public final class ArgbOutput {
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @return packed opaque non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
-    public static long[] toOpaqueArgbLongPixels(DecodedPlanes decodedPlanes) {
+    public static long[] toOpaqueArgbLongPixels(DecodedSurface decodedPlanes) {
         return toOpaqueArgbLongPixels(decodedPlanes, DEFAULT_TRANSFORM);
     }
 
@@ -205,8 +205,8 @@ public final class ArgbOutput {
     /// @param decodedPlanes the decoded planes to convert
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return packed opaque non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
-    public static long[] toOpaqueArgbLongPixels(DecodedPlanes decodedPlanes, YuvToRgbTransform transform) {
-        DecodedPlanes checkedDecodedPlanes = requireLongOutputDecodedPlanes(decodedPlanes);
+    public static long[] toOpaqueArgbLongPixels(DecodedSurface decodedPlanes, YuvToRgbTransform transform) {
+        DecodedSurface checkedDecodedPlanes = requireLongOutputDecodedPlanes(decodedPlanes);
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
 
         int outputWidth = checkedDecodedPlanes.codedWidth();
@@ -265,7 +265,7 @@ public final class ArgbOutput {
     /// @param decodedPlanes the decoded planes to convert
     /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
     /// @return one opaque high-bit-depth decoded frame
-    public static DecodedFrame toOpaqueArgbHighBitDepthFrame(DecodedPlanes decodedPlanes, OutputFrameMetadata metadata) {
+    public static DecodedFrame toOpaqueArgbHighBitDepthFrame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
         return toOpaqueArgbHighBitDepthFrame(decodedPlanes, metadata, DEFAULT_TRANSFORM);
     }
 
@@ -277,7 +277,7 @@ public final class ArgbOutput {
     /// @param presentationIndex the zero-based presentation index of the frame
     /// @return one opaque high-bit-depth decoded frame
     public static DecodedFrame toOpaqueArgbHighBitDepthFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             FrameType frameType,
             boolean visible,
             long presentationIndex
@@ -294,7 +294,7 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque high-bit-depth decoded frame
     public static DecodedFrame toOpaqueArgbHighBitDepthFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -314,11 +314,11 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque high-bit-depth decoded frame
     public static DecodedFrame toOpaqueArgbHighBitDepthFrame(
-            DecodedPlanes decodedPlanes,
+            DecodedSurface decodedPlanes,
             OutputFrameMetadata metadata,
             YuvToRgbTransform transform
     ) {
-        DecodedPlanes checkedDecodedPlanes = requireLongOutputDecodedPlanes(decodedPlanes);
+        DecodedSurface checkedDecodedPlanes = requireLongOutputDecodedPlanes(decodedPlanes);
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         long[] pixels = toOpaqueArgbLongPixels(checkedDecodedPlanes, transform);
         return new DecodedFrame(
@@ -339,8 +339,8 @@ public final class ArgbOutput {
     ///
     /// @param decodedPlanes the decoded planes to validate
     /// @return the validated decoded planes
-    private static DecodedPlanes requireIntOutputDecodedPlanes(DecodedPlanes decodedPlanes) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+    private static DecodedSurface requireIntOutputDecodedPlanes(DecodedSurface decodedPlanes) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         if (checkedDecodedPlanes.bitDepth() != 8
                 && checkedDecodedPlanes.bitDepth() != 10
                 && checkedDecodedPlanes.bitDepth() != 12
@@ -357,8 +357,8 @@ public final class ArgbOutput {
     ///
     /// @param decodedPlanes the decoded planes to validate
     /// @return the validated decoded planes
-    private static DecodedPlanes requireLongOutputDecodedPlanes(DecodedPlanes decodedPlanes) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+    private static DecodedSurface requireLongOutputDecodedPlanes(DecodedSurface decodedPlanes) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         if (checkedDecodedPlanes.bitDepth() != 8
                 && checkedDecodedPlanes.bitDepth() != 10
                 && checkedDecodedPlanes.bitDepth() != 12
@@ -389,7 +389,7 @@ public final class ArgbOutput {
     /// @param plane the candidate chroma plane
     /// @param name the argument name used in the failure message
     /// @return the required chroma plane
-    private static DecodedPlane requireChromaPlane(@Nullable DecodedPlane plane, String name) {
+    private static PaddedPlane requireChromaPlane(@Nullable PaddedPlane plane, String name) {
         if (plane == null) {
             throw new IllegalArgumentException(name + " is required for chroma ARGB output");
         }
@@ -406,7 +406,7 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for grayscale expansion
     /// @return the filled destination pixel buffer
     private static int[] convertOpaqueI400(
-            DecodedPlane lumaPlane,
+            PaddedPlane lumaPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -435,7 +435,7 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for grayscale expansion
     /// @return the filled destination pixel buffer
     private static long[] convertOpaqueLongI400(
-            DecodedPlane lumaPlane,
+            PaddedPlane lumaPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -466,9 +466,9 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return the filled destination pixel buffer
     private static int[] convertOpaqueI420(
-            DecodedPlane lumaPlane,
-            DecodedPlane chromaUPlane,
-            DecodedPlane chromaVPlane,
+            PaddedPlane lumaPlane,
+            PaddedPlane chromaUPlane,
+            PaddedPlane chromaVPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -536,9 +536,9 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return the filled destination pixel buffer
     private static long[] convertOpaqueLongI420(
-            DecodedPlane lumaPlane,
-            DecodedPlane chromaUPlane,
-            DecodedPlane chromaVPlane,
+            PaddedPlane lumaPlane,
+            PaddedPlane chromaUPlane,
+            PaddedPlane chromaVPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -600,9 +600,9 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return the filled destination pixel buffer
     private static int[] convertOpaqueI422(
-            DecodedPlane lumaPlane,
-            DecodedPlane chromaUPlane,
-            DecodedPlane chromaVPlane,
+            PaddedPlane lumaPlane,
+            PaddedPlane chromaUPlane,
+            PaddedPlane chromaVPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -670,9 +670,9 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return the filled destination pixel buffer
     private static long[] convertOpaqueLongI422(
-            DecodedPlane lumaPlane,
-            DecodedPlane chromaUPlane,
-            DecodedPlane chromaVPlane,
+            PaddedPlane lumaPlane,
+            PaddedPlane chromaUPlane,
+            PaddedPlane chromaVPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -734,9 +734,9 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return the filled destination pixel buffer
     private static int[] convertOpaqueI444(
-            DecodedPlane lumaPlane,
-            DecodedPlane chromaUPlane,
-            DecodedPlane chromaVPlane,
+            PaddedPlane lumaPlane,
+            PaddedPlane chromaUPlane,
+            PaddedPlane chromaVPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,
@@ -780,9 +780,9 @@ public final class ArgbOutput {
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return the filled destination pixel buffer
     private static long[] convertOpaqueLongI444(
-            DecodedPlane lumaPlane,
-            DecodedPlane chromaUPlane,
-            DecodedPlane chromaVPlane,
+            PaddedPlane lumaPlane,
+            PaddedPlane chromaUPlane,
+            PaddedPlane chromaVPlane,
             int outputWidth,
             int outputHeight,
             int bitDepth,

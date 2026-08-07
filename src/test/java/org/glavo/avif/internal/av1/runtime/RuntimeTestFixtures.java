@@ -29,8 +29,8 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -215,15 +215,15 @@ final class RuntimeTestFixtures {
     /// @param bitDepth the decoded bit depth
     /// @param sample the stored unsigned luma sample value
     /// @return one minimal single-pixel monochrome decoded-plane snapshot
-    static DecodedPlanes createDecodedPlanes(int bitDepth, int sample) {
-        return new DecodedPlanes(
+    static DecodedSurface createDecodedPlanes(int bitDepth, int sample) {
+        return new DecodedSurface(
                 bitDepth,
                 Av1ChromaFormat.MONOCHROME,
                 1,
                 1,
                 1,
                 1,
-                new DecodedPlane(1, 1, 1, new short[]{(short) sample}),
+                new PaddedPlane(1, 1, 1, new short[]{(short) sample}),
                 null,
                 null
         );
@@ -300,7 +300,7 @@ final class RuntimeTestFixtures {
                 ),
                 new Av1ColorConfig(
                         8,
-                        false,
+                        true,
                         false,
                         2,
                         2,

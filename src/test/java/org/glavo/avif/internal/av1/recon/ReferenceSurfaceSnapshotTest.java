@@ -16,8 +16,8 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -46,14 +46,14 @@ final class ReferenceSurfaceSnapshotTest {
     void referenceSurfaceSnapshotRetainsFrameState() {
         FrameHeader frameHeader = createFrameHeader();
         FrameSyntaxDecodeResult syntaxResult = createFrameSyntaxDecodeResult(frameHeader);
-        DecodedPlanes decodedPlanes = new DecodedPlanes(
+        DecodedSurface decodedPlanes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 8,
                 8,
                 8,
                 8,
-                new DecodedPlane(8, 8, 8, new short[64]),
+                new PaddedPlane(8, 8, 8, new short[64]),
                 null,
                 null
         );
@@ -71,14 +71,14 @@ final class ReferenceSurfaceSnapshotTest {
     void referenceSurfaceSnapshotRejectsMismatchedFrameHeaders() {
         FrameHeader assemblyHeader = createFrameHeader();
         FrameSyntaxDecodeResult syntaxResult = createFrameSyntaxDecodeResult(assemblyHeader);
-        DecodedPlanes decodedPlanes = new DecodedPlanes(
+        DecodedSurface decodedPlanes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 8,
                 8,
                 8,
                 8,
-                new DecodedPlane(8, 8, 8, new short[64]),
+                new PaddedPlane(8, 8, 8, new short[64]),
                 null,
                 null
         );
@@ -149,7 +149,7 @@ final class ReferenceSurfaceSnapshotTest {
                 ),
                 new Av1ColorConfig(
                         8,
-                        false,
+                        true,
                         false,
                         2,
                         2,

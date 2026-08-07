@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.testutil;
 
-import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -129,7 +129,7 @@ public final class SuperResolutionOracle {
     /// @param targetWidth the post-upscale plane width
     /// @param bitDepth the decoded sample bit depth
     /// @return the expected horizontally upscaled raster
-    public static int[][] upscalePlane(DecodedPlane sourcePlane, int targetWidth, int bitDepth) {
+    public static int[][] upscalePlane(PaddedPlane sourcePlane, int targetWidth, int bitDepth) {
         int[][] expected = new int[sourcePlane.height()][targetWidth];
         for (int y = 0; y < sourcePlane.height(); y++) {
             int[] sourceRow = new int[sourcePlane.width()];

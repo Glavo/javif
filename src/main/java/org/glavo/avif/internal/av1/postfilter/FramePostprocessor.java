@@ -17,7 +17,7 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -54,7 +54,7 @@ public final class FramePostprocessor {
     /// @param decodedPlanes the reconstructed planes to post-process
     /// @param frameHeader the normalized frame header that owns the planes
     /// @return the post-filter, pre-grain decoded planes
-    public DecodedPlanes postprocess(DecodedPlanes decodedPlanes, FrameHeader frameHeader) {
+    public DecodedSurface postprocess(DecodedSurface decodedPlanes, FrameHeader frameHeader) {
         return postprocess(decodedPlanes, frameHeader, null);
     }
 
@@ -64,17 +64,17 @@ public final class FramePostprocessor {
     /// @param frameHeader the normalized frame header that owns the planes
     /// @param syntaxDecodeResult the decoded frame syntax that carries block-level postfilter state, or `null`
     /// @return the post-filter, pre-grain decoded planes
-    public DecodedPlanes postprocess(
-            DecodedPlanes decodedPlanes,
+    public DecodedSurface postprocess(
+            DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
-        DecodedPlanes afterLoopFilter = loopFilterApplier.apply(checkedDecodedPlanes, checkedFrameHeader, syntaxDecodeResult);
-        DecodedPlanes afterCdef = cdefApplier.apply(afterLoopFilter, checkedFrameHeader.cdef(), syntaxDecodeResult);
-        DecodedPlanes afterSuperResolution = superResolutionUpscaler.apply(afterCdef, checkedFrameHeader);
-        DecodedPlanes restorationBoundary = afterSuperResolution;
+        DecodedSurface afterLoopFilter = loopFilterApplier.apply(checkedDecodedPlanes, checkedFrameHeader, syntaxDecodeResult);
+        DecodedSurface afterCdef = cdefApplier.apply(afterLoopFilter, checkedFrameHeader.cdef(), syntaxDecodeResult);
+        DecodedSurface afterSuperResolution = superResolutionUpscaler.apply(afterCdef, checkedFrameHeader);
+        DecodedSurface restorationBoundary = afterSuperResolution;
         if (RestorationApplier.hasActiveRestoration(
                 checkedFrameHeader.restoration(),
                 checkedDecodedPlanes.hasChroma()

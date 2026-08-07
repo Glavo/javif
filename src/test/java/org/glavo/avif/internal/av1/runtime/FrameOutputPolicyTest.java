@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.runtime;
 
 import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.decode.DecodeFrameType;
+import org.glavo.avif.decode.Av1FrameSelection;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -33,43 +33,43 @@ final class FrameOutputPolicyTest {
     void shouldOutputFrameSuppressesInvisibleFramesUnlessConfiguredOtherwise() {
         FrameHeader invisibleKeyFrame = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, false, 0x01);
 
-        assertFalse(FrameOutputPolicy.shouldOutputFrame(invisibleKeyFrame, config(false, DecodeFrameType.ALL)));
-        assertTrue(FrameOutputPolicy.shouldOutputFrame(invisibleKeyFrame, config(true, DecodeFrameType.KEY)));
+        assertFalse(FrameOutputPolicy.shouldOutputFrame(invisibleKeyFrame, config(false, Av1FrameSelection.ALL)));
+        assertTrue(FrameOutputPolicy.shouldOutputFrame(invisibleKeyFrame, config(true, Av1FrameSelection.KEY)));
     }
 
     /// Verifies that current-frame output obeys the configured decode-frame-type filter.
     @Test
-    void shouldOutputFrameMatchesDecodeFrameTypeFilter() {
+    void shouldOutputFrameMatchesFrameSelectionFilter() {
         FrameHeader keyFrame = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x00);
         FrameHeader intraFrame = RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, true, 0x00);
         FrameHeader interFrame = RuntimeTestFixtures.createFrameHeader(FrameType.INTER, true, 0x00);
         FrameHeader switchReferenceFrame = RuntimeTestFixtures.createFrameHeader(FrameType.SWITCH, true, 0x02);
 
-        assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, DecodeFrameType.ALL)));
+        assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, Av1FrameSelection.ALL)));
 
-        assertTrue(FrameOutputPolicy.shouldOutputFrame(switchReferenceFrame, config(false, DecodeFrameType.REFERENCE)));
-        assertFalse(FrameOutputPolicy.shouldOutputFrame(interFrame, config(false, DecodeFrameType.REFERENCE)));
+        assertTrue(FrameOutputPolicy.shouldOutputFrame(switchReferenceFrame, config(false, Av1FrameSelection.REFERENCE)));
+        assertFalse(FrameOutputPolicy.shouldOutputFrame(interFrame, config(false, Av1FrameSelection.REFERENCE)));
 
-        assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, DecodeFrameType.INTRA)));
-        assertTrue(FrameOutputPolicy.shouldOutputFrame(intraFrame, config(false, DecodeFrameType.INTRA)));
-        assertFalse(FrameOutputPolicy.shouldOutputFrame(interFrame, config(false, DecodeFrameType.INTRA)));
+        assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, Av1FrameSelection.INTRA)));
+        assertTrue(FrameOutputPolicy.shouldOutputFrame(intraFrame, config(false, Av1FrameSelection.INTRA)));
+        assertFalse(FrameOutputPolicy.shouldOutputFrame(interFrame, config(false, Av1FrameSelection.INTRA)));
 
-        assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, DecodeFrameType.KEY)));
-        assertFalse(FrameOutputPolicy.shouldOutputFrame(intraFrame, config(false, DecodeFrameType.KEY)));
+        assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, Av1FrameSelection.KEY)));
+        assertFalse(FrameOutputPolicy.shouldOutputFrame(intraFrame, config(false, Av1FrameSelection.KEY)));
     }
 
     /// Verifies that existing-frame output ignores `showFrame` visibility but still applies frame-type filters.
     @Test
-    void shouldOutputExistingFrameIgnoresVisibilityButMatchesDecodeFrameTypeFilter() {
+    void shouldOutputExistingFrameIgnoresVisibilityButMatchesFrameSelectionFilter() {
         FrameHeader hiddenKeyFrame = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, false, 0x00);
         FrameHeader hiddenInterFrame = RuntimeTestFixtures.createFrameHeader(FrameType.INTER, false, 0x00);
         FrameHeader hiddenReferenceSwitchFrame = RuntimeTestFixtures.createFrameHeader(FrameType.SWITCH, false, 0x04);
 
-        assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenKeyFrame, config(false, DecodeFrameType.ALL)));
-        assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenReferenceSwitchFrame, config(false, DecodeFrameType.REFERENCE)));
-        assertFalse(FrameOutputPolicy.shouldOutputExistingFrame(hiddenInterFrame, config(false, DecodeFrameType.REFERENCE)));
-        assertFalse(FrameOutputPolicy.shouldOutputExistingFrame(hiddenInterFrame, config(false, DecodeFrameType.INTRA)));
-        assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenKeyFrame, config(false, DecodeFrameType.KEY)));
+        assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenKeyFrame, config(false, Av1FrameSelection.ALL)));
+        assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenReferenceSwitchFrame, config(false, Av1FrameSelection.REFERENCE)));
+        assertFalse(FrameOutputPolicy.shouldOutputExistingFrame(hiddenInterFrame, config(false, Av1FrameSelection.REFERENCE)));
+        assertFalse(FrameOutputPolicy.shouldOutputExistingFrame(hiddenInterFrame, config(false, Av1FrameSelection.INTRA)));
+        assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenKeyFrame, config(false, Av1FrameSelection.KEY)));
     }
 
     /// Verifies that film-grain synthesis is required only when both the configuration and the
@@ -79,22 +79,22 @@ final class FrameOutputPolicyTest {
         FrameHeader grainFrame = RuntimeTestFixtures.createFrameHeaderWithFilmGrain(FrameType.KEY, true, 0x01, true);
         FrameHeader plainFrame = RuntimeTestFixtures.createFrameHeaderWithFilmGrain(FrameType.KEY, true, 0x01, false);
 
-        assertTrue(FrameOutputPolicy.requiresFilmGrainSynthesis(grainFrame, config(false, DecodeFrameType.ALL)));
-        assertFalse(FrameOutputPolicy.requiresFilmGrainSynthesis(grainFrame, Av1DecoderConfig.builder()
-                .applyFilmGrain(false)
-                .build()));
-        assertFalse(FrameOutputPolicy.requiresFilmGrainSynthesis(plainFrame, config(false, DecodeFrameType.ALL)));
+        assertTrue(FrameOutputPolicy.requiresFilmGrainSynthesis(grainFrame, config(false, Av1FrameSelection.ALL)));
+        assertFalse(FrameOutputPolicy.requiresFilmGrainSynthesis(
+                grainFrame,
+                Av1DecoderConfig.DEFAULT.withApplyFilmGrain(false)
+        ));
+        assertFalse(FrameOutputPolicy.requiresFilmGrainSynthesis(plainFrame, config(false, Av1FrameSelection.ALL)));
     }
 
     /// Creates one immutable decoder configuration for runtime output-policy checks.
     ///
     /// @param outputInvisibleFrames whether invisible current frames should be exposed
-    /// @param decodeFrameType the configured frame-type filter
+    /// @param frameSelection the configured frame selection
     /// @return one immutable decoder configuration for runtime output-policy checks
-    private static Av1DecoderConfig config(boolean outputInvisibleFrames, DecodeFrameType decodeFrameType) {
-        return Av1DecoderConfig.builder()
-                .outputInvisibleFrames(outputInvisibleFrames)
-                .decodeFrameType(decodeFrameType)
-                .build();
+    private static Av1DecoderConfig config(boolean outputInvisibleFrames, Av1FrameSelection frameSelection) {
+        return Av1DecoderConfig.DEFAULT
+                .withOutputInvisibleFrames(outputInvisibleFrames)
+                .withFrameSelection(frameSelection);
     }
 }

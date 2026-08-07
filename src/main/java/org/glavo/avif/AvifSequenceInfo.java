@@ -21,6 +21,11 @@ import org.jetbrains.annotations.Unmodifiable;
 /// Immutable metadata for an AVIF animated image sequence.
 @NotNullByDefault
 public final class AvifSequenceInfo {
+    /// Repetition count used when an animated sequence has no edit list.
+    public static final int REPETITION_COUNT_UNKNOWN = -1;
+    /// Repetition count used when an animated sequence repeats indefinitely.
+    public static final int REPETITION_COUNT_INFINITE = -2;
+
     /// The number of frames advertised by the container.
     private final int frameCount;
     /// The media timescale for frame durations.
@@ -37,8 +42,8 @@ public final class AvifSequenceInfo {
     /// @param frameCount the number of frames advertised by the container
     /// @param mediaTimescale the media timescale for frame durations, or zero when absent
     /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param repetitionCount the repetition count, `AvifImageInfo.REPETITION_COUNT_UNKNOWN`,
-    /// or `AvifImageInfo.REPETITION_COUNT_INFINITE`
+    /// @param repetitionCount the repetition count, [#REPETITION_COUNT_UNKNOWN],
+    /// or [#REPETITION_COUNT_INFINITE]
     /// @param frameDurations per-frame durations in media timescale units
     public AvifSequenceInfo(
             int frameCount,
@@ -57,8 +62,8 @@ public final class AvifSequenceInfo {
             throw new IllegalArgumentException("mediaDuration < 0: " + mediaDuration);
         }
         if (repetitionCount < 0
-                && repetitionCount != AvifImageInfo.REPETITION_COUNT_UNKNOWN
-                && repetitionCount != AvifImageInfo.REPETITION_COUNT_INFINITE) {
+                && repetitionCount != REPETITION_COUNT_UNKNOWN
+                && repetitionCount != REPETITION_COUNT_INFINITE) {
             throw new IllegalArgumentException("Invalid repetition count: " + repetitionCount);
         }
 
@@ -110,12 +115,11 @@ public final class AvifSequenceInfo {
     /// Returns the animated-sequence repetition count.
     ///
     /// A non-negative value is the number of repetitions after the first playback. Zero means the
-    /// sequence should play once. `AvifImageInfo.REPETITION_COUNT_UNKNOWN` means the container did
-    /// not expose an edit list, and `AvifImageInfo.REPETITION_COUNT_INFINITE` means the sequence
+    /// sequence should play once. [#REPETITION_COUNT_UNKNOWN] means the container did not expose
+    /// an edit list, and [#REPETITION_COUNT_INFINITE] means the sequence
     /// repeats indefinitely.
     ///
-    /// @return the repetition count, `AvifImageInfo.REPETITION_COUNT_UNKNOWN`, or
-    /// `AvifImageInfo.REPETITION_COUNT_INFINITE`
+    /// @return the repetition count, [#REPETITION_COUNT_UNKNOWN], or [#REPETITION_COUNT_INFINITE]
     public int repetitionCount() {
         return repetitionCount;
     }

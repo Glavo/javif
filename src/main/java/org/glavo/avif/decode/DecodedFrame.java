@@ -16,6 +16,7 @@
 package org.glavo.avif.decode;
 
 import org.glavo.avif.AvifBitDepth;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.PixelBuffers;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -44,6 +45,8 @@ public final class DecodedFrame {
     private final boolean visible;
     /// The zero-based presentation index of the frame.
     private final long presentationIndex;
+    /// The packed ARGB pixel format used by this frame's native storage.
+    private final AvifPixelFormat pixelFormat;
     /// The AV1 temporal-layer identifier carried by the frame OBU.
     private final int temporalId;
     /// The AV1 spatial-layer identifier carried by the frame OBU.
@@ -198,6 +201,20 @@ public final class DecodedFrame {
         if (intPixels == null && longPixels == null) {
             throw new IllegalArgumentException("At least one pixel representation is required");
         }
+        int pixelCount = checkedPixelCount(width, height);
+        if (intPixels != null && intPixels.remaining() != pixelCount) {
+            throw new IllegalArgumentException(
+                    "Int pixel count does not match dimensions: " + intPixels.remaining()
+            );
+        }
+        if (longPixels != null && longPixels.remaining() != pixelCount) {
+            throw new IllegalArgumentException(
+                    "Long pixel count does not match dimensions: " + longPixels.remaining()
+            );
+        }
+        if (presentationIndex < 0) {
+            throw new IllegalArgumentException("presentationIndex < 0: " + presentationIndex);
+        }
         if (temporalId < 0 || temporalId > 7) {
             throw new IllegalArgumentException("temporalId out of range: " + temporalId);
         }
@@ -211,6 +228,7 @@ public final class DecodedFrame {
         this.frameType = Objects.requireNonNull(frameType, "frameType");
         this.visible = visible;
         this.presentationIndex = presentationIndex;
+        this.pixelFormat = intPixels != null ? AvifPixelFormat.ARGB_8888 : AvifPixelFormat.ARGB_16161616;
         this.temporalId = temporalId;
         this.spatialId = spatialId;
         this.intPixels = intPixels;
@@ -264,6 +282,13 @@ public final class DecodedFrame {
     /// @return the presentation index
     public long presentationIndex() {
         return presentationIndex;
+    }
+
+    /// Returns the packed ARGB pixel format used by this frame's native storage.
+    ///
+    /// @return the packed ARGB pixel format
+    public AvifPixelFormat pixelFormat() {
+        return pixelFormat;
     }
 
     /// Returns the AV1 temporal-layer identifier carried by the frame OBU.
@@ -352,5 +377,24 @@ public final class DecodedFrame {
             throw new IllegalStateException("Long pixels are unavailable");
         }
         return pixels;
+    }
+
+    /// Returns the exact pixel count for validated positive dimensions.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @return the pixel count
+    private static int checkedPixelCount(int width, int height) {
+        if (width <= 0) {
+            throw new IllegalArgumentException("width <= 0: " + width);
+        }
+        if (height <= 0) {
+            throw new IllegalArgumentException("height <= 0: " + height);
+        }
+        long pixelCount = (long) width * height;
+        if (pixelCount > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Frame dimensions are too large: " + width + "x" + height);
+        }
+        return (int) pixelCount;
     }
 }

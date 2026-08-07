@@ -1,7 +1,7 @@
 package org.glavo.avif.testutil;
 
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -138,7 +138,7 @@ public final class InterPredictionOracle {
     /// @param filterMode the interpolation filter used for both directions
     /// @return one sampled reference-plane block in row-major order
     public static int[][] sampleReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -179,7 +179,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one sampled reference-plane block in row-major order
     public static int[][] sampleReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -223,7 +223,7 @@ public final class InterPredictionOracle {
     /// @param verticalFilterMode the effective vertical interpolation filter
     /// @return one sampled reference-plane block in row-major order
     public static int[][] sampleReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -268,7 +268,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one sampled reference-plane block in row-major order
     public static int[][] sampleReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -315,7 +315,7 @@ public final class InterPredictionOracle {
     /// @param filterMode the interpolation filter used for both directions
     /// @return one higher-precision compound predictor in row-major order
     public static int[][] sampleCompoundReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -357,7 +357,7 @@ public final class InterPredictionOracle {
     /// @param verticalFilterMode the effective vertical interpolation filter
     /// @return one higher-precision compound predictor in row-major order
     public static int[][] sampleCompoundReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -402,7 +402,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one higher-precision compound predictor in row-major order
     public static int[][] sampleCompoundReferencePlaneBlock(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int width,
             int height,
             int sourceNumeratorX,
@@ -502,7 +502,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one signed higher-precision compound predictor
     private static int sampleCompoundInterPlaneValue(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -595,7 +595,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one sampled inter value
     private static int sampleInterPlaneValue(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -681,7 +681,7 @@ public final class InterPredictionOracle {
     /// @param filter the selected horizontal filter taps
     /// @return one horizontally filtered signed sample
     private static long horizontalInterpolate(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceX0,
             int sourceY,
             int[] filter
@@ -702,7 +702,7 @@ public final class InterPredictionOracle {
     /// @param filter the selected vertical filter taps
     /// @return one vertically filtered signed sample
     private static long verticalInterpolate(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceX,
             int sourceY0,
             int[] filter
@@ -800,7 +800,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one bilinearly interpolated unsigned sample
     private static int bilinearInterpolateAt(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
@@ -855,7 +855,7 @@ public final class InterPredictionOracle {
     /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one signed higher-precision bilinear predictor
     private static int bilinearCompoundInterpolateAt(
-            DecodedPlane referencePlane,
+            PaddedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,

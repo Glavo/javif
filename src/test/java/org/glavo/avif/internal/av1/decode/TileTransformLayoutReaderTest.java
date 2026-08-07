@@ -417,8 +417,9 @@ final class TileTransformLayoutReaderTest {
             int codedWidth,
             int codedHeight
     ) {
-        boolean chromaSubsamplingX = chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422;
-        boolean chromaSubsamplingY = chromaFormat == Av1ChromaFormat.YUV420;
+        boolean chromaSubsamplingX = chromaFormat != Av1ChromaFormat.YUV444;
+        boolean chromaSubsamplingY = chromaFormat == Av1ChromaFormat.MONOCHROME
+                || chromaFormat == Av1ChromaFormat.YUV420;
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 codedWidth,

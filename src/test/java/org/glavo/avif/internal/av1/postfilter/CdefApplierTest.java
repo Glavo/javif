@@ -22,8 +22,8 @@ import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
@@ -66,11 +66,11 @@ final class CdefApplierTest {
             FrameSyntaxDecodeResult syntaxDecodeResult =
                     Objects.requireNonNull(lastFrameSyntaxDecodeResult(reader), "lastFrameSyntaxDecodeResult");
             FrameHeader frameHeader = syntaxDecodeResult.assembly().frameHeader();
-            DecodedPlanes reconstructed = new FrameReconstructor().reconstruct(syntaxDecodeResult);
-            DecodedPlanes afterLoopFilter = new LoopFilterApplier().apply(reconstructed, frameHeader, syntaxDecodeResult);
-            DecodedPlanes filtered = new CdefApplier().apply(afterLoopFilter, frameHeader.cdef(), syntaxDecodeResult);
+            DecodedSurface reconstructed = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+            DecodedSurface afterLoopFilter = new LoopFilterApplier().apply(reconstructed, frameHeader, syntaxDecodeResult);
+            DecodedSurface filtered = new CdefApplier().apply(afterLoopFilter, frameHeader.cdef(), syntaxDecodeResult);
 
-            DecodedPlane lumaPlane = afterLoopFilter.lumaPlane();
+            PaddedPlane lumaPlane = afterLoopFilter.lumaPlane();
             int startX = 560;
             int startY = 120;
             int detectedDirection = detectDirection(lumaPlane, startX, startY);
@@ -113,25 +113,25 @@ final class CdefApplierTest {
         for (int y = 0; y < 8; y++) {
             paddedSamples[y * 8 + 7] = 104;
         }
-        DecodedPlanes baselinePlanes = new DecodedPlanes(
+        DecodedSurface baselinePlanes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 7,
                 8,
                 7,
                 8,
-                new DecodedPlane(7, 8, 8, baselineSamples),
+                new PaddedPlane(7, 8, 8, baselineSamples),
                 null,
                 null
         );
-        DecodedPlanes paddedPlanes = new DecodedPlanes(
+        DecodedSurface paddedPlanes = new DecodedSurface(
                 8,
                 Av1ChromaFormat.MONOCHROME,
                 7,
                 8,
                 7,
                 8,
-                new DecodedPlane(7, 8, 8, paddedSamples),
+                new PaddedPlane(7, 8, 8, paddedSamples),
                 null,
                 null
         );
@@ -165,8 +165,8 @@ final class CdefApplierTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedPlanes baselineFiltered = new CdefApplier().apply(baselinePlanes, cdef, syntaxDecodeResult);
-        DecodedPlanes paddedFiltered = new CdefApplier().apply(paddedPlanes, cdef, syntaxDecodeResult);
+        DecodedSurface baselineFiltered = new CdefApplier().apply(baselinePlanes, cdef, syntaxDecodeResult);
+        DecodedSurface paddedFiltered = new CdefApplier().apply(paddedPlanes, cdef, syntaxDecodeResult);
 
         assertEquals(100, baselineFiltered.lumaPlane().sample(6, 4));
         assertTrue(paddedFiltered.lumaPlane().sample(6, 4) > baselineFiltered.lumaPlane().sample(6, 4));
@@ -179,11 +179,11 @@ final class CdefApplierTest {
     /// @param startX the CDEF-unit start X coordinate
     /// @param startY the CDEF-unit start Y coordinate
     /// @return the detected CDEF direction
-    private static int detectDirection(DecodedPlane plane, int startX, int startY) {
+    private static int detectDirection(PaddedPlane plane, int startX, int startY) {
         try {
             Method detectDirection = declaredMethod(
                     "detectDirection",
-                    DecodedPlane.class,
+                    PaddedPlane.class,
                     int.class,
                     int.class,
                     int.class,
@@ -219,7 +219,7 @@ final class CdefApplierTest {
     /// @param direction the CDEF direction to apply
     /// @return the filtered sample raster
     private static short[] filterUnit(
-            DecodedPlane plane,
+            PaddedPlane plane,
             int startX,
             int startY,
             int endX,
@@ -235,7 +235,7 @@ final class CdefApplierTest {
             int secondaryStrength = (int) decodeSecondaryStrength.invoke(null, encodedStrength, 0);
             Method filterUnit = declaredMethod(
                     "filterUnit",
-                    DecodedPlane.class,
+                    PaddedPlane.class,
                     short[].class,
                     int.class,
                     int.class,
@@ -360,7 +360,7 @@ final class CdefApplierTest {
     /// @param endX the exclusive region end X coordinate
     /// @param endY the exclusive region end Y coordinate
     private static void assertRegionEquals(
-            DecodedPlane plane,
+            PaddedPlane plane,
             short[] expectedSamples,
             int startX,
             int startY,
@@ -385,7 +385,7 @@ final class CdefApplierTest {
     /// @param endY the exclusive region end Y coordinate
     /// @return whether the rectangular region matches
     private static boolean regionEquals(
-            DecodedPlane plane,
+            PaddedPlane plane,
             short[] expectedSamples,
             int startX,
             int startY,

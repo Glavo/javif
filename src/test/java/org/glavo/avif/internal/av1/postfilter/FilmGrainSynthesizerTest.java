@@ -18,8 +18,8 @@ package org.glavo.avif.internal.av1.postfilter;
 import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.decode.DecodedPlane;
-import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.internal.av1.image.PaddedPlane;
+import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -34,7 +34,7 @@ final class FilmGrainSynthesizerTest {
     /// Verifies that disabled film grain returns the original pre-grain planes.
     @Test
     void applyReturnsOriginalPlanesWhenFilmGrainIsDisabled() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {128, 128, 128, 128},
@@ -61,7 +61,7 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.disabledFilmGrain()
         );
 
-        DecodedPlanes result = new FilmGrainSynthesizer().apply(
+        DecodedSurface result = new FilmGrainSynthesizer().apply(
                 decodedPlanes,
                 frameHeader,
                 colorConfig(decodedPlanes, 2)
@@ -73,7 +73,7 @@ final class FilmGrainSynthesizerTest {
     /// Verifies that enabled film grain produces one deterministic but separate presentation copy.
     @Test
     void applyProducesDeterministicGrainAppliedCopy() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.YUV420,
                 new int[][]{
                         {128, 128, 128, 128, 128, 128, 128, 128},
@@ -115,8 +115,8 @@ final class FilmGrainSynthesizerTest {
         );
 
         FilmGrainSynthesizer synthesizer = new FilmGrainSynthesizer();
-        DecodedPlanes first = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
-        DecodedPlanes second = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
+        DecodedSurface first = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
+        DecodedSurface second = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
 
         assertNotSame(decodedPlanes, first);
         assertEquals(first.lumaPlane().sample(0, 0), second.lumaPlane().sample(0, 0));
@@ -130,7 +130,7 @@ final class FilmGrainSynthesizerTest {
     /// chroma, while changing at least one unrestricted presentation sample.
     @Test
     void applyClipsSynthesizedSamplesToRestrictedRange() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 Av1ChromaFormat.YUV420,
                 new int[][]{
                         {0, 255, 0, 255, 0, 255, 0, 255},
@@ -179,17 +179,17 @@ final class FilmGrainSynthesizerTest {
         );
 
         FilmGrainSynthesizer synthesizer = new FilmGrainSynthesizer();
-        DecodedPlanes unrestricted = synthesizer.apply(
+        DecodedSurface unrestricted = synthesizer.apply(
                 decodedPlanes,
                 unrestrictedFrameHeader,
                 colorConfig(decodedPlanes, 2)
         );
-        DecodedPlanes restricted = synthesizer.apply(
+        DecodedSurface restricted = synthesizer.apply(
                 decodedPlanes,
                 restrictedFrameHeader,
                 colorConfig(decodedPlanes, 2)
         );
-        DecodedPlanes identityMatrixRestricted = synthesizer.apply(
+        DecodedSurface identityMatrixRestricted = synthesizer.apply(
                 decodedPlanes,
                 restrictedFrameHeader,
                 colorConfig(decodedPlanes, 0)
@@ -244,14 +244,14 @@ final class FilmGrainSynthesizerTest {
                 samples[y * stride + x] = (short) (x < width ? 128 + ((x * 11 + y * 7) & 0x1FF) : 999);
             }
         }
-        DecodedPlanes decodedPlanes = new DecodedPlanes(
+        DecodedSurface decodedPlanes = new DecodedSurface(
                 10,
                 Av1ChromaFormat.MONOCHROME,
                 width,
                 height,
                 width,
                 height,
-                new DecodedPlane(width, height, stride, samples),
+                new PaddedPlane(width, height, stride, samples),
                 null,
                 null
         );
@@ -299,7 +299,7 @@ final class FilmGrainSynthesizerTest {
                 )
         );
 
-        DecodedPlanes result = new FilmGrainSynthesizer().apply(
+        DecodedSurface result = new FilmGrainSynthesizer().apply(
                 decodedPlanes,
                 frameHeader,
                 colorConfig(decodedPlanes, 2)
@@ -312,7 +312,7 @@ final class FilmGrainSynthesizerTest {
     /// Verifies that explicit chroma scaling works without luma scaling points.
     @Test
     void applySupportsExplicitChromaGrainWithoutLumaScalingPoints() {
-        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 10,
                 Av1ChromaFormat.YUV444,
                 new int[][]{
@@ -392,7 +392,7 @@ final class FilmGrainSynthesizerTest {
                 )
         );
 
-        DecodedPlanes result = new FilmGrainSynthesizer().apply(
+        DecodedSurface result = new FilmGrainSynthesizer().apply(
                 decodedPlanes,
                 frameHeader,
                 colorConfig(decodedPlanes, 2)
@@ -408,7 +408,7 @@ final class FilmGrainSynthesizerTest {
     /// @param planes the decoded planes whose bit depth and chroma layout are copied
     /// @param matrixCoefficients the AV1 matrix-coefficients code
     /// @return the matching color configuration
-    private static Av1ColorConfig colorConfig(DecodedPlanes planes, int matrixCoefficients) {
+    private static Av1ColorConfig colorConfig(DecodedSurface planes, int matrixCoefficients) {
         Av1ChromaFormat chromaFormat = planes.chromaFormat();
         return new Av1ColorConfig(
                 planes.bitDepth(),
@@ -420,8 +420,8 @@ final class FilmGrainSynthesizerTest {
                 false,
                 chromaFormat,
                 0,
-                chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422,
-                chromaFormat == Av1ChromaFormat.YUV420,
+                chromaFormat != Av1ChromaFormat.YUV444,
+                chromaFormat == Av1ChromaFormat.MONOCHROME || chromaFormat == Av1ChromaFormat.YUV420,
                 false
         );
     }
@@ -431,7 +431,7 @@ final class FilmGrainSynthesizerTest {
     /// @param expected the original plane
     /// @param actual the compared plane
     /// @return the changed visible sample count
-    private static int countChangedVisibleSamples(DecodedPlane expected, DecodedPlane actual) {
+    private static int countChangedVisibleSamples(PaddedPlane expected, PaddedPlane actual) {
         int changed = 0;
         for (int y = 0; y < expected.height(); y++) {
             for (int x = 0; x < expected.width(); x++) {
@@ -449,7 +449,7 @@ final class FilmGrainSynthesizerTest {
     /// @param plane the output plane to inspect
     /// @param width the visible width
     /// @param stride the physical stride
-    private static void assertPaddingEquals(int sentinel, DecodedPlane plane, int width, int stride) {
+    private static void assertPaddingEquals(int sentinel, PaddedPlane plane, int width, int stride) {
         short[] samples = plane.samples();
         for (int y = 0; y < plane.height(); y++) {
             for (int x = width; x < stride; x++) {

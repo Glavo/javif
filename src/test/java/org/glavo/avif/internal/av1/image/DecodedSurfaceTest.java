@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.internal.av1.image;
 
 import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -25,14 +25,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests for immutable decoded-plane contracts.
+/// Tests for immutable internal padded-surface contracts.
 @NotNullByDefault
-final class DecodedPlanesTest {
+final class DecodedSurfaceTest {
     /// Verifies that one decoded plane reads unsigned samples and defensively copies stored data.
     @Test
     void decodedPlaneReadsUnsignedSamplesAndCopiesStorage() {
         short[] source = new short[]{1, (short) 0xFFFF, 3, 4};
-        DecodedPlane plane = new DecodedPlane(2, 2, 2, source);
+        PaddedPlane plane = new PaddedPlane(2, 2, 2, source);
 
         source[0] = 9;
 
@@ -46,7 +46,7 @@ final class DecodedPlanesTest {
     /// Verifies that stored-plane reads use the row stride across right and bottom padding.
     @Test
     void decodedPlaneReadsPaddedStorageByStride() {
-        DecodedPlane plane = new DecodedPlane(
+        PaddedPlane plane = new PaddedPlane(
                 2,
                 2,
                 3,
@@ -64,23 +64,23 @@ final class DecodedPlanesTest {
     /// Verifies that monochrome decoded planes reject unexpected chroma storage.
     @Test
     void monochromeDecodedPlanesRejectUnexpectedChroma() {
-        DecodedPlane luma = new DecodedPlane(4, 4, 4, filledSamples(16, (short) 7));
-        DecodedPlane chroma = new DecodedPlane(2, 2, 2, filledSamples(4, (short) 3));
+        PaddedPlane luma = new PaddedPlane(4, 4, 4, filledSamples(16, (short) 7));
+        PaddedPlane chroma = new PaddedPlane(2, 2, 2, filledSamples(4, (short) 3));
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DecodedPlanes(8, Av1ChromaFormat.MONOCHROME, 4, 4, 4, 4, luma, chroma, null)
+                () -> new DecodedSurface(8, Av1ChromaFormat.MONOCHROME, 4, 4, 4, 4, luma, chroma, null)
         );
     }
 
     /// Verifies that `YUV420` decoded planes validate subsampled chroma dimensions.
     @Test
     void i420DecodedPlanesValidateChromaDimensions() {
-        DecodedPlane luma = new DecodedPlane(5, 3, 5, filledSamples(15, (short) 1));
-        DecodedPlane chromaU = new DecodedPlane(3, 2, 3, filledSamples(6, (short) 2));
-        DecodedPlane chromaV = new DecodedPlane(3, 2, 3, filledSamples(6, (short) 3));
+        PaddedPlane luma = new PaddedPlane(5, 3, 5, filledSamples(15, (short) 1));
+        PaddedPlane chromaU = new PaddedPlane(3, 2, 3, filledSamples(6, (short) 2));
+        PaddedPlane chromaV = new PaddedPlane(3, 2, 3, filledSamples(6, (short) 3));
 
-        DecodedPlanes planes = new DecodedPlanes(8, Av1ChromaFormat.YUV420, 5, 3, 5, 3, luma, chromaU, chromaV);
+        DecodedSurface planes = new DecodedSurface(8, Av1ChromaFormat.YUV420, 5, 3, 5, 3, luma, chromaU, chromaV);
 
         assertTrue(planes.hasChroma());
         assertEquals(5, planes.codedWidth());
@@ -90,19 +90,19 @@ final class DecodedPlanesTest {
         assertEquals(3, planes.chromaUPlane().width());
         assertEquals(2, planes.chromaUPlane().height());
 
-        DecodedPlane wrongChroma = new DecodedPlane(2, 2, 2, filledSamples(4, (short) 3));
+        PaddedPlane wrongChroma = new PaddedPlane(2, 2, 2, filledSamples(4, (short) 3));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DecodedPlanes(8, Av1ChromaFormat.YUV420, 5, 3, 5, 3, luma, wrongChroma, chromaV)
+                () -> new DecodedSurface(8, Av1ChromaFormat.YUV420, 5, 3, 5, 3, luma, wrongChroma, chromaV)
         );
     }
 
     /// Verifies that monochrome decoded planes report the expected chroma absence.
     @Test
     void monochromeDecodedPlanesDoNotReportChroma() {
-        DecodedPlane luma = new DecodedPlane(4, 4, 4, filledSamples(16, (short) 5));
+        PaddedPlane luma = new PaddedPlane(4, 4, 4, filledSamples(16, (short) 5));
 
-        DecodedPlanes planes = new DecodedPlanes(10, Av1ChromaFormat.MONOCHROME, 4, 4, 4, 4, luma, null, null);
+        DecodedSurface planes = new DecodedSurface(10, Av1ChromaFormat.MONOCHROME, 4, 4, 4, 4, luma, null, null);
 
         assertFalse(planes.hasChroma());
         assertEquals(Av1ChromaFormat.MONOCHROME, planes.chromaFormat());

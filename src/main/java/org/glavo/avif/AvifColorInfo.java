@@ -36,9 +36,9 @@ public final class AvifColorInfo {
     /// @param matrixCoefficients the CICP matrix coefficients value
     /// @param fullRange whether samples are full range
     public AvifColorInfo(int colorPrimaries, int transferCharacteristics, int matrixCoefficients, boolean fullRange) {
-        this.colorPrimaries = colorPrimaries;
-        this.transferCharacteristics = transferCharacteristics;
-        this.matrixCoefficients = matrixCoefficients;
+        this.colorPrimaries = checkedCodePoint(colorPrimaries, "colorPrimaries");
+        this.transferCharacteristics = checkedCodePoint(transferCharacteristics, "transferCharacteristics");
+        this.matrixCoefficients = checkedCodePoint(matrixCoefficients, "matrixCoefficients");
         this.fullRange = fullRange;
     }
 
@@ -68,5 +68,17 @@ public final class AvifColorInfo {
     /// @return whether samples are full range
     public boolean fullRange() {
         return fullRange;
+    }
+
+    /// Returns a validated unsigned 16-bit `nclx` code point.
+    ///
+    /// @param value the code point
+    /// @param name the parameter name
+    /// @return the validated code point
+    private static int checkedCodePoint(int value, String name) {
+        if (value < 0 || value > 0xFFFF) {
+            throw new IllegalArgumentException(name + " out of range: " + value);
+        }
+        return value;
     }
 }

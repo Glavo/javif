@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.runtime;
 
 import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.decode.DecodeFrameType;
+import org.glavo.avif.decode.Av1FrameSelection;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -41,7 +41,7 @@ public final class FrameOutputPolicy {
         if (!checkedFrameHeader.showFrame() && !checkedConfig.outputInvisibleFrames()) {
             return false;
         }
-        return matchesDecodeFrameType(checkedFrameHeader, checkedConfig.decodeFrameType());
+        return matchesFrameSelection(checkedFrameHeader, checkedConfig.frameSelection());
     }
 
     /// Returns whether one referenced `show_existing_frame` surface should be exposed publicly.
@@ -55,7 +55,7 @@ public final class FrameOutputPolicy {
     public static boolean shouldOutputExistingFrame(FrameHeader referencedFrameHeader, Av1DecoderConfig config) {
         FrameHeader checkedFrameHeader = Objects.requireNonNull(referencedFrameHeader, "referencedFrameHeader");
         Av1DecoderConfig checkedConfig = Objects.requireNonNull(config, "config");
-        return matchesDecodeFrameType(checkedFrameHeader, checkedConfig.decodeFrameType());
+        return matchesFrameSelection(checkedFrameHeader, checkedConfig.frameSelection());
     }
 
     /// Returns whether the current output request would require film-grain synthesis.
@@ -69,13 +69,13 @@ public final class FrameOutputPolicy {
         return checkedConfig.applyFilmGrain() && checkedFrameHeader.filmGrain().applyGrain();
     }
 
-    /// Returns whether one frame header matches the requested decode-frame-type filter.
+    /// Returns whether one frame header matches the requested frame selection.
     ///
     /// @param frameHeader the frame header to evaluate
-    /// @param decodeFrameType the configured frame-type filter
-    /// @return whether the frame header matches the requested decode-frame-type filter
-    private static boolean matchesDecodeFrameType(FrameHeader frameHeader, DecodeFrameType decodeFrameType) {
-        return switch (Objects.requireNonNull(decodeFrameType, "decodeFrameType")) {
+    /// @param frameSelection the configured frame selection
+    /// @return whether the frame header matches the requested selection
+    private static boolean matchesFrameSelection(FrameHeader frameHeader, Av1FrameSelection frameSelection) {
+        return switch (Objects.requireNonNull(frameSelection, "frameSelection")) {
             case ALL -> true;
             case REFERENCE -> frameHeader.refreshFrameFlags() != 0;
             case INTRA -> frameHeader.frameType() == FrameType.KEY || frameHeader.frameType() == FrameType.INTRA;

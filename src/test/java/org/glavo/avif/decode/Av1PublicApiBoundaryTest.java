@@ -15,6 +15,8 @@
  */
 package org.glavo.avif.decode;
 
+import org.glavo.avif.DecodedPlane;
+import org.glavo.avif.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +29,8 @@ import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -41,7 +45,11 @@ final class Av1PublicApiBoundaryTest {
     void exportedSignaturesDoNotReferenceInternalPackages() {
         for (Class<?> apiType : List.of(
                 Av1ImageReader.class,
+                Av1DecodedOutput.class,
                 Av1ColorConfig.class,
+                Av1DecoderConfig.class,
+                Av1FrameSelection.class,
+                DecodedFrame.class,
                 DecodedPlane.class,
                 DecodedPlanes.class
         )) {
@@ -80,39 +88,51 @@ final class Av1PublicApiBoundaryTest {
     /// @param type the reflected type to inspect
     /// @param signature the owning signature used in an assertion message
     private static void assertExportedType(Type type, String signature) {
+        assertExportedType(type, signature, new HashSet<>());
+    }
+
+    /// Verifies one type reference while breaking recursive generic-bound cycles.
+    ///
+    /// @param type the reflected type to inspect
+    /// @param signature the owning signature used in an assertion message
+    /// @param visited the type references already traversed for this signature
+    private static void assertExportedType(Type type, String signature, Set<Type> visited) {
+        if (!visited.add(type)) {
+            return;
+        }
         if (type instanceof Class<?> concreteType) {
             assertFalse(
                     concreteType.getName().startsWith(INTERNAL_PACKAGE_PREFIX),
                     () -> signature + " exposes " + concreteType.getName()
             );
             if (concreteType.isArray()) {
-                assertExportedType(concreteType.getComponentType(), signature);
+                assertExportedType(concreteType.getComponentType(), signature, visited);
             }
             return;
         }
         if (type instanceof ParameterizedType parameterizedType) {
-            assertExportedType(parameterizedType.getRawType(), signature);
+            assertExportedType(parameterizedType.getRawType(), signature, visited);
             for (Type argument : parameterizedType.getActualTypeArguments()) {
-                assertExportedType(argument, signature);
+                assertExportedType(argument, signature, visited);
             }
             return;
         }
         if (type instanceof GenericArrayType arrayType) {
-            assertExportedType(arrayType.getGenericComponentType(), signature);
+            assertExportedType(arrayType.getGenericComponentType(), signature, visited);
             return;
         }
         if (type instanceof WildcardType wildcardType) {
             for (Type bound : wildcardType.getLowerBounds()) {
-                assertExportedType(bound, signature);
+                assertExportedType(bound, signature, visited);
             }
             for (Type bound : wildcardType.getUpperBounds()) {
-                assertExportedType(bound, signature);
+                assertExportedType(bound, signature, visited);
             }
             return;
         }
         if (type instanceof TypeVariable<?> variable) {
             for (Type bound : variable.getBounds()) {
-                assertExportedType(bound, signature);
+                assertExportedType(bound, signature, visited);
             }
         }
     }
