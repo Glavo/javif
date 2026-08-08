@@ -34,7 +34,7 @@ public enum AvifErrorCode {
     ISPE_SIZE_MISMATCH,
     /// A grid image has inconsistent cells or invalid canvas geometry.
     INVALID_IMAGE_GRID,
-    /// The decoded image exceeds the configured maximum frame size.
+    /// The decoded image exceeds the configured or implementation maximum frame size.
     FRAME_SIZE_LIMIT_EXCEEDED,
     /// The embedded AV1 payload could not be decoded.
     AV1_DECODE_FAILED,

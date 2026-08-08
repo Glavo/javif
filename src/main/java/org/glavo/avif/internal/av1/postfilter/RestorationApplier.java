@@ -36,6 +36,10 @@ import java.util.Objects;
 /// AV1 self-guided A/B projection model.
 @NotNullByDefault
 public final class RestorationApplier {
+    /// Creates a loop-restoration applier.
+    public RestorationApplier() {
+    }
+
     /// The AV1 restoration processing stripe size in luma samples.
     private static final int RESTORATION_PROC_UNIT_SIZE = 64;
 

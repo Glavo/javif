@@ -28,6 +28,10 @@ import java.util.Objects;
 /// Parser that converts AV1 tile-data layout into per-tile bitstream views.
 @NotNullByDefault
 public final class TileBitstreamParser {
+    /// Creates a tile-bitstream parser.
+    public TileBitstreamParser() {
+    }
+
     /// The parser used to derive raw tile byte ranges.
     private final TileDataParser tileDataParser = new TileDataParser();
 

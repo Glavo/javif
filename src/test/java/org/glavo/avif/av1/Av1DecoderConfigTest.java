@@ -39,7 +39,7 @@ final class Av1DecoderConfigTest {
         assertFalse(config.largeScaleTileMode());
         assertEquals(Av1FrameSelection.ALL, config.frameSelection());
         assertEquals(0, config.operatingPoint());
-        assertEquals(0, config.frameSizeLimit());
+        assertEquals(8192L * 8192L, config.frameSizeLimit());
     }
 
     /// Verifies that invalid operating points are rejected.

@@ -1515,14 +1515,13 @@ public final class Av1Decoder implements AutoCloseable {
         );
     }
 
-    /// Enforces the configured frame size limit against a parsed frame header.
+    /// Enforces configured and implementation frame size limits against a parsed frame header.
     ///
     /// @param frameHeader the parsed frame header
     /// @param packet the source OBU packet
-    /// @throws Av1DecodeException if the configured frame size limit is exceeded
+    /// @throws Av1DecodeException if a frame size limit is exceeded
     private void enforceFrameSizeLimit(FrameHeader frameHeader, ObuPacket packet) throws Av1DecodeException {
-        long frameSizeLimit = config.frameSizeLimit();
-        if (frameSizeLimit == 0 || frameHeader.showExistingFrame()) {
+        if (frameHeader.showExistingFrame()) {
             return;
         }
         enforceFrameSizeLimit(
@@ -1532,23 +1531,26 @@ public final class Av1Decoder implements AutoCloseable {
         );
     }
 
-    /// Enforces the configured frame size limit against explicit output dimensions.
+    /// Enforces configured and implementation frame size limits against explicit output dimensions.
     ///
     /// @param width the output luma width
     /// @param height the output luma height
     /// @param packet the source OBU packet
-    /// @throws Av1DecodeException if the configured frame size limit is exceeded
+    /// @throws Av1DecodeException if a frame size limit is exceeded
     private void enforceFrameSizeLimit(int width, int height, ObuPacket packet) throws Av1DecodeException {
         long frameSizeLimit = config.frameSizeLimit();
-        if (frameSizeLimit == 0) {
-            return;
-        }
         long pixelCount = (long) width * height;
-        if (pixelCount > frameSizeLimit) {
+        long effectiveLimit = frameSizeLimit == 0
+                ? Integer.MAX_VALUE
+                : Math.min(frameSizeLimit, Integer.MAX_VALUE);
+        if (pixelCount > effectiveLimit) {
+            String limitKind = frameSizeLimit != 0 && frameSizeLimit <= Integer.MAX_VALUE
+                    ? "configured"
+                    : "implementation";
             throw new Av1DecodeException(
                     Av1DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
                     Av1DecodeStage.FRAME_HEADER_PARSE,
-                    "Frame size exceeds the configured limit: " + width + "x" + height,
+                    "Frame size exceeds the " + limitKind + " limit: " + width + "x" + height,
                     packet.streamOffset(),
                     packet.obuIndex(),
                     null

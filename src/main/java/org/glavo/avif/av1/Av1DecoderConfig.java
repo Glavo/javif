@@ -25,6 +25,9 @@ import java.util.Objects;
 /// when the requested value is already selected and otherwise returns a new configuration.
 @NotNullByDefault
 public final class Av1DecoderConfig {
+    /// The default maximum decoded luma-plane area, sufficient for an `8192x8192` frame.
+    private static final long DEFAULT_FRAME_SIZE_LIMIT = 8192L * 8192L;
+
     /// The default decoder configuration.
     public static final Av1DecoderConfig DEFAULT = new Av1DecoderConfig(
             true,
@@ -34,7 +37,7 @@ public final class Av1DecoderConfig {
             false,
             Av1FrameSelection.ALL,
             0,
-            0
+            DEFAULT_FRAME_SIZE_LIMIT
     );
 
     /// Whether decoded output includes film grain synthesis.
@@ -51,7 +54,7 @@ public final class Av1DecoderConfig {
     private final Av1FrameSelection frameSelection;
     /// The selected AV1 operating point.
     private final int operatingPoint;
-    /// The maximum decoded frame size in pixels, or `0` when unlimited.
+    /// The maximum decoded frame size in pixels, or `0` when no additional configured limit applies.
     private final long frameSizeLimit;
 
     /// Creates a validated decoder configuration.
@@ -63,7 +66,8 @@ public final class Av1DecoderConfig {
     /// @param largeScaleTileMode whether Large Scale Tile layout is enabled
     /// @param frameSelection the selected frame categories
     /// @param operatingPoint the operating-point index
-    /// @param frameSizeLimit the maximum frame size in pixels, or `0` when unlimited
+    /// @param frameSizeLimit the maximum frame size in pixels, or `0` when no additional
+    ///                       configured limit applies
     private Av1DecoderConfig(
             boolean applyFilmGrain,
             boolean strictStdCompliance,
@@ -148,7 +152,10 @@ public final class Av1DecoderConfig {
 
     /// Returns the maximum decoded frame size in pixels.
     ///
-    /// @return the frame size limit, or `0` when unlimited
+    /// A zero value disables the configurable resource limit. Implementation limits required to
+    /// represent a decoded plane still apply.
+    ///
+    /// @return the frame size limit, or `0` when no additional configured limit applies
     public long frameSizeLimit() {
         return frameSizeLimit;
     }
@@ -226,7 +233,10 @@ public final class Av1DecoderConfig {
 
     /// Returns a configuration with the supplied maximum decoded frame size.
     ///
-    /// @param value the frame size limit in pixels, or `0` when unlimited
+    /// A zero value disables the configurable resource limit. It does not disable implementation
+    /// limits required to represent decoded planes.
+    ///
+    /// @param value the frame size limit in pixels, or `0` when no additional configured limit applies
     /// @return this configuration or one with the requested limit
     public Av1DecoderConfig withFrameSizeLimit(long value) {
         return value == frameSizeLimit ? this : copy(applyFilmGrain, strictStdCompliance,

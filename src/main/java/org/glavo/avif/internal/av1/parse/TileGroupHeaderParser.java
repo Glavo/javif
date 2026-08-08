@@ -31,6 +31,10 @@ import java.util.Objects;
 /// Parser for AV1 tile-group headers embedded inside `TILE_GROUP` and `FRAME` OBUs.
 @NotNullByDefault
 public final class TileGroupHeaderParser {
+    /// Creates a tile-group-header parser.
+    public TileGroupHeaderParser() {
+    }
+
     /// Parses a tile-group header from the supplied bit reader.
     ///
     /// @param reader the payload bit reader positioned at the tile-group header

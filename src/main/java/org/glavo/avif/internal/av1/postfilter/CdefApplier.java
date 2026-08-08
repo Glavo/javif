@@ -36,6 +36,10 @@ import java.util.Objects;
 /// CDEF processing boundary, and fully skipped CDEF units are preserved.
 @NotNullByDefault
 public final class CdefApplier {
+    /// Creates a CDEF applier.
+    public CdefApplier() {
+    }
+
     /// The luma CDEF unit size in samples.
     private static final int CDEF_UNIT_SIZE = 8;
 

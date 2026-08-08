@@ -56,6 +56,8 @@ public final class AvifContainerParser {
     private static final int SUPPORTED_GAIN_MAP_METADATA_VERSION = 0;
     /// Internal marker for an indefinite track duration.
     private static final long INDEFINITE_TRACK_DURATION = -1L;
+    /// The maximum number of sequence samples materialized from one track's sample tables.
+    private static final int MAX_SEQUENCE_SAMPLE_COUNT = 1_000_000;
 
     /// The retained container data source.
     private final AvifDataSource source;
@@ -2627,6 +2629,12 @@ public final class AvifContainerParser {
             if (sd <= 0) {
                 throw parseFailed("stts sample_delta must be positive", input.offset() - 4);
             }
+            enforceSequenceSampleCount(
+                    meta.moovState.sampleDeltas.size(),
+                    sc,
+                    "stts",
+                    input.offset() - 8
+            );
             for (int j = 0; j < sc; j++) meta.moovState.sampleDeltas.add(sd);
         }
     }
@@ -2684,11 +2692,39 @@ public final class AvifContainerParser {
         input.skip(4);
         int ss = checkedU32ToInt(input.readU32(), input.offset() - 4);
         int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        enforceSequenceSampleCount(
+                meta.moovState.sampleSizes.size(),
+                sc,
+                "stsz",
+                input.offset() - 4
+        );
         if (ss == 0) {
             for (int i = 0; i < sc; i++)
                 meta.moovState.sampleSizes.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
         } else {
             for (int i = 0; i < sc; i++) meta.moovState.sampleSizes.add(ss);
+        }
+    }
+
+    /// Rejects a compressed sample-table run before expanding it beyond the parser resource limit.
+    ///
+    /// @param existingCount the number of samples already materialized for the current track
+    /// @param additionalCount the number of samples declared by the current table entry
+    /// @param boxType the sample-table box type used in diagnostics
+    /// @param offset the byte offset of the declared count
+    /// @throws AvifDecodeException if the expanded sample count exceeds the supported limit
+    private static void enforceSequenceSampleCount(
+            int existingCount,
+            int additionalCount,
+            String boxType,
+            int offset
+    ) throws AvifDecodeException {
+        long expandedCount = (long) existingCount + additionalCount;
+        if (expandedCount > MAX_SEQUENCE_SAMPLE_COUNT) {
+            throw unsupported(
+                    boxType + " sample count exceeds the supported limit: " + expandedCount,
+                    offset
+            );
         }
     }
 

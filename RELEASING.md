@@ -62,6 +62,9 @@ release must be fixed under a new version if any artifact has already reached Ce
 
 ## Local validation
 
+Use JDK 23 or newer for any local command that generates Javadoc or publication artifacts. The
+release workflow uses JDK 25 for those steps while retaining a separate JDK 17 compatibility gate.
+
 The release version and POM can be checked without credentials or remote changes:
 
 ```text

@@ -37,6 +37,10 @@ import java.util.Objects;
 /// Parser for AV1 frame headers carried by standalone or combined frame OBUs.
 @NotNullByDefault
 public final class FrameHeaderParser {
+    /// Creates a frame-header parser.
+    public FrameHeaderParser() {
+    }
+
     /// The AV1 `primary_ref_none` sentinel value.
     private static final int PRIMARY_REF_NONE = 7;
     /// The AV1 maximum tile column count.

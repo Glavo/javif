@@ -56,6 +56,10 @@ import java.util.Objects;
 @NotNullByDefault
 public final class AvifViewerApp extends Application {
 
+    /// Creates an uninitialized viewer application for the JavaFX launcher.
+    public AvifViewerApp() {
+    }
+
     /// Displays the current decoded frame.
     private final ImageView imageView = new ImageView();
     /// Displays the current file, image properties, and loading status.

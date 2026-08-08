@@ -1022,6 +1022,27 @@ final class Av1DecoderTest {
         assertEquals("Frame size exceeds the configured limit: 64x64", exception.getMessage());
     }
 
+    /// Verifies that disabling the configured frame limit retains the plane-representation limit.
+    @Test
+    void readFrameRetainsImplementationLimitWhenConfiguredLimitIsDisabled() {
+        byte[] stream = concat(
+                obu(1, maximumDimensionReducedStillPicturePayload()),
+                obu(3, reducedStillPictureFrameHeaderPayload(16, 32))
+        );
+        Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withFrameSizeLimit(0);
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
+                    config
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(Av1DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals("Frame size exceeds the implementation limit: 65536x65536", exception.getMessage());
+    }
+
     /// Verifies that `show_existing_frame` cannot reference an empty reference slot.
     @Test
     void readFrameRejectsShowExistingFrameWithUnpopulatedSlot() {
@@ -4221,6 +4242,33 @@ final class Av1DecoderTest {
         writer.writeFlag(true);
         writer.writeFlag(false);
         writeReducedStillPictureColorConfig(writer, chromaFormat, 8, false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a reduced still-picture sequence header whose luma plane cannot be represented by
+    /// the decoder's array-backed plane storage.
+    ///
+    /// @return the maximum-dimension reduced still-picture sequence header payload
+    private static byte[] maximumDimensionReducedStillPicturePayload() {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(reducedStillPictureProfile(Av1ChromaFormat.YUV420), 3);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(5, 3);
+        writer.writeBits(1, 2);
+        writer.writeBits(15, 4);
+        writer.writeBits(15, 4);
+        writer.writeBits(65535, 16);
+        writer.writeBits(65535, 16);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writeReducedStillPictureColorConfig(writer, Av1ChromaFormat.YUV420, 8, false);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }

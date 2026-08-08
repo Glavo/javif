@@ -20,10 +20,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v5
-      - name: Verify with Gradle
+      - name: Test on Java 17
         run: >-
           xvfb-run -a ./gradlew -g .gradle-user-home
-          cleanTest test javadoc assemble verifyNoRuntimeDependencies
+          cleanTest test verifyNoRuntimeDependencies
+          --info --no-daemon --stacktrace
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+      - name: Build and verify documentation on Java 25
+        run: >-
+          xvfb-run -a ./gradlew -g .gradle-user-home
+          clean assemble javadoc verifyNoRuntimeDependencies
           --info --no-daemon --stacktrace
       - name: Upload JAR
         uses: actions/upload-artifact@v7

@@ -46,7 +46,7 @@ public final class Av1DecodedOutput {
     /// The spatial-layer identifier of the presentation request.
     private final int spatialId;
     /// The cached packed-pixel representation, or `null` before conversion.
-    private volatile @Nullable Av1DecodedFrame frame;
+    private @Nullable Av1DecodedFrame frame;
 
     /// Creates a decoded output from validated decoder state.
     ///
@@ -145,23 +145,17 @@ public final class Av1DecodedOutput {
     /// @throws UnsupportedOperationException if the color configuration cannot be converted
     public Av1DecodedFrame toFrame() {
         Av1DecodedFrame result = frame;
-        if (result != null) {
-            return result;
-        }
-        synchronized (this) {
-            result = frame;
-            if (result == null) {
-                result = OutputFrameFactory.createFrame(
-                        surface,
-                        colorConfig,
-                        frameType,
-                        visible,
-                        presentationIndex,
-                        temporalId,
-                        spatialId
-                );
-                frame = result;
-            }
+        if (result == null) {
+            result = OutputFrameFactory.createFrame(
+                    surface,
+                    colorConfig,
+                    frameType,
+                    visible,
+                    presentationIndex,
+                    temporalId,
+                    spatialId
+            );
+            frame = result;
         }
         return result;
     }

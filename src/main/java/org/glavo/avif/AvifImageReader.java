@@ -52,6 +52,8 @@ import java.util.Objects;
 /// [#readAllFrames()] access. Their indexed, raw-plane, and tone-mapping operations fail with
 /// [AvifErrorCode#SEEKABLE_SOURCE_REQUIRED]. Sequential decoding also reports that code when the
 /// container layout requires revisiting data outside the bounded progressive read window.
+/// After a sequence frame fails, indexed operations remain available for seekable sources, but
+/// sequential reading cannot resume because its persistent AV1 decoder may have consumed input.
 @NotNullByDefault
 public final class AvifImageReader implements AutoCloseable {
     /// The immutable factory options used to create this reader.
@@ -72,6 +74,8 @@ public final class AvifImageReader implements AutoCloseable {
     private @Nullable Av1Decoder sequenceAlphaAv1Decoder;
     /// The expected next frame index from the persistent sequence alpha reader.
     private int sequenceAlphaAv1FrameIndex;
+    /// Whether a sequence frame failed after sequential decoding began.
+    private boolean sequentialSequenceReadFailed;
 
     /// Creates an AVIF image reader.
     ///
@@ -171,18 +175,37 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Reads the next decoded frame.
     ///
+    /// If a sequence frame fails, subsequent calls fail without attempting to reuse the partially
+    /// advanced persistent sequence decoder. Indexed access remains available when the source is
+    /// seekable.
+    ///
     /// @return the next decoded frame, or `null` at end-of-stream
-    /// @throws IOException if the frame cannot be decoded
+    /// @throws IOException if the frame cannot be decoded or sequential sequence decoding has
+    ///                     already failed
     public @Nullable AvifFrame readFrame() throws IOException {
         ensureOpen();
+        if (sequentialSequenceReadFailed) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    "Sequential sequence decoding cannot resume after a frame failure",
+                    null
+            );
+        }
         if (nextFrameIndex >= container.info().frameCount()) {
             return null;
         }
-        AvifFrame frame = container.isSequence()
-                ? readSequenceFrameSequential(nextFrameIndex)
-                : readFrameAtIndex(nextFrameIndex);
-        nextFrameIndex++;
-        return frame;
+        try {
+            AvifFrame frame = container.isSequence()
+                    ? readSequenceFrameSequential(nextFrameIndex)
+                    : readFrameAtIndex(nextFrameIndex);
+            nextFrameIndex++;
+            return frame;
+        } catch (IOException | RuntimeException exception) {
+            if (container.isSequence()) {
+                sequentialSequenceReadFailed = true;
+            }
+            throw exception;
+        }
     }
 
     /// Reads the decoded frame at the supplied index.
@@ -744,21 +767,27 @@ public final class AvifImageReader implements AutoCloseable {
         return new DecodedRawImage(composed, Objects.requireNonNull(colorConfig, "colorConfig"));
     }
 
-    /// Enforces the configured frame-size limit against a derived grid canvas.
+    /// Enforces configured and implementation frame-size limits against a derived grid canvas.
     ///
     /// Individual AV1 cells are checked by `Av1Decoder`; this additional check prevents a
     /// collection of individually valid cells from producing an oversized composed image.
     ///
     /// @param source the normalized grid image source
     /// @param label the diagnostic image label
-    /// @throws AvifDecodeException if the grid canvas exceeds the configured frame-size limit
+    /// @throws AvifDecodeException if the grid canvas exceeds a frame-size limit
     private void enforceGridFrameSizeLimit(AvifImageSource source, String label) throws AvifDecodeException {
         long frameSizeLimit = factory.av1DecoderConfig().frameSizeLimit();
         long pixelCount = (long) source.outputWidth() * source.outputHeight();
-        if (frameSizeLimit != 0 && pixelCount > frameSizeLimit) {
+        long effectiveLimit = frameSizeLimit == 0
+                ? Integer.MAX_VALUE
+                : Math.min(frameSizeLimit, Integer.MAX_VALUE);
+        if (pixelCount > effectiveLimit) {
+            String limitKind = frameSizeLimit != 0 && frameSizeLimit <= Integer.MAX_VALUE
+                    ? "configured"
+                    : "implementation";
             throw new AvifDecodeException(
                     AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
-                    label + " grid size exceeds the configured limit: "
+                    label + " grid size exceeds the " + limitKind + " limit: "
                             + source.outputWidth() + "x" + source.outputHeight(),
                     null
             );

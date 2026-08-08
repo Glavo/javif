@@ -30,7 +30,7 @@ public enum Av1DecodeErrorCode {
     INVALID_BITSTREAM,
     /// The input uses a valid AV1 feature that this decoder does not support.
     UNSUPPORTED_FEATURE,
-    /// The configured frame size limit was exceeded.
+    /// The configured or implementation frame size limit was exceeded.
     FRAME_SIZE_LIMIT_EXCEEDED,
     /// The decoder state machine reached an invalid state.
     STATE_VIOLATION

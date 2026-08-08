@@ -29,6 +29,10 @@ import java.util.Objects;
 /// Parser for the per-tile payload layout stored inside AV1 tile groups.
 @NotNullByDefault
 public final class TileDataParser {
+    /// Creates a tile-data parser.
+    public TileDataParser() {
+    }
+
     /// Parses per-tile payload ranges from a tile-group payload.
     ///
     /// @param obu the source OBU packet

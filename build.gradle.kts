@@ -81,7 +81,8 @@ dependencies {
     javafx("controls")
     javafx("graphics")
 
-    compileOnlyApi("org.jetbrains:annotations:26.1.0")
+    compileOnly("org.jetbrains:annotations:26.1.0")
+    testCompileOnly("org.jetbrains:annotations:26.1.0")
 
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -226,6 +227,7 @@ val aomAvifZip = testCorpusCacheDirectory.map { it.file("av1-avif-$aomAvifCommit
 val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-resources")
 val argonAv1Version = "2.1.1"
 val argonAv1ArchiveName = "argon_coveragetool_av1_base_and_extended_profiles_v$argonAv1Version.zip"
+val argonAv1ArchiveSha256 = "33ff3d2ca3c53706c00a49c7c752dcedf431a8e771d369a45351c15198a4c242"
 val argonAv1Zip = testCorpusCacheDirectory.map { it.file(argonAv1ArchiveName) }
 val firefoxCommit = "ac91bfcce1bf3240e2dce40f47c372e76bc4f26c"
 val firefoxAvifTestResourcesDirectory = testCorpusCacheDirectory.map { it.dir("firefox-avif-$firefoxCommit") }
@@ -440,6 +442,43 @@ fun aggregateCorpusSha256(directory: File, resourceNames: List<String>): String 
     return HexFormat.of().formatHex(digest.digest())
 }
 
+fun fileSha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    file.inputStream().buffered().use { input ->
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) {
+                break
+            }
+            digest.update(buffer, 0, count)
+        }
+    }
+    return HexFormat.of().formatHex(digest.digest())
+}
+
+val verifyArgonAv1Archive = tasks.register("verifyArgonAv1Archive") {
+    group = "verification"
+    description = "Verifies the pinned Argon Streams AV1 corpus archive."
+    dependsOn(downloadArgonAv1Streams)
+
+    inputs.file(argonAv1Zip)
+    inputs.property("expectedSha256", argonAv1ArchiveSha256)
+    val verificationMarker = layout.buildDirectory.file("verified-test-corpora/$argonAv1ArchiveName.sha256")
+    outputs.file(verificationMarker)
+
+    doLast {
+        val archive = argonAv1Zip.get().asFile
+        val actualSha256 = fileSha256(archive)
+        check(actualSha256 == argonAv1ArchiveSha256) {
+            "Unexpected Argon Streams AV1 archive digest: $actualSha256"
+        }
+        val marker = verificationMarker.get().asFile
+        marker.parentFile.mkdirs()
+        marker.writeText(actualSha256 + "\n", StandardCharsets.UTF_8)
+    }
+}
+
 val verifyFirefoxAvifTestResources = tasks.register("verifyFirefoxAvifTestResources") {
     group = "verification"
     description = "Verifies the pinned Firefox AVIF resource selections."
@@ -552,7 +591,7 @@ tasks.register<Test>("argonAv1Test") {
     group = "verification"
     description = "Runs the Argon Streams AV1 corpus tests."
     dependsOn(tasks.testClasses)
-    dependsOn(downloadArgonAv1Streams)
+    dependsOn(verifyArgonAv1Archive)
 
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
@@ -667,12 +706,18 @@ tasks.jacocoTestReport {
 }
 
 tasks.withType<Javadoc> {
+    doFirst {
+        if (JavaVersion.current() < JavaVersion.VERSION_23) {
+            throw GradleException("Javadoc generation requires JDK 23 or newer for Markdown documentation comments")
+        }
+    }
+
     (options as StandardJavadocDocletOptions).also {
         it.jFlags!!.addAll(listOf("-Duser.language=en", "-Duser.country=", "-Duser.variant="))
 
         it.encoding("UTF-8")
         it.addBooleanOption("html5", true)
-        it.addStringOption("Xdoclint:none", "-quiet")
+        it.addBooleanOption("quiet", true)
 
         it.tags!!.addAll(
             listOf(

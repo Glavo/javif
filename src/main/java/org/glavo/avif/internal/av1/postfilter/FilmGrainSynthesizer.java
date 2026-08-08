@@ -37,6 +37,10 @@ import java.util.zip.GZIPInputStream;
 /// per-32x32 block offsets, optional overlap blending, and per-plane scaling functions.
 @NotNullByDefault
 public final class FilmGrainSynthesizer {
+    /// Creates a film-grain synthesizer.
+    public FilmGrainSynthesizer() {
+    }
+
     /// The luma grain lookup width.
     private static final int GRAIN_WIDTH = 82;
 

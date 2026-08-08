@@ -39,6 +39,10 @@ import java.util.Objects;
 /// transform boundaries to run the deblocking sample filters before CDEF sees the frame.
 @NotNullByDefault
 public final class LoopFilterApplier {
+    /// Creates a loop-filter applier.
+    public LoopFilterApplier() {
+    }
+
     /// The number of luma samples represented by one AV1 mode-info unit.
     private static final int MI_SIZE = 4;
 

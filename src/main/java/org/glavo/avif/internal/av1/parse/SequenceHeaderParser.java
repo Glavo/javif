@@ -34,6 +34,10 @@ import java.util.Objects;
 /// Parser for AV1 sequence header OBUs.
 @NotNullByDefault
 public final class SequenceHeaderParser {
+    /// Creates a sequence-header parser.
+    public SequenceHeaderParser() {
+    }
+
     /// The AV1 `BT.709` color primaries code.
     private static final int COLOR_PRI_BT709 = 1;
     /// The AV1 `unknown` color primaries code.

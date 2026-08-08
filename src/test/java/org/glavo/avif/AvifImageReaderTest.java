@@ -1521,6 +1521,24 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that sequential sequence decoding becomes terminal after post-decode adaptation fails.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be opened
+    @Test
+    void sequentialSequenceReadCannotResumeAfterFrameFailure() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithUnsupportedColorMatrix())) {
+            AvifDecodeException firstFailure = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, firstFailure.code());
+
+            AvifDecodeException repeatedFailure = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.AV1_DECODE_FAILED, repeatedFailure.code());
+            assertEquals(
+                    "Sequential sequence decoding cannot resume after a frame failure",
+                    repeatedFailure.getMessage()
+            );
+        }
+    }
+
     /// Verifies that AVIS `tref/prem` references expose premultiplied alpha metadata.
     ///
     /// @throws IOException if the synthetic sequence cannot be read or decoded
@@ -1586,6 +1604,28 @@ final class AvifImageReaderTest {
                 () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 2, 1))
         );
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that a compressed `stts` run cannot force unbounded timing-table expansion.
+    @Test
+    void rejectsAnimatedSequenceWithOversizedTimingSampleCount() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 1_000_001, 1))
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertTrue(exception.getMessage().contains("stts sample count exceeds the supported limit"));
+    }
+
+    /// Verifies that a constant-size `stsz` table cannot force unbounded sample-size expansion.
+    @Test
+    void rejectsAnimatedSequenceWithOversizedFixedSampleCount() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithOversizedFixedSampleCount())
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertTrue(exception.getMessage().contains("stsz sample count exceeds the supported limit"));
     }
 
     /// Verifies that AVIS media duration must match summed frame durations.
@@ -3307,6 +3347,34 @@ final class AvifImageReaderTest {
         return minimalAvisSequenceWithSplitChunks(useCo64, 3, 1, 3, 1);
     }
 
+    /// Creates a minimal AVIS sequence whose container color metadata selects an unsupported matrix.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithUnsupportedColorMatrix() {
+        byte[] sequence = minimalAvisSequenceWithSplitChunks(false);
+        byte[] supportedColorProperty = colorProperty();
+        int colorPropertyOffset = indexOf(sequence, supportedColorProperty);
+        if (colorPropertyOffset < 0) {
+            throw new AssertionError("Minimal AVIS fixture does not contain its color property");
+        }
+        byte[] unsupportedColorProperty = box(
+                "colr",
+                fourCc("nclx"),
+                u16(1),
+                u16(13),
+                u16(99),
+                new byte[]{(byte) 0x80}
+        );
+        System.arraycopy(
+                unsupportedColorProperty,
+                0,
+                sequence,
+                colorPropertyOffset,
+                unsupportedColorProperty.length
+        );
+        return sequence;
+    }
+
     /// Creates a minimal AVIS sequence with configurable timing and sample-to-chunk tables.
     ///
     /// @param useCo64 whether to encode chunk offsets with `co64`
@@ -3424,6 +3492,32 @@ final class AvifImageReaderTest {
                 sample2.length
         );
         return concat(ftyp, moov, box("mdat", mdatPayload));
+    }
+
+    /// Creates a minimal AVIS sequence whose constant-size `stsz` table declares more samples
+    /// than the parser will materialize.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithOversizedFixedSampleCount() {
+        byte[] sampleTable = box(
+                "stbl",
+                sampleDescriptionBox(),
+                timeToSampleBox(1, 1),
+                sampleToChunkBox(1),
+                chunkOffsetBox(new int[]{0, 0}, false),
+                fixedSampleSizeBox(1, 1_000_001)
+        );
+        byte[] track = box(
+                "trak",
+                trackHeaderBox(1),
+                box(
+                        "mdia",
+                        mediaHeaderBox(1),
+                        handlerBox("pict"),
+                        box("minf", sampleTable)
+                )
+        );
+        return concat(sequenceFileTypeBox(), box("moov", track));
     }
 
     /// Creates a minimal AVIS sequence where an ignored track appears before the image track.
@@ -4389,6 +4483,15 @@ final class AvifImageReaderTest {
             payload.writeBytes(u32(sampleSize));
         }
         return fullBox("stsz", 0, 0, payload.toByteArray());
+    }
+
+    /// Creates a constant-size sample table without materializing per-sample entries in the fixture.
+    ///
+    /// @param sampleSize the shared sample size
+    /// @param sampleCount the declared sample count
+    /// @return the `stsz` box bytes
+    private static byte[] fixedSampleSizeBox(int sampleSize, int sampleCount) {
+        return fullBox("stsz", 0, 0, u32(sampleSize), u32(sampleCount));
     }
 
     /// Creates the AVIF file type box used by the minimal test image.

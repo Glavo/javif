@@ -19,12 +19,13 @@ The detailed implemented surface, deliberate boundaries, and verification baseli
 
 ## Requirements
 
-- JDK 17 or newer.
+- JDK 17 or newer to compile, test, and run the library.
+- JDK 23 or newer to generate Javadoc and complete a publication build; CI uses JDK 25.
 - JavaFX 21 or newer only when using `org.glavo.avif.javafx` or the desktop viewer.
 
 ## Build
 
-Run the release gate with the repository-local Gradle user home:
+Run the release gate on JDK 23 or newer with the repository-local Gradle user home:
 
 ```text
 ./gradlew -g .gradle-user-home cleanTest test javadoc assemble verifyNoRuntimeDependencies

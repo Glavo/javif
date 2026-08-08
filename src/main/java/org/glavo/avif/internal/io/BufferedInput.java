@@ -38,9 +38,12 @@ import java.util.Objects;
 /// The class is not thread-safe.
 @NotNullByDefault
 public abstract class BufferedInput implements ReadableByteChannel {
+    /// The default staging-buffer capacity in bytes.
     private static final int DEFAULT_BUFFER_SIZE = 8192;
 
+    /// The little-endian staging buffer containing unread source bytes.
     protected final ByteBuffer buffer;
+    /// Whether this input has been closed.
     protected boolean closed = false;
 
     /// Creates an input with the default heap-backed staging buffer.
@@ -75,6 +78,8 @@ public abstract class BufferedInput implements ReadableByteChannel {
     }
 
     /// Fails when the input has already been closed.
+    ///
+    /// @throws IOException if this input is closed
     protected final void ensureOpen() throws IOException {
         if (closed) {
             throw new IOException("BufferedInput is closed");
@@ -109,6 +114,11 @@ public abstract class BufferedInput implements ReadableByteChannel {
     /// @throws IOException if the underlying source is truncated, closed, or unreadable
     protected abstract void fillBuffer(int required) throws IOException;
 
+    /// Compacts the staging buffer and returns it in write mode for a refill.
+    ///
+    /// @param required the required unread byte count after filling
+    /// @return the staging buffer in write mode
+    /// @throws IOException if this input is closed
     protected ByteBuffer prepareForFill(int required) throws IOException {
         ensureOpen();
         ByteBuffer buffer = this.buffer;
@@ -121,12 +131,17 @@ public abstract class BufferedInput implements ReadableByteChannel {
         return buffer;
     }
 
+    /// Skips up to the requested number of currently buffered bytes.
+    ///
+    /// @param len the maximum number of buffered bytes to skip
+    /// @return the number of bytes skipped
     protected final long skipBufferedBytes(long len) {
         int skipped = (int) Math.min(len, buffer.remaining());
         buffer.position(buffer.position() + skipped);
         return skipped;
     }
 
+    /// Discards every byte currently retained in the staging buffer.
     protected final void clearBuffer() {
         buffer.position(0);
         buffer.limit(0);

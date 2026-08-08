@@ -29,6 +29,10 @@ import java.util.Objects;
 /// post-filter surface in one [ReferenceSurfaceSnapshot].
 @NotNullByDefault
 public final class RuntimeReferenceSlot {
+    /// Creates an empty reference slot.
+    public RuntimeReferenceSlot() {
+    }
+
     /// The complete stored reference state, or `null` when the slot is empty.
     private @Nullable ReferenceSurfaceSnapshot snapshot;
 
