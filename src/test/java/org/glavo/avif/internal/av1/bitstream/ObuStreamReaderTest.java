@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.bitstream;
 
 import org.glavo.avif.av1.Av1DecodeErrorCode;
 import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -284,6 +285,36 @@ final class ObuStreamReaderTest {
         });
 
         assertEquals(Av1DecodeErrorCode.UNEXPECTED_EOF, exception.code());
+    }
+
+    /// Verifies that a declared payload is rejected before allocating or reading past the limit.
+    @Test
+    void rejectsDeclaredPayloadBeforeAllocationWhenItExceedsLimit() {
+        byte[] stream = new byte[]{0b0000_1010, 5};
+
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
+                new ObuStreamReader(input, 4).readObu();
+            }
+        });
+
+        assertEquals(Av1DecodeErrorCode.OBU_PAYLOAD_SIZE_LIMIT_EXCEEDED, exception.code());
+        assertEquals(Av1DecodeStage.OBU_READ, exception.stage());
+    }
+
+    /// Verifies that a size-less final OBU stops at the configured payload limit.
+    @Test
+    void rejectsSizeLessPayloadWhenItExceedsLimit() {
+        byte[] stream = new byte[]{0b0001_1000, 1, 2};
+
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
+                new ObuStreamReader(input, 1).readObu();
+            }
+        });
+
+        assertEquals(Av1DecodeErrorCode.OBU_PAYLOAD_SIZE_LIMIT_EXCEEDED, exception.code());
+        assertEquals(Av1DecodeStage.OBU_READ, exception.stage());
     }
 
     /// Encodes a single self-delimited OBU.

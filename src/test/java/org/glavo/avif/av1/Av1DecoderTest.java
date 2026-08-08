@@ -1102,6 +1102,29 @@ final class Av1DecoderTest {
         });
     }
 
+    /// Verifies that a consumed output advances its presentation index even if packed RGB
+    /// conversion fails.
+    ///
+    /// @throws IOException if the follow-up raw output cannot be read
+    @Test
+    void readFrameAdvancesPresentationIndexWhenOutputConversionFails() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload(Av1ChromaFormat.YUV420, 8, false, 64, 64, 10)),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(3, showExistingFrameHeaderPayload(0))
+        );
+
+        try (Av1Decoder reader = Av1Decoder.open(ByteBuffer.wrap(stream))) {
+            Av1DecodeException exception = assertThrows(Av1DecodeException.class, reader::readFrame);
+            assertEquals(Av1DecodeErrorCode.UNSUPPORTED_FEATURE, exception.code());
+            assertEquals(Av1DecodeStage.OUTPUT_CONVERSION, exception.stage());
+
+            Av1DecodedOutput nextOutput = Objects.requireNonNull(reader.readOutput(), "next output");
+            assertEquals(1, nextOutput.presentationIndex());
+            assertNull(reader.readOutput());
+        }
+    }
+
     /// Verifies that showing a key frame reloads its complete state and refreshes every reference
     /// slot before subsequent frame parsing.
     ///
@@ -4324,6 +4347,23 @@ final class Av1DecoderTest {
             int bitDepth,
             boolean filmGrainPresent
     ) {
+        writeReducedStillPictureColorConfig(writer, chromaFormat, bitDepth, filmGrainPresent, -1);
+    }
+
+    /// Writes reduced still-picture color configuration with optional explicit matrix signaling.
+    ///
+    /// @param writer the destination bit writer
+    /// @param chromaFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @param filmGrainPresent whether the sequence header should advertise film grain support
+    /// @param matrixCoefficients the explicit matrix coefficient code, or `-1` for unspecified
+    private static void writeReducedStillPictureColorConfig(
+            BitWriter writer,
+            Av1ChromaFormat chromaFormat,
+            int bitDepth,
+            boolean filmGrainPresent,
+            int matrixCoefficients
+    ) {
         int profile = reducedStillPictureProfile(chromaFormat, bitDepth);
         writer.writeFlag(bitDepth != 8);
         if (profile == 2 && bitDepth == 10) {
@@ -4334,7 +4374,12 @@ final class Av1DecoderTest {
         if (profile != 1) {
             writer.writeFlag(chromaFormat == Av1ChromaFormat.MONOCHROME);
         }
-        writer.writeFlag(false);
+        writer.writeFlag(matrixCoefficients >= 0);
+        if (matrixCoefficients >= 0) {
+            writer.writeBits(1, 8);
+            writer.writeBits(1, 8);
+            writer.writeBits(matrixCoefficients, 8);
+        }
         switch (chromaFormat) {
             case MONOCHROME -> {
                 writer.writeFlag(true);
@@ -4450,6 +4495,33 @@ final class Av1DecoderTest {
             int codedWidth,
             int codedHeight
     ) {
+        return fullSequenceHeaderPayload(
+                chromaFormat,
+                bitDepth,
+                filmGrainPresent,
+                codedWidth,
+                codedHeight,
+                -1
+        );
+    }
+
+    /// Creates one full sequence header with optional explicit matrix signaling.
+    ///
+    /// @param chromaFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @param filmGrainPresent whether frame headers in the stream may signal film grain
+    /// @param codedWidth the requested coded frame width
+    /// @param codedHeight the requested coded frame height
+    /// @param matrixCoefficients the explicit matrix coefficient code, or `-1` for unspecified
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(
+            Av1ChromaFormat chromaFormat,
+            int bitDepth,
+            boolean filmGrainPresent,
+            int codedWidth,
+            int codedHeight,
+            int matrixCoefficients
+    ) {
         if (codedWidth < 1 || codedWidth > 64) {
             throw new IllegalArgumentException("codedWidth out of supported fixture range: " + codedWidth);
         }
@@ -4485,7 +4557,13 @@ final class Av1DecoderTest {
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
-        writeReducedStillPictureColorConfig(writer, chromaFormat, bitDepth, filmGrainPresent);
+        writeReducedStillPictureColorConfig(
+                writer,
+                chromaFormat,
+                bitDepth,
+                filmGrainPresent,
+                matrixCoefficients
+        );
         writer.writeTrailingBits();
         return writer.toByteArray();
     }

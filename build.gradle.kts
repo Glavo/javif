@@ -221,8 +221,10 @@ val testCorpusCacheDirectory = providers.provider {
     layout.projectDirectory.dir("external/test-corpora")
 }
 val libavifCommit = "b54eac58daf563e9150cc6abce7631ac71b999aa"
+val libavifArchiveSha256 = "a9ef36092cf8e70b6ef9aad6d89f041a1d0880d43bee8eed12dcbc1a965f21ec"
 val libavifZip = testCorpusCacheDirectory.map { it.file("libavif-$libavifCommit.zip") }
 val aomAvifCommit = "bf4c18d1f3971069b75e87d6ee469790589f4f09"
+val aomAvifArchiveSha256 = "840d9c5330d5d7965b4838b282a333810027a15166ccb80c034ef4bc5951cd2c"
 val aomAvifZip = testCorpusCacheDirectory.map { it.file("av1-avif-$aomAvifCommit.zip") }
 val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-resources")
 val argonAv1Version = "2.1.1"
@@ -457,6 +459,48 @@ fun fileSha256(file: File): String {
     return HexFormat.of().formatHex(digest.digest())
 }
 
+val verifyLibavifArchive = tasks.register("verifyLibavifArchive") {
+    group = "verification"
+    description = "Verifies the pinned libavif test-data archive."
+    dependsOn(downloadLibavif)
+
+    inputs.file(libavifZip)
+    inputs.property("expectedSha256", libavifArchiveSha256)
+    val verificationMarker = layout.buildDirectory.file("verified-test-corpora/libavif-$libavifCommit.sha256")
+    outputs.file(verificationMarker)
+
+    doLast {
+        val actualSha256 = fileSha256(libavifZip.get().asFile)
+        check(actualSha256 == libavifArchiveSha256) {
+            "Unexpected libavif test-data archive digest: $actualSha256"
+        }
+        val marker = verificationMarker.get().asFile
+        marker.parentFile.mkdirs()
+        marker.writeText(actualSha256 + "\n", StandardCharsets.UTF_8)
+    }
+}
+
+val verifyAomAvifArchive = tasks.register("verifyAomAvifArchive") {
+    group = "verification"
+    description = "Verifies the pinned AOMedia AVIF test archive."
+    dependsOn(downloadAomAvifTestFiles)
+
+    inputs.file(aomAvifZip)
+    inputs.property("expectedSha256", aomAvifArchiveSha256)
+    val verificationMarker = layout.buildDirectory.file("verified-test-corpora/av1-avif-$aomAvifCommit.sha256")
+    outputs.file(verificationMarker)
+
+    doLast {
+        val actualSha256 = fileSha256(aomAvifZip.get().asFile)
+        check(actualSha256 == aomAvifArchiveSha256) {
+            "Unexpected AOMedia AVIF test archive digest: $actualSha256"
+        }
+        val marker = verificationMarker.get().asFile
+        marker.parentFile.mkdirs()
+        marker.writeText(actualSha256 + "\n", StandardCharsets.UTF_8)
+    }
+}
+
 val verifyArgonAv1Archive = tasks.register("verifyArgonAv1Archive") {
     group = "verification"
     description = "Verifies the pinned Argon Streams AV1 corpus archive."
@@ -510,7 +554,7 @@ val verifyChromiumAvifTestResources = tasks.register("verifyChromiumAvifTestReso
 }
 
 val prepareAomAvifTestResources = tasks.register<Sync>("prepareAomAvifTestResources") {
-    dependsOn(downloadAomAvifTestFiles)
+    dependsOn(verifyAomAvifArchive)
     inputs.property("aomAvifResourceSetVersion", 2)
     into(aomAvifTestResourcesDirectory)
 
@@ -673,7 +717,7 @@ tasks.register<Test>("chromiumAvifTest") {
 }
 
 tasks.processTestResources {
-    dependsOn(downloadLibavif)
+    dependsOn(verifyLibavifArchive)
 
     from(zipTree(libavifZip)) {
         includeEmptyDirs = false

@@ -254,6 +254,12 @@ final class AvifImageReaderTest {
         assertThrows(IllegalArgumentException.class, () -> AvifImageReaderFactory.DEFAULT.withInputSizeLimit(-1));
     }
 
+    /// Verifies that negative configured metadata-size limits are rejected.
+    @Test
+    void readerFactoryRejectsNegativeMetadataSizeLimit() {
+        assertThrows(IllegalArgumentException.class, () -> AvifImageReaderFactory.DEFAULT.withMetadataSizeLimit(-1));
+    }
+
     /// Verifies that the default packed pixel format follows the decoded source bit depth.
     @Test
     void pixelFormatDefaultsFollowSourceBitDepth() {
@@ -285,14 +291,17 @@ final class AvifImageReaderTest {
         AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
                 .withAv1DecoderConfig(av1Config)
                 .withOutputPixelFormat(AvifPixelFormat.ARGB_8888)
-                .withInputSizeLimit(8192);
+                .withInputSizeLimit(8192)
+                .withMetadataSizeLimit(4096);
 
         assertEquals(av1Config, factory.av1DecoderConfig());
         assertEquals(AvifPixelFormat.ARGB_8888, factory.outputPixelFormat());
         assertEquals(8192, factory.inputSizeLimit());
+        assertEquals(4096, factory.metadataSizeLimit());
         assertEquals(Av1DecoderConfig.DEFAULT, AvifImageReaderFactory.DEFAULT.av1DecoderConfig());
         assertNull(AvifImageReaderFactory.DEFAULT.outputPixelFormat());
-        assertEquals(0, AvifImageReaderFactory.DEFAULT.inputSizeLimit());
+        assertEquals(256L * 1024L * 1024L, AvifImageReaderFactory.DEFAULT.inputSizeLimit());
+        assertEquals(64L * 1024L * 1024L, AvifImageReaderFactory.DEFAULT.metadataSizeLimit());
     }
 
     /// Verifies that every public input type rejects encoded data above the configured limit.
@@ -881,6 +890,21 @@ final class AvifImageReaderTest {
             String xmpText = new String(remainingBytes(xmp), StandardCharsets.UTF_8);
             assertTrue(xmpText.contains("x:xmpmeta") || xmpText.contains("rdf:RDF"));
         }
+    }
+
+    /// Verifies that retained ICC, Exif, XMP, and opaque payloads share one metadata budget.
+    ///
+    /// @throws IOException if the fixture cannot be read
+    @Test
+    void openRejectsMaterializedMetadataAboveConfiguredLimit() throws IOException {
+        byte[] source = testResourceBytes(LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE);
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReaderFactory.DEFAULT.withMetadataSizeLimit(1).open(source)
+        );
+
+        assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+        assertTrue(exception.getMessage().contains("materialized metadata"));
     }
 
     /// Verifies that a libavif gain-map fixture exposes its `tmap` association metadata.
@@ -1666,6 +1690,86 @@ final class AvifImageReaderTest {
                 () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 3, 2))
         );
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that AVIS tracks cannot silently collapse multiple sample descriptions.
+    @Test
+    void rejectsAnimatedSequenceWithMultipleSampleDescriptions() {
+        byte[] sequence = minimalAvisSequenceWithSplitChunks(false);
+        int stsdTypeOffset = indexOf(sequence, fourCc("stsd"));
+        assertTrue(stsdTypeOffset >= 0);
+        writeU32(sequence, stsdTypeOffset + 8, 2);
+
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(sequence)
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("exactly one sample description"));
+    }
+
+    /// Verifies that every AVIS sample-to-chunk entry references the sole sample description.
+    @Test
+    void rejectsAnimatedSequenceWithUnsupportedSampleDescriptionIndex() {
+        byte[] sequence = minimalAvisSequenceWithSplitChunks(false);
+        int stscTypeOffset = indexOf(sequence, fourCc("stsc"));
+        assertTrue(stscTypeOffset >= 0);
+        writeU32(sequence, stscTypeOffset + 20, 2);
+
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(sequence)
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("sample_description_index must be 1"));
+    }
+
+    /// Verifies that AVIS timing is not synthesized when the timing table is absent.
+    @Test
+    void rejectsAnimatedSequenceWithoutTimingTable() {
+        byte[] sequence = minimalAvisSequenceWithSplitChunks(false);
+        int sttsTypeOffset = indexOf(sequence, fourCc("stts"));
+        assertTrue(sttsTypeOffset >= 0);
+        System.arraycopy(fourCc("free"), 0, sequence, sttsTypeOffset, 4);
+
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(sequence)
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("timing table does not cover all samples"));
+    }
+
+    /// Verifies that AVIS chunk layout is not guessed when `stsc` is absent.
+    @Test
+    void rejectsAnimatedSequenceWithoutSampleToChunkTable() {
+        byte[] sequence = minimalAvisSequenceWithSplitChunks(false);
+        int stscTypeOffset = indexOf(sequence, fourCc("stsc"));
+        assertTrue(stscTypeOffset >= 0);
+        System.arraycopy(fourCc("free"), 0, sequence, stscTypeOffset, 4);
+
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(sequence)
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("no sample-to-chunk table"));
+    }
+
+    /// Verifies that AVIS media timing is not guessed when `mdhd` declares a zero timescale.
+    @Test
+    void rejectsAnimatedSequenceWithoutPositiveMediaTimescale() {
+        byte[] sequence = minimalAvisSequenceWithSplitChunks(false);
+        int mdhdTypeOffset = indexOf(sequence, fourCc("mdhd"));
+        assertTrue(mdhdTypeOffset >= 0);
+        writeU32(sequence, mdhdTypeOffset + 16, 0);
+
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(sequence)
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("positive media timescale"));
     }
 
     /// Verifies that duplicate AVIS media handler boxes are rejected.
@@ -3847,18 +3951,40 @@ final class AvifImageReaderTest {
             int[] chunkOffsets,
             int... sampleSizes
     ) {
-        byte[] ignoredTrack = avisTrackBox(
-                leadingHandlerType,
-                new int[]{0, 0},
-                false,
-                3,
-                1,
-                3,
-                1,
-                3,
-                null,
-                sampleSizes
-        );
+        byte[] ignoredTrack;
+        if ("soun".equals(leadingHandlerType)) {
+            byte[] sampleTable = box(
+                    "stbl",
+                    nonImageSampleDescriptionBox(),
+                    timeToSampleBox(3, 1),
+                    sampleToChunkBox(1),
+                    chunkOffsetBox(new int[]{0, 0}, false),
+                    sampleSizeBox(sampleSizes)
+            );
+            ignoredTrack = box(
+                    "trak",
+                    trackHeaderBox(1, 3),
+                    box(
+                            "mdia",
+                            mediaHeaderBox(3),
+                            handlerBox(leadingHandlerType),
+                            box("minf", sampleTable)
+                    )
+            );
+        } else {
+            ignoredTrack = avisTrackBox(
+                    leadingHandlerType,
+                    new int[]{0, 0},
+                    false,
+                    3,
+                    1,
+                    3,
+                    1,
+                    3,
+                    null,
+                    sampleSizes
+            );
+        }
         byte[] imageTrack = avisTrackBox(
                 null,
                 chunkOffsets,
@@ -4385,6 +4511,20 @@ final class AvifImageReaderTest {
     /// @return the `stsd` box bytes
     private static byte[] sampleDescriptionBox(@Nullable String auxiliaryType) {
         return fullBox("stsd", 0, 0, u32(1), av01SampleEntry(auxiliaryType));
+    }
+
+    /// Creates multiple opaque sample descriptions for an ignored non-image track.
+    ///
+    /// @return the `stsd` box bytes
+    private static byte[] nonImageSampleDescriptionBox() {
+        return fullBox(
+                "stsd",
+                0,
+                0,
+                u32(2),
+                box("mp4a"),
+                box("mp4a")
+        );
     }
 
     /// Creates a minimal `av01` sample entry.

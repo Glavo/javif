@@ -45,12 +45,12 @@ parity are not project features.
 
 ## Verification Baseline
 
-- `processTestResources` downloads a pinned libavif source archive and copies its test fixtures into
-  generated test resources.
+- `processTestResources` downloads a pinned libavif source archive, verifies its SHA-256 digest,
+  and copies its test fixtures into generated test resources.
 - The opt-in `aomAvifTest` task downloads a pinned `AOMediaCodec/av1-avif` source archive and tests
-  all 172 AVIF files contributed by Apple, Link-U, Microsoft, Netflix, and Xiph. The task extracts
-  only AVIF files and their licenses or construction notes; it does not add the large reference
-  PNG set to the ordinary test classpath.
+  all 172 AVIF files contributed by Apple, Link-U, Microsoft, Netflix, and Xiph. The archive is
+  SHA-256 verified before extraction. The task extracts only AVIF files and their licenses or
+  construction notes; it does not add the large reference PNG set to the ordinary test classpath.
 - All 83 Link-U files curated by the pinned AOMedia corpus are decoded end to end and compared with
   FFmpeg's first-frame source planes. Documented PNG references additionally cover presentation
   transforms such as clean aperture, rotation, and mirroring.
@@ -64,8 +64,10 @@ parity are not project features.
   progressive images, Sample Transform, HDR/WCG metadata, and reference pixel/plane comparisons.
 - Unit and integration tests cover entropy decoding, syntax contexts, prediction, reconstruction,
   postfilters, output conversion, container validation, public API lifecycle, and input adapters.
+- Gradle dependency verification pins SHA-256 digests for build plugins and compile/test artifacts;
+  GitHub Actions are referenced by immutable commit SHA values.
 - No decoder-correctness test is disabled or retained as an expected failure.
-- The release gate is:
+- On JDK 23 or newer, the release gate is:
 
   ```text
   ./gradlew -g .gradle-user-home cleanTest test javadoc assemble verifyNoRuntimeDependencies

@@ -40,6 +40,7 @@ final class Av1DecoderConfigTest {
         assertEquals(Av1FrameSelection.ALL, config.frameSelection());
         assertEquals(0, config.operatingPoint());
         assertEquals(8192L * 8192L, config.frameSizeLimit());
+        assertEquals(256L * 1024L * 1024L, config.obuPayloadSizeLimit());
     }
 
     /// Verifies that invalid operating points are rejected.
@@ -60,7 +61,8 @@ final class Av1DecoderConfigTest {
                 .withLargeScaleTileMode(true)
                 .withFrameSelection(Av1FrameSelection.REFERENCE)
                 .withOperatingPoint(2)
-                .withFrameSizeLimit(1234);
+                .withFrameSizeLimit(1234)
+                .withObuPayloadSizeLimit(5678);
 
         assertSame(config, config.withOperatingPoint(2));
         Av1DecoderConfig changed = config.withOperatingPoint(7);
@@ -72,6 +74,7 @@ final class Av1DecoderConfigTest {
         assertEquals(Av1FrameSelection.REFERENCE, changed.frameSelection());
         assertEquals(7, changed.operatingPoint());
         assertEquals(1234, changed.frameSizeLimit());
+        assertEquals(5678, changed.obuPayloadSizeLimit());
         assertThrows(IllegalArgumentException.class, () -> config.withOperatingPoint(32));
     }
 
@@ -79,5 +82,11 @@ final class Av1DecoderConfigTest {
     @Test
     void withFrameSizeLimitRejectsNegativeValue() {
         assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.DEFAULT.withFrameSizeLimit(-1));
+    }
+
+    /// Verifies that negative OBU payload size limits are rejected.
+    @Test
+    void withObuPayloadSizeLimitRejectsNegativeValue() {
+        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.DEFAULT.withObuPayloadSizeLimit(-1));
     }
 }

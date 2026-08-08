@@ -32,6 +32,8 @@ public enum Av1DecodeErrorCode {
     UNSUPPORTED_FEATURE,
     /// The configured or implementation frame size limit was exceeded.
     FRAME_SIZE_LIMIT_EXCEEDED,
+    /// The configured or implementation OBU payload size limit was exceeded.
+    OBU_PAYLOAD_SIZE_LIMIT_EXCEEDED,
     /// The decoder state machine reached an invalid state.
     STATE_VIOLATION
 }

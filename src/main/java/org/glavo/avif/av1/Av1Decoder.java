@@ -121,7 +121,9 @@ public final class Av1Decoder implements AutoCloseable {
     private Av1Decoder(BufferedInput source, Av1DecoderConfig config, boolean annexB) {
         this.source = Objects.requireNonNull(source, "source");
         this.config = Objects.requireNonNull(config, "config");
-        this.obuReader = annexB ? ObuStreamReader.forAnnexB(source) : new ObuStreamReader(source);
+        this.obuReader = annexB
+                ? ObuStreamReader.forAnnexB(source, config.obuPayloadSizeLimit())
+                : new ObuStreamReader(source, config.obuPayloadSizeLimit());
         this.sequenceHeaderParser = new SequenceHeaderParser();
         this.frameHeaderParser = new FrameHeaderParser();
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
@@ -257,6 +259,9 @@ public final class Av1Decoder implements AutoCloseable {
 
     /// Reads the next decoded frame from the source.
     ///
+    /// The presentation output is consumed before packed RGB conversion. If conversion is not
+    /// supported, this method throws and a subsequent read continues with the following output.
+    ///
     /// @return the next decoded frame, or `null` at end-of-stream
     /// @throws IOException if the source is unreadable or the bitstream is malformed
     public @Nullable Av1DecodedFrame readFrame() throws IOException {
@@ -264,13 +269,13 @@ public final class Av1Decoder implements AutoCloseable {
         if (output == null) {
             return null;
         }
+        nextPresentationIndex++;
         Av1DecodedFrame frame;
         try {
             frame = output.createOutput().toFrame();
         } catch (UnsupportedOperationException exception) {
             throw unsupportedOutputConversion(output.packet(), exception);
         }
-        nextPresentationIndex++;
         return frame;
     }
 
@@ -433,9 +438,9 @@ public final class Av1Decoder implements AutoCloseable {
         return null;
     }
 
-    /// Reads all decoded frames from the source until end-of-stream.
+    /// Reads all remaining decoded frames from the current stream position until end-of-stream.
     ///
-    /// @return all decoded frames from the source
+    /// @return all remaining decoded frames from the current stream position
     /// @throws IOException if the source is unreadable or the bitstream is malformed
     public @Unmodifiable List<Av1DecodedFrame> readAllFrames() throws IOException {
         ensureOpen();

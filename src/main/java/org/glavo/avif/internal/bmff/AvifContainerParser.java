@@ -58,9 +58,15 @@ public final class AvifContainerParser {
     private static final long INDEFINITE_TRACK_DURATION = -1L;
     /// The maximum number of sequence samples materialized from one track's sample tables.
     private static final int MAX_SEQUENCE_SAMPLE_COUNT = 1_000_000;
+    /// The default maximum cumulative size of materialized non-image metadata.
+    private static final long DEFAULT_METADATA_SIZE_LIMIT = 64L * 1024L * 1024L;
 
     /// The retained container data source.
     private final AvifDataSource source;
+    /// The configured cumulative limit for materialized non-image metadata, or zero for no limit.
+    private final long metadataSizeLimit;
+    /// The cumulative byte size reserved for materialized non-image metadata.
+    private long materializedMetadataSize;
     /// The parsed metadata state.
     private final MetaState meta = new MetaState();
     /// Whether an AVIF-compatible `ftyp` box was parsed.
@@ -73,8 +79,13 @@ public final class AvifContainerParser {
     /// Creates an AVIF container parser.
     ///
     /// @param source the retained container data source
-    private AvifContainerParser(AvifDataSource source) {
+    /// @param metadataSizeLimit the cumulative metadata size limit, or zero for no configured limit
+    private AvifContainerParser(AvifDataSource source, long metadataSizeLimit) {
+        if (metadataSizeLimit < 0) {
+            throw new IllegalArgumentException("metadataSizeLimit < 0: " + metadataSizeLimit);
+        }
         this.source = Objects.requireNonNull(source, "source");
+        this.metadataSizeLimit = metadataSizeLimit;
     }
 
     /// Parses AVIF container data.
@@ -86,7 +97,10 @@ public final class AvifContainerParser {
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
     public static AvifContainer parse(byte[] source) throws AvifDecodeException {
-        return parse(AvifDataSource.ofBytes(Objects.requireNonNull(source, "source")));
+        return parse(
+                AvifDataSource.ofBytes(Objects.requireNonNull(source, "source")),
+                DEFAULT_METADATA_SIZE_LIMIT
+        );
     }
 
     /// Parses AVIF container data from a retained positional source.
@@ -98,7 +112,19 @@ public final class AvifContainerParser {
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
     public static AvifContainer parse(AvifDataSource source) throws AvifDecodeException {
-        return new AvifContainerParser(source).parse();
+        return parse(source, DEFAULT_METADATA_SIZE_LIMIT);
+    }
+
+    /// Parses AVIF container data with a cumulative metadata materialization limit.
+    ///
+    /// @param source the retained positional source
+    /// @param metadataSizeLimit the cumulative metadata size limit in bytes, or zero for no
+    ///                          configured limit
+    /// @return parsed AVIF container data
+    /// @throws AvifDecodeException if the container is malformed, unsupported, or exceeds the
+    ///                             configured metadata limit
+    public static AvifContainer parse(AvifDataSource source, long metadataSizeLimit) throws AvifDecodeException {
+        return new AvifContainerParser(source, metadataSizeLimit).parse();
     }
 
     /// Parses AVIF container data.
@@ -1652,7 +1678,7 @@ public final class AvifContainerParser {
     /// @param input the property payload input
     /// @return the parsed property
     /// @throws AvifDecodeException if the property is malformed
-    private static Property parseProperty(BoxHeader header, BoxInput input) throws AvifDecodeException {
+    private Property parseProperty(BoxHeader header, BoxInput input) throws AvifDecodeException {
         return switch (header.type()) {
             case "ispe" -> parseIspe(input);
             case "av1C" -> parseAv1C(input);
@@ -1675,7 +1701,8 @@ public final class AvifContainerParser {
     /// @param input the property payload input
     /// @return the parsed opaque property
     /// @throws AvifDecodeException if a UUID property is missing its user type
-    private static OpaqueProperty parseOpaqueProperty(BoxHeader header, BoxInput input) throws AvifDecodeException {
+    private OpaqueProperty parseOpaqueProperty(BoxHeader header, BoxInput input) throws AvifDecodeException {
+        reserveMetadataBytes(input.remaining(), input.offset(), header.type() + " item property");
         byte @Nullable [] userType = null;
         if ("uuid".equals(header.type())) {
             if (input.remaining() < 16) {
@@ -1739,9 +1766,10 @@ public final class AvifContainerParser {
     /// @param input the property payload input
     /// @return the parsed property
     /// @throws AvifDecodeException if the property is malformed
-    private static Property parseColr(BoxInput input) throws AvifDecodeException {
+    private Property parseColr(BoxInput input) throws AvifDecodeException {
         String colourType = input.readFourCc();
         if ("prof".equals(colourType) || "rICC".equals(colourType)) {
+            reserveMetadataBytes(input.remaining(), input.offset(), "ICC color profile");
             byte[] profile = input.readBytes(input.remaining());
             if (profile.length == 0) {
                 throw parseFailed("ICC color profile payload is empty", input.offset());
@@ -1749,6 +1777,7 @@ public final class AvifContainerParser {
             return new IccColorProfile(profile);
         }
         if (!"nclx".equals(colourType)) {
+            reserveMetadataBytes((long) input.remaining() + 4L, input.offset() - 4, "opaque colr property");
             ByteArrayOutputStream payload = new ByteArrayOutputStream();
             payload.writeBytes(colourType.getBytes(StandardCharsets.ISO_8859_1));
             payload.writeBytes(input.readBytes(input.remaining()));
@@ -1774,8 +1803,9 @@ public final class AvifContainerParser {
     /// @param input the property payload input
     /// @return the parsed property
     /// @throws AvifDecodeException if the property is malformed
-    private static AuxiliaryType parseAuxC(BoxInput input) throws AvifDecodeException {
+    private AuxiliaryType parseAuxC(BoxInput input) throws AvifDecodeException {
         readFullBox(input);
+        reserveMetadataBytes(input.remaining(), input.offset(), "auxiliary type property");
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         while (input.hasRemaining()) {
             int value = input.readU8();
@@ -1913,6 +1943,27 @@ public final class AvifContainerParser {
     /// Creates an AVIF container from parsed sequence data.
     private AvifContainer parseSequenceImage() throws AvifDecodeException {
         MoovState s = meta.moovState;
+        if (s.seqHeaderObu == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "AVIS container has no usable AV1 color track",
+                    null
+            );
+        }
+        if (s.width <= 0 || s.height <= 0 || s.bitDepth <= 0 || s.chromaFormat == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "AVIS color track is missing required image configuration",
+                    null
+            );
+        }
+        if (s.mediaTimescale <= 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "AVIS color track has no positive media timescale",
+                    null
+            );
+        }
         validateSequencePremultipliedAlphaReferences();
         SequencePayloads colorPayloads = sequencePayloads(s, "Color sequence");
         AvifPayload @Nullable [] alphaPayloads = sequenceAuxiliaryPayloads(
@@ -1925,17 +1976,16 @@ public final class AvifContainerParser {
                 colorPayloads.sampleCount,
                 "Depth sequence"
         );
-        int ts = s.mediaTimescale > 0 ? s.mediaTimescale : 30;
         long dur = sequenceDuration(s, colorPayloads);
         int repetitionCount = sequenceRepetitionCount(s);
         AvifImageInfo info = new AvifImageInfo(
-                s.width > 0 ? s.width : 1,
-                s.height > 0 ? s.height : 1,
-                AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
-                s.chromaFormat != null ? s.chromaFormat : Av1ChromaFormat.YUV420
+                s.width,
+                s.height,
+                AvifBitDepth.fromBits(s.bitDepth),
+                s.chromaFormat
         ).withSequenceInfo(new AvifSequenceInfo(
                         colorPayloads.sampleCount,
-                        ts,
+                        s.mediaTimescale,
                         dur,
                         repetitionCount,
                         colorPayloads.frameDeltas
@@ -2051,10 +2101,17 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, label + " has no chunk offsets", null);
         }
         int sampleCount = track.sampleSizes.size();
-        if (!track.sampleDeltas.isEmpty() && track.sampleDeltas.size() != sampleCount) {
+        if (track.sampleDeltas.size() != sampleCount) {
             throw new AvifDecodeException(
                     AvifErrorCode.BMFF_PARSE_FAILED,
                     label + " timing table does not cover all samples",
+                    null
+            );
+        }
+        if (track.sampleToChunkEntries.isEmpty()) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    label + " has no sample-to-chunk table",
                     null
             );
         }
@@ -2062,26 +2119,26 @@ public final class AvifContainerParser {
         int[] deltas = new int[sampleCount];
 
         int sampleIndex = 0;
-        if (track.sampleToChunkEntries.isEmpty()) {
-            sampleIndex = collectSequentialChunkSamples(track, label, payloads, deltas, sampleIndex, 0, sampleCount);
-        } else {
-            int entryIndex = 0;
-            for (int chunkIndex = 1; chunkIndex <= track.chunkOffsets.size() && sampleIndex < sampleCount; chunkIndex++) {
-                while (entryIndex + 1 < track.sampleToChunkEntries.size()
-                        && chunkIndex >= track.sampleToChunkEntries.get(entryIndex + 1).firstChunk) {
-                    entryIndex++;
-                }
-                SampleToChunkEntry entry = track.sampleToChunkEntries.get(entryIndex);
-                sampleIndex = collectSequentialChunkSamples(
-                        track,
-                        label,
-                        payloads,
-                        deltas,
-                        sampleIndex,
-                        chunkIndex - 1,
-                        Math.min(sampleCount, sampleIndex + entry.samplesPerChunk)
-                );
+        int entryIndex = 0;
+        for (int chunkIndex = 1; chunkIndex <= track.chunkOffsets.size() && sampleIndex < sampleCount; chunkIndex++) {
+            while (entryIndex + 1 < track.sampleToChunkEntries.size()
+                    && chunkIndex >= track.sampleToChunkEntries.get(entryIndex + 1).firstChunk) {
+                entryIndex++;
             }
+            SampleToChunkEntry entry = track.sampleToChunkEntries.get(entryIndex);
+            int exclusiveSampleEnd = (int) Math.min(
+                    sampleCount,
+                    (long) sampleIndex + entry.samplesPerChunk
+            );
+            sampleIndex = collectSequentialChunkSamples(
+                    track,
+                    label,
+                    payloads,
+                    deltas,
+                    sampleIndex,
+                    chunkIndex - 1,
+                    exclusiveSampleEnd
+            );
         }
         if (sampleIndex != sampleCount) {
             throw new AvifDecodeException(
@@ -2118,7 +2175,7 @@ public final class AvifContainerParser {
         while (sampleIndex < exclusiveSampleEnd) {
             int size = track.sampleSizes.get(sampleIndex);
             payloads[sampleIndex] = sequenceSample(label, sampleIndex, offset, size);
-            deltas[sampleIndex] = sampleIndex < track.sampleDeltas.size() ? track.sampleDeltas.get(sampleIndex) : 1;
+            deltas[sampleIndex] = track.sampleDeltas.get(sampleIndex);
             offset += size;
             sampleIndex++;
         }
@@ -2183,29 +2240,49 @@ public final class AvifContainerParser {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             if ("trak".equals(child.type())) {
-                MoovState selectedTrack = meta.moovState.copy();
-                meta.moovState.copyFrom(new MoovState());
+                MoovState parsedTrack = new MoovState();
                 BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
-                parseMoovTrack(trakPayload);
-                MoovState parsedTrack = meta.moovState.copy();
+                parseMoovTrack(trakPayload, parsedTrack);
+                finalizeMoovTrack(parsedTrack);
                 inferLegacyMoovAuxiliaryType(parsedTrack);
                 if (isMoovImageTrack(parsedTrack)) {
                     if (parsedTrack.auxiliaryType != null) {
                         meta.moovAuxiliaryCandidates.add(parsedTrack);
-                        meta.moovState.copyFrom(selectedTrack);
-                    } else if (parsedTrack.seqHeaderObu == null) {
-                        meta.moovState.copyFrom(selectedTrack);
-                    } else if (selectedTrack.seqHeaderObu != null
-                            && moovColorTrackPreference(parsedTrack) <= moovColorTrackPreference(selectedTrack)) {
-                        meta.moovState.copyFrom(selectedTrack);
+                    } else if (parsedTrack.seqHeaderObu != null
+                            && (meta.moovState.seqHeaderObu == null
+                            || moovColorTrackPreference(parsedTrack) > moovColorTrackPreference(meta.moovState))) {
+                        meta.moovState = parsedTrack;
                     }
-                } else {
-                    meta.moovState.copyFrom(selectedTrack);
                 }
             }
             input.skipBoxPayload(child);
         }
         resolveMoovAuxiliaryTracks();
+    }
+
+    /// Finalizes AV1 configuration that depends on the complete parsed track geometry.
+    ///
+    /// @param track the parsed track to finalize
+    private static void finalizeMoovTrack(MoovState track) throws AvifDecodeException {
+        if (isPotentialMoovImageTrack(track)
+                && track.containsAv1SampleDescription
+                && track.sampleDescriptionCount != 1) {
+            throw parseFailed("AVIS stsd must contain exactly one sample description");
+        }
+        if (isPotentialMoovImageTrack(track)
+                && track.av1Config != null
+                && track.hasNonPrimarySampleDescriptionReference) {
+            throw parseFailed("AVIS stsc sample_description_index must be 1");
+        }
+        if (isPotentialMoovImageTrack(track)
+                && track.av1Config != null
+                && track.maximumSyncSampleNumber > track.sampleSizes.size()) {
+            throw parseFailed("AVIS stss sample number is outside the sample table");
+        }
+        Av1Config av1Config = track.av1Config;
+        if (av1Config != null && track.width > 0 && track.height > 0) {
+            track.seqHeaderObu = av1Config.seqHeaderObu(track.width, track.height);
+        }
     }
 
     /// Infers the alpha type for legacy monochrome AVIS auxiliary tracks without `auxi`.
@@ -2233,6 +2310,18 @@ public final class AvifContainerParser {
                 || "pict".equals(handlerType)
                 || "vide".equals(handlerType)
                 || ("auxv".equals(handlerType) && track.auxiliaryType != null);
+    }
+
+    /// Returns whether a handler may describe an AVIS image track before its sample entry is parsed.
+    ///
+    /// @param track the partially parsed track state
+    /// @return whether the handler permits an AV1 image sample entry
+    private static boolean isPotentialMoovImageTrack(MoovState track) {
+        String handlerType = track.mediaHandlerType;
+        return handlerType == null
+                || "pict".equals(handlerType)
+                || "vide".equals(handlerType)
+                || "auxv".equals(handlerType);
     }
 
     /// Returns the deterministic selection priority for one AVIS color-track candidate.
@@ -2336,29 +2425,29 @@ public final class AvifContainerParser {
     }
 
     /// Parses a `trak` box and extracts video track metadata.
-    private void parseMoovTrack(BoxInput input) throws AvifDecodeException {
+    private void parseMoovTrack(BoxInput input, MoovState track) throws AvifDecodeException {
         boolean edtsSeen = false;
         boolean trefSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "tkhd" -> parseMoovTkhd(payload);
+                case "tkhd" -> parseMoovTkhd(payload, track);
                 case "tref" -> {
                     if (trefSeen) {
                         throw parseFailed("Box[trak] contains a duplicate unique box of type 'tref'", child.offset());
                     }
                     trefSeen = true;
-                    parseMoovTref(payload);
+                    parseMoovTref(payload, track);
                 }
                 case "edts" -> {
                     if (edtsSeen) {
                         throw parseFailed("Box[trak] contains a duplicate unique box of type 'edts'", child.offset());
                     }
                     edtsSeen = true;
-                    parseMoovEdts(payload);
+                    parseMoovEdts(payload, track);
                 }
-                case "mdia" -> parseMoovMdia(payload);
+                case "mdia" -> parseMoovMdia(payload, track);
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2366,26 +2455,26 @@ public final class AvifContainerParser {
     }
 
     /// Parses a `tkhd` box for track dimensions.
-    private void parseMoovTkhd(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovTkhd(BoxInput input, MoovState track) throws AvifDecodeException {
         FullBox fb = readFullBox(input);
         if (fb.version == 1) {
             input.skip(16);
         } else {
             input.skip(8);
         }
-        meta.moovState.trackId = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        track.trackId = checkedU32ToInt(input.readU32(), input.offset() - 4);
         input.skip(4);
-        meta.moovState.trackDuration = fb.version == 1 ? readTrackDuration64(input) : readTrackDuration32(input);
+        track.trackDuration = fb.version == 1 ? readTrackDuration64(input) : readTrackDuration32(input);
         input.skip(52);
         long w = input.readU32();
         long h = input.readU32();
         int width = checkedU32ToInt(w >>> 16, input.offset());
         int height = checkedU32ToInt(h >>> 16, input.offset());
-        if (width > 0 && meta.moovState.width == 0) {
-            meta.moovState.width = width;
+        if (width > 0 && track.width == 0) {
+            track.width = width;
         }
-        if (height > 0 && meta.moovState.height == 0) {
-            meta.moovState.height = height;
+        if (height > 0 && track.height == 0) {
+            track.height = height;
         }
     }
 
@@ -2393,13 +2482,13 @@ public final class AvifContainerParser {
     ///
     /// @param input the tref box payload
     /// @throws AvifDecodeException if the box is malformed
-    private void parseMoovTref(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovTref(BoxInput input, MoovState track) throws AvifDecodeException {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "auxl" -> parseMoovTrackReference(payload, meta.moovState.auxiliaryForTrackIds, "auxl");
-                case "prem" -> parseMoovTrackReference(payload, meta.moovState.premultipliedByTrackIds, "prem");
+                case "auxl" -> parseMoovTrackReference(payload, track.auxiliaryForTrackIds, "auxl");
+                case "prem" -> parseMoovTrackReference(payload, track.premultipliedByTrackIds, "prem");
                 default -> {
                 }
             }
@@ -2431,7 +2520,7 @@ public final class AvifContainerParser {
     }
 
     /// Parses an `edts` box for AVIS edit-list metadata.
-    private void parseMoovEdts(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovEdts(BoxInput input, MoovState track) throws AvifDecodeException {
         boolean elstSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
@@ -2441,7 +2530,7 @@ public final class AvifContainerParser {
                 }
                 elstSeen = true;
                 BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
-                parseMoovElst(payload);
+                parseMoovElst(payload, track);
             }
             input.skipBoxPayload(child);
         }
@@ -2451,11 +2540,11 @@ public final class AvifContainerParser {
     }
 
     /// Parses an `elst` box for AVIS repetition metadata.
-    private void parseMoovElst(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovElst(BoxInput input, MoovState track) throws AvifDecodeException {
         FullBox fb = readFullBox(input);
-        meta.moovState.editListSeen = true;
+        track.editListSeen = true;
         if ((fb.flags & 1) == 0) {
-            meta.moovState.editListRepeating = false;
+            track.editListRepeating = false;
             return;
         }
         if (fb.version != 0 && fb.version != 1) {
@@ -2471,26 +2560,34 @@ public final class AvifContainerParser {
         }
         input.skip(fb.version == 1 ? 8 : 4);
         input.skip(4);
-        meta.moovState.editListRepeating = true;
-        meta.moovState.editListSegmentDuration = segmentDuration;
+        track.editListRepeating = true;
+        track.editListSegmentDuration = segmentDuration;
     }
 
     /// Parses a `mdia` box to reach the media information and sample table.
-    private void parseMoovMdia(BoxInput input) throws AvifDecodeException {
+    private void parseMoovMdia(BoxInput input, MoovState track) throws AvifDecodeException {
+        // Resolve the handler before interpreting sample-table restrictions. BMFF does not make
+        // child-box order significant, and non-image tracks may use otherwise unsupported tables.
+        BoxInput handlerScan = input.slice(input.offset(), input.remaining());
         boolean hdlrSeen = false;
+        while (handlerScan.hasRemaining()) {
+            BoxHeader child = handlerScan.readBoxHeader();
+            if ("hdlr".equals(child.type())) {
+                if (hdlrSeen) {
+                    throw parseFailed("Box[mdia] contains a duplicate unique box of type 'hdlr'", child.offset());
+                }
+                hdlrSeen = true;
+                parseMoovHandler(handlerScan.slice(child.payloadOffset(), child.payloadSize()), track);
+            }
+            handlerScan.skipBoxPayload(child);
+        }
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "mdhd" -> parseMoovMdhd(payload);
-                case "hdlr" -> {
-                    if (hdlrSeen) {
-                        throw parseFailed("Box[mdia] contains a duplicate unique box of type 'hdlr'", child.offset());
-                    }
-                    hdlrSeen = true;
-                    parseMoovHandler(payload);
-                }
-                case "minf" -> parseMoovMinf(payload);
+                case "mdhd" -> parseMoovMdhd(payload, track);
+                case "hdlr" -> {}
+                case "minf" -> parseMoovMinf(payload, track);
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2501,17 +2598,17 @@ public final class AvifContainerParser {
     ///
     /// @param input the box payload input
     /// @throws AvifDecodeException if the handler box is malformed
-    private void parseMoovHandler(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovHandler(BoxInput input, MoovState track) throws AvifDecodeException {
         readFullBox(input);
         long preDefined = input.readU32();
         if (preDefined != 0) {
             throw parseFailed("mdia hdlr pre_defined must be zero", input.offset() - 4);
         }
-        meta.moovState.mediaHandlerType = input.readFourCc();
+        track.mediaHandlerType = input.readFourCc();
     }
 
     /// Parses an `mdhd` box for media timescale and duration.
-    private void parseMoovMdhd(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovMdhd(BoxInput input, MoovState track) throws AvifDecodeException {
         FullBox fb = readFullBox(input);
         if (fb.version == 1) {
             input.skip(16);
@@ -2520,35 +2617,60 @@ public final class AvifContainerParser {
         }
         int timescale = checkedU32ToInt(input.readU32(), input.offset() - 4);
         long duration = fb.version == 1 ? input.readU64() : input.readU32();
-        meta.moovState.mediaTimescale = timescale;
-        meta.moovState.mediaDuration = duration;
+        track.mediaTimescale = timescale;
+        track.mediaDuration = duration;
     }
 
     /// Parses a `minf` box to reach the sample table.
-    private void parseMoovMinf(BoxInput input) throws AvifDecodeException {
+    private void parseMoovMinf(BoxInput input, MoovState track) throws AvifDecodeException {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             if ("stbl".equals(child.type())) {
                 BoxInput stblPayload = input.slice(child.payloadOffset(), child.payloadSize());
-                parseMoovStbl(stblPayload);
+                parseMoovStbl(stblPayload, track);
             }
             input.skipBoxPayload(child);
         }
     }
 
     /// Parses a `stbl` (sample table) box and extracts all available sample metadata.
-    private void parseMoovStbl(BoxInput input) throws AvifDecodeException {
+    private void parseMoovStbl(BoxInput input, MoovState track) throws AvifDecodeException {
+        Set<String> seenTables = new HashSet<>();
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "stsd" -> parseMoovStsd(payload);
-                case "stts" -> parseMoovStts(payload);
-                case "stco" -> parseMoovStco(payload);
-                case "co64" -> parseMoovCo64(payload);
-                case "stsc" -> parseMoovStsc(payload);
-                case "stsz" -> parseMoovStsz(payload);
-                case "stss" -> parseMoovStss(payload);
+                case "stsd" -> {
+                    unique(seenTables, child.type(), child.offset());
+                    parseMoovStsd(payload, track);
+                }
+                case "stts" -> {
+                    unique(seenTables, child.type(), child.offset());
+                    parseMoovStts(payload, track);
+                }
+                case "stco", "co64" -> {
+                    if (seenTables.contains("stco") || seenTables.contains("co64")) {
+                        throw parseFailed("AVIS sample table contains multiple chunk-offset tables", child.offset());
+                    }
+                    seenTables.add(child.type());
+                    if ("stco".equals(child.type())) {
+                        parseMoovStco(payload, track);
+                    } else {
+                        parseMoovCo64(payload, track);
+                    }
+                }
+                case "stsc" -> {
+                    unique(seenTables, child.type(), child.offset());
+                    parseMoovStsc(payload, track);
+                }
+                case "stsz" -> {
+                    unique(seenTables, child.type(), child.offset());
+                    parseMoovStsz(payload, track);
+                }
+                case "stss" -> {
+                    unique(seenTables, child.type(), child.offset());
+                    parseMoovStss(payload, track);
+                }
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2556,47 +2678,66 @@ public final class AvifContainerParser {
     }
 
     /// Parses `stsd` and extracts the av01 sample entry with av1C config.
-    private void parseMoovStsd(BoxInput input) throws AvifDecodeException {
+    private void parseMoovStsd(BoxInput input, MoovState track) throws AvifDecodeException {
         readFullBox(input);
         int entryCount = checkedU32ToInt(input.readU32(), input.offset() - 4);
-        for (int i = 0; i < Math.min(entryCount, 1); i++) {
+        enforceSequenceTableEntryCount(entryCount, "stsd", input.offset() - 4);
+        track.sampleDescriptionCount = entryCount;
+        if (entryCount != 1 && isPotentialMoovImageTrack(track)) {
+            throw parseFailed("AVIS stsd must contain exactly one sample description", input.offset() - 4);
+        }
+        for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
             BoxHeader entry = input.readBoxHeader();
             if ("av01".equals(entry.type())) {
-                BoxInput av01i = input.slice(entry.payloadOffset(), entry.payloadSize());
-                parseMoovAv01Entry(av01i);
+                track.containsAv1SampleDescription = true;
+                if (entryCount == 1) {
+                    BoxInput av01i = input.slice(entry.payloadOffset(), entry.payloadSize());
+                    parseMoovAv01Entry(av01i, track);
+                }
             }
             input.skipBoxPayload(entry);
+        }
+        if (input.hasRemaining()) {
+            throw parseFailed("AVIS stsd contains trailing data after its sample descriptions", input.offset());
         }
     }
 
     /// Extracts av1C and colr from an av01 sample entry.
-    private void parseMoovAv01Entry(BoxInput input) throws AvifDecodeException {
+    private void parseMoovAv01Entry(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(24);
         int w = input.readU16();
         int h = input.readU16();
-        if (w > 0 && meta.moovState.width == 0) meta.moovState.width = w;
-        if (h > 0 && meta.moovState.height == 0) meta.moovState.height = h;
+        if (w > 0 && track.width == 0) track.width = w;
+        if (h > 0 && track.height == 0) track.height = h;
         input.skip(50);
+        boolean av1ConfigSeen = false;
+        boolean auxiliaryTypeSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
                 case "av1C" -> {
-                    int av1cPos = payload.offset();
+                    if (av1ConfigSeen) {
+                        throw parseFailed("AVIS av01 entry contains multiple av1C boxes", child.offset());
+                    }
+                    av1ConfigSeen = true;
                     Av1Config c = parseAv1C(payload);
-                    meta.moovState.bitDepth = c.bitDepth();
-                    meta.moovState.chromaFormat = c.chromaFormat();
-                    meta.moovState.seqHeaderObu = c.seqHeaderObu(
-                            meta.moovState.width > 0 ? meta.moovState.width : 150,
-                            meta.moovState.height > 0 ? meta.moovState.height : 150
-                    );
+                    track.av1Config = c;
+                    track.bitDepth = c.bitDepth();
+                    track.chromaFormat = c.chromaFormat();
                 }
                 case "colr" -> {
                     Property p = parseColr(payload);
-                    if (p instanceof ColorProperty cp) meta.moovState.colr = cp.colorInfo;
-                    if (p instanceof IccColorProfile icc) meta.moovState.iccProfile = icc.profile();
+                    if (p instanceof ColorProperty cp) track.colr = cp.colorInfo;
+                    if (p instanceof IccColorProfile icc) track.iccProfile = icc.profile();
                 }
-                case "auxi" -> meta.moovState.auxiliaryType = parseMoovAuxiliaryType(payload);
+                case "auxi" -> {
+                    if (auxiliaryTypeSeen) {
+                        throw parseFailed("AVIS av01 entry contains multiple auxi boxes", child.offset());
+                    }
+                    auxiliaryTypeSeen = true;
+                    track.auxiliaryType = parseMoovAuxiliaryType(payload);
+                }
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2608,18 +2749,20 @@ public final class AvifContainerParser {
     /// @param input the box payload input
     /// @return the auxiliary image type string
     /// @throws AvifDecodeException if the box is malformed or unsupported
-    private static String parseMoovAuxiliaryType(BoxInput input) throws AvifDecodeException {
+    private String parseMoovAuxiliaryType(BoxInput input) throws AvifDecodeException {
         FullBox fullBox = readFullBox(input);
         if (fullBox.version != 0 || fullBox.flags != 0) {
             throw unsupported("Unsupported auxi version/flags", input.offset());
         }
+        reserveMetadataBytes(input.remaining(), input.offset(), "AVIS auxiliary type");
         return readNullTerminatedString(input);
     }
 
     /// Parses `stts` for sample timing deltas.
-    private void parseMoovStts(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovStts(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        enforceSequenceTableEntryCount(n, "stts", input.offset() - 4);
         for (int i = 0; i < n; i++) {
             int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
             int sd = checkedU32ToInt(input.readU32(), input.offset() - 4);
@@ -2630,35 +2773,38 @@ public final class AvifContainerParser {
                 throw parseFailed("stts sample_delta must be positive", input.offset() - 4);
             }
             enforceSequenceSampleCount(
-                    meta.moovState.sampleDeltas.size(),
+                    track.sampleDeltas.size(),
                     sc,
                     "stts",
                     input.offset() - 8
             );
-            for (int j = 0; j < sc; j++) meta.moovState.sampleDeltas.add(sd);
+            for (int j = 0; j < sc; j++) track.sampleDeltas.add(sd);
         }
     }
 
     /// Parses `stco` for chunk offsets.
-    private void parseMoovStco(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovStco(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        enforceSequenceTableEntryCount(n, "stco", input.offset() - 4);
         for (int i = 0; i < n; i++)
-            meta.moovState.chunkOffsets.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+            track.chunkOffsets.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
     }
 
     /// Parses `co64` for 64-bit chunk offsets.
-    private void parseMoovCo64(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovCo64(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        enforceSequenceTableEntryCount(n, "co64", input.offset() - 4);
         for (int i = 0; i < n; i++)
-            meta.moovState.chunkOffsets.add(checkedU64ToInt(input.readU64(), input.offset() - 8));
+            track.chunkOffsets.add(checkedU64ToInt(input.readU64(), input.offset() - 8));
     }
 
     /// Parses `stsc` for sample-to-chunk layout.
-    private void parseMoovStsc(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovStsc(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        enforceSequenceTableEntryCount(n, "stsc", input.offset() - 4);
         for (int i = 0; i < n; i++) {
             int firstChunk = checkedU32ToInt(input.readU32(), input.offset() - 4);
             int samplesPerChunk = checkedU32ToInt(input.readU32(), input.offset() - 4);
@@ -2672,37 +2818,35 @@ public final class AvifContainerParser {
             if (samplesPerChunk <= 0) {
                 throw parseFailed("stsc samples_per_chunk must be positive", input.offset() - 8);
             }
-            if (sampleDescriptionIndex <= 0) {
-                throw parseFailed("stsc sample_description_index must be positive", input.offset() - 4);
-            }
-            if (!meta.moovState.sampleToChunkEntries.isEmpty()) {
-                SampleToChunkEntry previous = meta.moovState.sampleToChunkEntries.get(
-                        meta.moovState.sampleToChunkEntries.size() - 1
+            track.hasNonPrimarySampleDescriptionReference |= sampleDescriptionIndex != 1;
+            if (!track.sampleToChunkEntries.isEmpty()) {
+                SampleToChunkEntry previous = track.sampleToChunkEntries.get(
+                        track.sampleToChunkEntries.size() - 1
                 );
                 if (firstChunk <= previous.firstChunk) {
                     throw parseFailed("stsc first_chunk entries must be strictly increasing", input.offset() - 12);
                 }
             }
-            meta.moovState.sampleToChunkEntries.add(new SampleToChunkEntry(firstChunk, samplesPerChunk));
+            track.sampleToChunkEntries.add(new SampleToChunkEntry(firstChunk, samplesPerChunk));
         }
     }
 
     /// Parses `stsz` for sample sizes.
-    private void parseMoovStsz(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovStsz(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int ss = checkedU32ToInt(input.readU32(), input.offset() - 4);
         int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
         enforceSequenceSampleCount(
-                meta.moovState.sampleSizes.size(),
+                track.sampleSizes.size(),
                 sc,
                 "stsz",
                 input.offset() - 4
         );
         if (ss == 0) {
             for (int i = 0; i < sc; i++)
-                meta.moovState.sampleSizes.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+                track.sampleSizes.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
         } else {
-            for (int i = 0; i < sc; i++) meta.moovState.sampleSizes.add(ss);
+            for (int i = 0; i < sc; i++) track.sampleSizes.add(ss);
         }
     }
 
@@ -2728,12 +2872,34 @@ public final class AvifContainerParser {
         }
     }
 
+    /// Rejects an AVIS table before retaining an excessive number of entries.
+    ///
+    /// @param entryCount the declared table entry count
+    /// @param boxType the table box type used in diagnostics
+    /// @param offset the source offset of the entry count
+    /// @throws AvifDecodeException if the table exceeds the parser resource limit
+    private static void enforceSequenceTableEntryCount(int entryCount, String boxType, int offset)
+            throws AvifDecodeException {
+        if (entryCount > MAX_SEQUENCE_SAMPLE_COUNT) {
+            throw unsupported(
+                    boxType + " entry count exceeds the supported limit: " + entryCount,
+                    offset
+            );
+        }
+    }
+
     /// Parses `stss` for sync sample indices.
-    private void parseMoovStss(BoxInput input) throws AvifDecodeException {
+    private static void parseMoovStss(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
-        for (int i = 0; i < n; i++)
-            meta.moovState.syncSamples.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+        enforceSequenceTableEntryCount(n, "stss", input.offset() - 4);
+        for (int i = 0; i < n; i++) {
+            int sampleNumber = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            if (sampleNumber <= 0) {
+                throw parseFailed("stss sample number is outside the sample table", input.offset() - 4);
+            }
+            track.maximumSyncSampleNumber = Math.max(track.maximumSyncSampleNumber, sampleNumber);
+        }
     }
 
     /// Parses an `ipma` box.
@@ -3361,8 +3527,10 @@ public final class AvifContainerParser {
     /// @return one contiguous item payload
     /// @throws AvifDecodeException if the item data is malformed or truncated
     private byte[] mergeItemExtents(Item item) throws AvifDecodeException {
+        AvifPayload payload = itemPayload(item);
+        reserveMetadataBytes(payload.length(), -1L, "item " + item.id + " payload");
         try {
-            return itemPayload(item).readBytes();
+            return payload.readBytes();
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -3373,6 +3541,28 @@ public final class AvifContainerParser {
                     exception
             );
         }
+    }
+
+    /// Reserves bytes from the cumulative non-image metadata materialization budget.
+    ///
+    /// @param byteCount the number of bytes about to be materialized
+    /// @param offset the associated source offset, or `-1` when the metadata spans extents
+    /// @param description the metadata description used in diagnostics
+    /// @throws AvifDecodeException if the configured metadata limit would be exceeded
+    private void reserveMetadataBytes(long byteCount, long offset, String description)
+            throws AvifDecodeException {
+        if (byteCount < 0) {
+            throw new IllegalArgumentException("byteCount < 0: " + byteCount);
+        }
+        if (metadataSizeLimit != 0 && byteCount > metadataSizeLimit - materializedMetadataSize) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.INPUT_TOO_LARGE,
+                    "AVIF materialized metadata exceeds configured size limit: "
+                            + description + " (" + metadataSizeLimit + " bytes)",
+                    offset >= 0 ? offset : null
+            );
+        }
+        materializedMetadataSize += byteCount;
     }
 
     /// Reads one full-box header.
@@ -3663,7 +3853,7 @@ public final class AvifContainerParser {
         /// The optional `idat` payload length.
         private int idatLength;
         /// The parsed AVIS moov state.
-        private final MoovState moovState = new MoovState();
+        private MoovState moovState = new MoovState();
 
         /// Returns an existing item or creates a new one.
         ///
@@ -3715,6 +3905,16 @@ public final class AvifContainerParser {
         private long editListSegmentDuration;
         /// The parsed AV1 sequence header OBU, or `null` before an AV1 track is found.
         private byte @Nullable [] seqHeaderObu;
+        /// The parsed AV1 sample-entry configuration, or `null` when absent.
+        private @Nullable Av1Config av1Config;
+        /// The number of sample descriptions declared by `stsd`.
+        private int sampleDescriptionCount;
+        /// Whether `stsd` contains at least one AV1 sample description.
+        private boolean containsAv1SampleDescription;
+        /// Whether `stsc` references a sample description other than the first.
+        private boolean hasNonPrimarySampleDescriptionReference;
+        /// The greatest one-based sync sample number declared by `stss`.
+        private int maximumSyncSampleNumber;
         /// The AVIS auxiliary track type, or `null` for the selected color track.
         private @Nullable String auxiliaryType;
         /// The `tref/auxl` color track IDs referenced by this auxiliary track.
@@ -3729,53 +3929,6 @@ public final class AvifContainerParser {
         private final List<SampleToChunkEntry> sampleToChunkEntries = new ArrayList<>();
         /// The parsed sample sizes.
         private final List<Integer> sampleSizes = new ArrayList<>();
-        /// The parsed sync sample indices.
-        private final List<Integer> syncSamples = new ArrayList<>();
-
-        /// Creates a copy of this sequence track state.
-        ///
-        /// @return an independent copy of this state
-        private MoovState copy() {
-            MoovState copy = new MoovState();
-            copy.copyFrom(this);
-            return copy;
-        }
-
-        /// Copies all values from another sequence track state.
-        ///
-        /// @param other the source state
-        private void copyFrom(MoovState other) {
-            trackId = other.trackId;
-            width = other.width;
-            height = other.height;
-            bitDepth = other.bitDepth;
-            chromaFormat = other.chromaFormat;
-            colr = other.colr;
-            iccProfile = other.iccProfile == null ? null : other.iccProfile.clone();
-            mediaHandlerType = other.mediaHandlerType;
-            mediaTimescale = other.mediaTimescale;
-            mediaDuration = other.mediaDuration;
-            trackDuration = other.trackDuration;
-            editListSeen = other.editListSeen;
-            editListRepeating = other.editListRepeating;
-            editListSegmentDuration = other.editListSegmentDuration;
-            seqHeaderObu = other.seqHeaderObu == null ? null : other.seqHeaderObu.clone();
-            auxiliaryType = other.auxiliaryType;
-            auxiliaryForTrackIds.clear();
-            auxiliaryForTrackIds.addAll(other.auxiliaryForTrackIds);
-            premultipliedByTrackIds.clear();
-            premultipliedByTrackIds.addAll(other.premultipliedByTrackIds);
-            sampleDeltas.clear();
-            sampleDeltas.addAll(other.sampleDeltas);
-            chunkOffsets.clear();
-            chunkOffsets.addAll(other.chunkOffsets);
-            sampleToChunkEntries.clear();
-            sampleToChunkEntries.addAll(other.sampleToChunkEntries);
-            sampleSizes.clear();
-            sampleSizes.addAll(other.sampleSizes);
-            syncSamples.clear();
-            syncSamples.addAll(other.syncSamples);
-        }
     }
 
     /// Parsed grid payloads and geometry.
@@ -4263,14 +4416,14 @@ public final class AvifContainerParser {
         ///
         /// @param profile the ICC profile payload
         private IccColorProfile(byte[] profile) {
-            this.profile = profile.clone();
+            this.profile = Objects.requireNonNull(profile, "profile");
         }
 
-        /// Returns a copy of the ICC profile payload.
+        /// Returns the internally owned ICC profile payload.
         ///
         /// @return the ICC profile payload
         private byte @Unmodifiable [] profile() {
-            return profile.clone();
+            return profile;
         }
     }
 
@@ -4305,8 +4458,8 @@ public final class AvifContainerParser {
         /// @param payload the property payload after any UUID user type
         private OpaqueProperty(String type, byte @Nullable [] userType, byte[] payload) {
             this.type = Objects.requireNonNull(type, "type");
-            this.userType = userType != null ? userType.clone() : null;
-            this.payload = Objects.requireNonNull(payload, "payload").clone();
+            this.userType = userType;
+            this.payload = Objects.requireNonNull(payload, "payload");
         }
 
         /// Creates a public opaque item property descriptor.

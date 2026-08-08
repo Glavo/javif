@@ -31,11 +31,17 @@ import java.util.Objects;
 /// Creates AVIF image readers with an immutable reusable set of decoding options.
 @NotNullByDefault
 public final class AvifImageReaderFactory {
-    /// The default reader factory.
+    /// The default maximum accepted encoded AVIF input size.
+    private static final long DEFAULT_INPUT_SIZE_LIMIT = 256L * 1024L * 1024L;
+    /// The default maximum cumulative size of materialized non-image metadata.
+    private static final long DEFAULT_METADATA_SIZE_LIMIT = 64L * 1024L * 1024L;
+
+    /// The default reader factory, with a 256 MiB input limit and a 64 MiB metadata limit.
     public static final AvifImageReaderFactory DEFAULT = new AvifImageReaderFactory(
             Av1DecoderConfig.DEFAULT,
             null,
-            0
+            DEFAULT_INPUT_SIZE_LIMIT,
+            DEFAULT_METADATA_SIZE_LIMIT
     );
 
     /// The maximum encoded input size supported by the integer-offset BMFF parser.
@@ -47,20 +53,26 @@ public final class AvifImageReaderFactory {
     private final @Nullable AvifPixelFormat outputPixelFormat;
     /// The maximum accepted encoded AVIF input size in bytes, or `0` for no limit.
     private final long inputSizeLimit;
+    /// The maximum cumulative size of materialized non-image metadata, or `0` for no configured limit.
+    private final long metadataSizeLimit;
 
     /// Creates a reader factory with validated options.
     ///
     /// @param av1DecoderConfig the underlying AV1 decoder configuration
     /// @param outputPixelFormat the packed ARGB output format, or `null` for automatic selection
     /// @param inputSizeLimit the maximum accepted encoded input size in bytes, or `0` for no limit
+    /// @param metadataSizeLimit the maximum cumulative size of materialized non-image metadata in
+    ///                          bytes, or `0` for no configured limit
     private AvifImageReaderFactory(
             Av1DecoderConfig av1DecoderConfig,
             @Nullable AvifPixelFormat outputPixelFormat,
-            long inputSizeLimit
+            long inputSizeLimit,
+            long metadataSizeLimit
     ) {
         this.av1DecoderConfig = Objects.requireNonNull(av1DecoderConfig, "av1DecoderConfig");
         this.outputPixelFormat = outputPixelFormat;
         this.inputSizeLimit = inputSizeLimit;
+        this.metadataSizeLimit = metadataSizeLimit;
     }
 
     /// Returns the underlying AV1 decoder configuration.
@@ -92,6 +104,17 @@ public final class AvifImageReaderFactory {
         return inputSizeLimit;
     }
 
+    /// Returns the maximum cumulative size of materialized non-image metadata.
+    ///
+    /// The limit covers payloads such as ICC profiles, Exif, XMP, gain-map metadata, grids,
+    /// sample-transform expressions, and opaque item properties. A value of `0` disables the
+    /// configured metadata limit; encoded input and implementation limits still apply.
+    ///
+    /// @return the metadata size limit in bytes, or `0` when no configured limit applies
+    public long metadataSizeLimit() {
+        return metadataSizeLimit;
+    }
+
     /// Returns a factory using the supplied AV1 decoder configuration.
     ///
     /// @param value the underlying AV1 decoder configuration
@@ -100,7 +123,7 @@ public final class AvifImageReaderFactory {
         Av1DecoderConfig checkedValue = Objects.requireNonNull(value, "value");
         return checkedValue == av1DecoderConfig
                 ? this
-                : new AvifImageReaderFactory(checkedValue, outputPixelFormat, inputSizeLimit);
+                : new AvifImageReaderFactory(checkedValue, outputPixelFormat, inputSizeLimit, metadataSizeLimit);
     }
 
     /// Returns a factory using the supplied packed ARGB output format.
@@ -113,7 +136,7 @@ public final class AvifImageReaderFactory {
     public AvifImageReaderFactory withOutputPixelFormat(@Nullable AvifPixelFormat value) {
         return value == outputPixelFormat
                 ? this
-                : new AvifImageReaderFactory(av1DecoderConfig, value, inputSizeLimit);
+                : new AvifImageReaderFactory(av1DecoderConfig, value, inputSizeLimit, metadataSizeLimit);
     }
 
     /// Returns a factory using the supplied maximum encoded input size.
@@ -131,7 +154,23 @@ public final class AvifImageReaderFactory {
         }
         return value == inputSizeLimit
                 ? this
-                : new AvifImageReaderFactory(av1DecoderConfig, outputPixelFormat, value);
+                : new AvifImageReaderFactory(av1DecoderConfig, outputPixelFormat, value, metadataSizeLimit);
+    }
+
+    /// Returns a factory using the supplied cumulative metadata materialization limit.
+    ///
+    /// A value of `0` disables the configured metadata limit. Encoded input and implementation
+    /// limits still apply.
+    ///
+    /// @param value the maximum cumulative metadata size in bytes, or `0` for no configured limit
+    /// @return a factory with the supplied metadata-size limit
+    public AvifImageReaderFactory withMetadataSizeLimit(long value) {
+        if (value < 0) {
+            throw new IllegalArgumentException("metadataSizeLimit must be non-negative");
+        }
+        return value == metadataSizeLimit
+                ? this
+                : new AvifImageReaderFactory(av1DecoderConfig, outputPixelFormat, inputSizeLimit, value);
     }
 
     /// Opens an AVIF image reader over a byte array.

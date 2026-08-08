@@ -19,7 +19,6 @@ import org.glavo.avif.av1.Av1Decoder;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1DecodedOutput;
 import org.glavo.avif.av1.Av1DecodeException;
-import org.glavo.avif.av1.Av1DecodedFrame;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
@@ -86,7 +85,7 @@ public final class AvifImageReader implements AutoCloseable {
         this.factory = Objects.requireNonNull(factory, "factory");
         this.source = Objects.requireNonNull(source, "source");
         try {
-            this.container = AvifContainerParser.parse(source);
+            this.container = AvifContainerParser.parse(source, factory.metadataSizeLimit());
         } catch (AvifDecodeException | RuntimeException | Error exception) {
             try {
                 source.close();
@@ -518,9 +517,9 @@ public final class AvifImageReader implements AutoCloseable {
             if (output == null)
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence produced no frame: " + frameIndex, null);
             sequenceAv1FrameIndex++;
-            AvifFrame rawFrame = adaptFrame(
-                    output.toFrame(),
+            AvifFrame rawFrame = adaptRawPlanes(
                     output.planes(),
+                    output.colorConfig(),
                     container.info().colorInfo(),
                     frameIndex,
                     factory.outputPixelFormat()
@@ -1298,9 +1297,9 @@ public final class AvifImageReader implements AutoCloseable {
                 }
             }
             Av1DecodedOutput requiredOutput = Objects.requireNonNull(output, "output");
-            AvifFrame rawFrame = adaptFrame(
-                    requiredOutput.toFrame(),
+            AvifFrame rawFrame = adaptRawPlanes(
                     requiredOutput.planes(),
+                    requiredOutput.colorConfig(),
                     container.info().colorInfo(),
                     frameIndex,
                     factory.outputPixelFormat()
@@ -1313,9 +1312,9 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Reads all decoded frames.
+    /// Reads all remaining decoded frames from the current sequential position.
     ///
-    /// @return all decoded frames
+    /// @return all remaining decoded frames
     /// @throws IOException if a frame cannot be decoded
     public @Unmodifiable List<AvifFrame> readAllFrames() throws IOException {
         ensureOpen();
@@ -1664,98 +1663,6 @@ public final class AvifImageReader implements AutoCloseable {
         return result;
     }
 
-    /// Adapts an AV1 decoded frame to the AVIF public frame model.
-    ///
-    /// @param frame the decoded AV1 frame
-    /// @param planes the decoded AV1 planes, or `null`
-    /// @param colorInfo the AVIF `nclx` color metadata, or `null`
-    /// @param frameIndex the zero-based AVIF frame index
-    /// @param outputPixelFormat the configured packed pixel format, or `null` to select by source bit depth
-    /// @return an AVIF public frame
-    /// @throws AvifDecodeException if the container selects an unsupported color conversion
-    private static AvifFrame adaptFrame(
-            Av1DecodedFrame frame,
-            @Nullable DecodedPlanes planes,
-            @Nullable AvifColorInfo colorInfo,
-            int frameIndex,
-            @Nullable AvifPixelFormat outputPixelFormat
-    ) throws AvifDecodeException {
-        AvifPixelFormat pixelFormat = outputPixelFormat != null
-                ? outputPixelFormat
-                : frame.bitDepth().defaultPixelFormat();
-        if (colorInfo != null && planes != null) {
-            try {
-                return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, pixelFormat);
-            } catch (UnsupportedOperationException exception) {
-                throw unsupportedColorConversion(exception);
-            }
-        }
-        if (pixelFormat == AvifPixelFormat.ARGB_8888) {
-            return new AvifFrame(
-                    frame.width(),
-                    frame.height(),
-                    frame.bitDepth(),
-                    frame.chromaFormat(),
-                    frameIndex,
-                    frame.intPixelBuffer()
-            );
-        }
-        if (pixelFormat == AvifPixelFormat.ARGB_16161616) {
-            return new AvifFrame(
-                    frame.width(),
-                    frame.height(),
-                    frame.bitDepth(),
-                    frame.chromaFormat(),
-                    frameIndex,
-                    frame.longPixelBuffer()
-            );
-        }
-        throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
-    }
-
-    /// Adapts decoded AV1 planes to the AVIF public frame model using container color metadata.
-    ///
-    /// @param frame the decoded AV1 frame metadata
-    /// @param planes the decoded AV1 planes to render
-    /// @param colorInfo the AVIF `nclx` color metadata
-    /// @param frameIndex the zero-based AVIF frame index
-    /// @param pixelFormat the concrete packed pixel format
-    /// @return an AVIF public frame rendered with the container-selected YUV transform
-    private static AvifFrame adaptFrameFromPlanes(
-            Av1DecodedFrame frame,
-            DecodedPlanes planes,
-            AvifColorInfo colorInfo,
-            int frameIndex,
-            AvifPixelFormat pixelFormat
-    ) {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorInfo(
-                colorInfo,
-                frame.chromaFormat() == Av1ChromaFormat.MONOCHROME
-        );
-        DecodedSurface decodedSurface = toDecodedPlanes(planes);
-        if (pixelFormat == AvifPixelFormat.ARGB_8888) {
-            return AvifFrame.fromOwnedPixels(
-                    frame.width(),
-                    frame.height(),
-                    frame.bitDepth(),
-                    frame.chromaFormat(),
-                    frameIndex,
-                    ArgbOutput.toOpaqueArgbPixels(decodedSurface, transform)
-            );
-        }
-        if (pixelFormat == AvifPixelFormat.ARGB_16161616) {
-            return AvifFrame.fromOwnedPixels(
-                    frame.width(),
-                    frame.height(),
-                    frame.bitDepth(),
-                    frame.chromaFormat(),
-                    frameIndex,
-                    ArgbOutput.toOpaqueArgbLongPixels(decodedSurface, transform)
-            );
-        }
-        throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
-    }
-
     /// Combines a sequentially read sequence frame with its matching alpha sample when present.
     ///
     /// @param colorFrame the decoded color frame
@@ -1802,7 +1709,7 @@ public final class AvifImageReader implements AutoCloseable {
         }
         sequenceAlphaAv1FrameIndex++;
         return combineFrameWithDecodedAlpha(
-                colorFrame, alphaOutput.toFrame(), alphaOutput.planes(), frameIndex
+                colorFrame, alphaOutput.planes(), frameIndex
         );
     }
 
@@ -1836,92 +1743,80 @@ public final class AvifImageReader implements AutoCloseable {
             Av1DecodedOutput requiredOutput = Objects.requireNonNull(alphaOutput, "alphaOutput");
             return combineFrameWithDecodedAlpha(
                     colorFrame,
-                    requiredOutput.toFrame(),
                     requiredOutput.planes(),
                     frameIndex
             );
         }
     }
 
-    /// Combines one decoded alpha frame with a color frame.
+    /// Combines decoded alpha planes with a color frame.
     ///
     /// @param colorFrame the decoded color frame
-    /// @param alphaFrame the decoded alpha frame metadata
-    /// @param alphaPlanes the decoded alpha planes, or `null`
+    /// @param alphaPlanes the decoded alpha planes
     /// @param frameIndex the zero-based AVIF frame index
     /// @return the combined AVIF frame
-    /// @throws AvifDecodeException if alpha planes are unavailable or dimensions differ
+    /// @throws AvifDecodeException if the alpha dimensions differ
     private AvifFrame combineFrameWithDecodedAlpha(
             AvifFrame colorFrame,
-            Av1DecodedFrame alphaFrame,
-            @Nullable DecodedPlanes alphaPlanes,
+            DecodedPlanes alphaPlanes,
             int frameIndex
     ) throws AvifDecodeException {
         return combineFrameWithDecodedAlpha(
                 colorFrame,
-                alphaFrame,
                 alphaPlanes,
                 frameIndex,
                 container.info().alphaPremultiplied()
         );
     }
 
-    /// Combines one decoded alpha frame with a color frame.
+    /// Combines decoded alpha planes with a color frame.
     ///
     /// @param colorFrame the decoded color frame
-    /// @param alphaFrame the decoded alpha frame metadata
-    /// @param alphaPlanes the decoded alpha planes, or `null`
+    /// @param alphaPlanes the decoded alpha planes
     /// @param frameIndex the zero-based AVIF frame index
     /// @param alphaPremultiplied whether color samples are premultiplied by alpha
     /// @return the combined AVIF frame
-    /// @throws AvifDecodeException if alpha planes are unavailable or dimensions differ
+    /// @throws AvifDecodeException if the alpha dimensions differ
     private static AvifFrame combineFrameWithDecodedAlpha(
             AvifFrame colorFrame,
-            Av1DecodedFrame alphaFrame,
-            @Nullable DecodedPlanes alphaPlanes,
+            DecodedPlanes alphaPlanes,
             int frameIndex,
             boolean alphaPremultiplied
     ) throws AvifDecodeException {
-        DecodedPlanes checkedAlphaPlanes = validateDecodedAlphaFrame(
+        DecodedPlanes checkedAlphaPlanes = validateDecodedAlphaPlanes(
                 colorFrame.width(),
                 colorFrame.height(),
-                alphaFrame,
                 alphaPlanes
         );
         return combineFrameWithAlphaPlane(
                 colorFrame,
                 checkedAlphaPlanes,
-                alphaFrame.bitDepth(),
+                checkedAlphaPlanes.bitDepth(),
                 frameIndex,
                 alphaPremultiplied
         );
     }
 
-    /// Validates one decoded alpha frame before composition.
+    /// Validates decoded alpha planes before composition.
     ///
     /// @param expectedWidth the expected alpha width
     /// @param expectedHeight the expected alpha height
-    /// @param alphaFrame the decoded alpha frame metadata
-    /// @param alphaPlanes the decoded alpha planes, or `null`
+    /// @param alphaPlanes the decoded alpha planes
     /// @return the validated alpha planes
-    /// @throws AvifDecodeException if the alpha frame is incompatible with the color frame
-    private static DecodedPlanes validateDecodedAlphaFrame(
+    /// @throws AvifDecodeException if the alpha planes are incompatible with the color frame
+    private static DecodedPlanes validateDecodedAlphaPlanes(
             int expectedWidth,
             int expectedHeight,
-            Av1DecodedFrame alphaFrame,
-            @Nullable DecodedPlanes alphaPlanes
+            DecodedPlanes alphaPlanes
     ) throws AvifDecodeException {
-        if (alphaFrame.width() != expectedWidth || alphaFrame.height() != expectedHeight) {
+        if (alphaPlanes.codedWidth() != expectedWidth || alphaPlanes.codedHeight() != expectedHeight) {
             throw new AvifDecodeException(
                     AvifErrorCode.AV1_DECODE_FAILED,
                     "Alpha with different decoded dimensions than master image",
                     null
             );
         }
-        if (alphaPlanes == null) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
-        }
-        validateAlphaLumaPlane(alphaPlanes.lumaPlane(), alphaFrame.width(), alphaFrame.height(), "Alpha");
+        validateAlphaLumaPlane(alphaPlanes.lumaPlane(), expectedWidth, expectedHeight, "Alpha");
         return alphaPlanes;
     }
 

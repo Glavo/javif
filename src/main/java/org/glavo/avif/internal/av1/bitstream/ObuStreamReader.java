@@ -30,6 +30,8 @@ import java.util.Objects;
 /// Sequential OBU reader for raw AV1 low-overhead or Annex B bitstreams.
 @NotNullByDefault
 public final class ObuStreamReader {
+    /// The default maximum encoded payload retained for one OBU.
+    private static final long DEFAULT_PAYLOAD_SIZE_LIMIT = 256L * 1024L * 1024L;
     /// The largest OBU payload representable by the decoder's byte-array storage.
     private static final int MAX_PAYLOAD_SIZE = Integer.MAX_VALUE - 8;
 
@@ -37,6 +39,8 @@ public final class ObuStreamReader {
     private final BufferedInput input;
     /// Whether the source uses Annex B temporal-unit and frame-unit framing.
     private final boolean annexB;
+    /// The effective maximum encoded payload retained for one OBU.
+    private final int maximumPayloadSize;
     /// The next unread byte offset in the source.
     private long streamOffset;
     /// The next unread OBU index in the source.
@@ -54,7 +58,16 @@ public final class ObuStreamReader {
     ///
     /// @param input the forward-only buffered byte source
     public ObuStreamReader(BufferedInput input) {
-        this(input, false);
+        this(input, false, DEFAULT_PAYLOAD_SIZE_LIMIT);
+    }
+
+    /// Creates a sequential OBU reader with an encoded-payload resource limit.
+    ///
+    /// @param input the forward-only buffered byte source
+    /// @param payloadSizeLimit the maximum encoded payload retained for one OBU, or `0` to apply
+    ///                         only the implementation limit
+    public ObuStreamReader(BufferedInput input, long payloadSizeLimit) {
+        this(input, false, payloadSizeLimit);
     }
 
     /// Creates a sequential reader for an Annex B AV1 bitstream.
@@ -62,16 +75,35 @@ public final class ObuStreamReader {
     /// @param input the forward-only buffered byte source
     /// @return a reader that consumes Annex B temporal, frame, and OBU length fields
     public static ObuStreamReader forAnnexB(BufferedInput input) {
-        return new ObuStreamReader(input, true);
+        return new ObuStreamReader(input, true, DEFAULT_PAYLOAD_SIZE_LIMIT);
+    }
+
+    /// Creates a sequential Annex B reader with an encoded-payload resource limit.
+    ///
+    /// @param input the forward-only buffered byte source
+    /// @param payloadSizeLimit the maximum encoded payload retained for one OBU, or `0` to apply
+    ///                         only the implementation limit
+    /// @return a reader that consumes Annex B temporal, frame, and OBU length fields
+    public static ObuStreamReader forAnnexB(BufferedInput input, long payloadSizeLimit) {
+        return new ObuStreamReader(input, true, payloadSizeLimit);
     }
 
     /// Creates a sequential OBU reader for one framing mode.
     ///
     /// @param input the forward-only buffered byte source
     /// @param annexB whether the source uses Annex B framing
-    private ObuStreamReader(BufferedInput input, boolean annexB) {
+    /// @param payloadSizeLimit the maximum encoded payload retained for one OBU, or `0` to apply
+    ///                         only the implementation limit
+    private ObuStreamReader(BufferedInput input, boolean annexB, long payloadSizeLimit) {
+        if (payloadSizeLimit < 0) {
+            throw new IllegalArgumentException("payloadSizeLimit < 0: " + payloadSizeLimit);
+        }
         this.input = Objects.requireNonNull(input, "input");
         this.annexB = annexB;
+        this.maximumPayloadSize = (int) Math.min(
+                payloadSizeLimit == 0 ? MAX_PAYLOAD_SIZE : payloadSizeLimit,
+                MAX_PAYLOAD_SIZE
+        );
     }
 
     /// Reads the next OBU packet from the source.
@@ -306,11 +338,12 @@ public final class ObuStreamReader {
                     null
             );
         }
-        if (payloadSize > MAX_PAYLOAD_SIZE) {
+        if (payloadSize > maximumPayloadSize) {
             throw new Av1DecodeException(
-                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeErrorCode.OBU_PAYLOAD_SIZE_LIMIT_EXCEEDED,
                     Av1DecodeStage.OBU_READ,
-                    "OBU payload exceeds the supported allocation size: " + payloadSize,
+                    "OBU payload exceeds the configured or implementation size limit: "
+                            + payloadSize + " > " + maximumPayloadSize,
                     obuOffset,
                     currentObuIndex,
                     null
@@ -422,11 +455,12 @@ public final class ObuStreamReader {
             } catch (EOFException ignored) {
                 return payload.toByteArray();
             }
-            if (payload.size() == MAX_PAYLOAD_SIZE) {
+            if (payload.size() == maximumPayloadSize) {
                 throw new Av1DecodeException(
-                        Av1DecodeErrorCode.INVALID_BITSTREAM,
+                        Av1DecodeErrorCode.OBU_PAYLOAD_SIZE_LIMIT_EXCEEDED,
                         Av1DecodeStage.OBU_READ,
-                        "OBU payload exceeds the supported allocation size: " + (MAX_PAYLOAD_SIZE + 1L),
+                        "OBU payload exceeds the configured or implementation size limit: "
+                                + (maximumPayloadSize + 1L) + " > " + maximumPayloadSize,
                         obuOffset,
                         currentObuIndex,
                         null
