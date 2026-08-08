@@ -6,6 +6,7 @@ build/
 !**/src/test/**/build/
 .kotlin
 /external/
+/gradle/maven-central-publish.properties
 
 ### IntelliJ IDEA ###
 .idea/

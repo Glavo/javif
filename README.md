@@ -32,6 +32,10 @@ Run the release gate with the repository-local Gradle user home:
 
 The main, source, and Javadoc JARs are written to `build/libs`.
 
+Formal signed artifacts are published from `v*` tags after the complete external corpus gate has
+passed for the tagged commit. See [RELEASING.md](RELEASING.md) for credentials, validation, and
+failure guidance.
+
 ## Decode an AVIF image
 
 ```java

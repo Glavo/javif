@@ -27,6 +27,14 @@ if (version == Project.DEFAULT_VERSION) {
 
 description = "Pure Java implementation of AV1 decoding and AVIF reading library"
 
+val releaseVersionPattern =
+    Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?")
+val configuredReleaseVersion = version.toString()
+var mavenPublicationSigningConfigured = false
+
+fun releaseProperty(name: String): String? =
+    findProperty(name)?.toString()?.takeIf(String::isNotBlank)
+
 java {
     withJavadocJar()
     withSourcesJar()
@@ -114,6 +122,51 @@ tasks.register("verifyNoRuntimeDependencies") {
 
         check(requiredRuntimeModules == setOf("java.base")) {
             "org.glavo.avif requires runtime modules other than java.base: ${requiredRuntimeModules.sorted().joinToString()}"
+        }
+    }
+}
+
+val verifyReleaseVersion = tasks.register("verifyReleaseVersion") {
+    group = "verification"
+    description = "Verifies that the project uses a valid non-SNAPSHOT release version."
+    inputs.property("releaseVersion", configuredReleaseVersion)
+
+    doLast {
+        if (!releaseVersionPattern.matches(configuredReleaseVersion)
+                || configuredReleaseVersion.endsWith("-SNAPSHOT", ignoreCase = true)) {
+            throw GradleException(
+                "Release version must use <major>.<minor>.<patch> with an optional pre-release suffix: " +
+                        configuredReleaseVersion,
+            )
+        }
+    }
+}
+
+val requiredReleaseProperties = listOf(
+    "sonatypeUsername",
+    "sonatypePassword",
+    "signing.key",
+    "signing.password",
+)
+val configuredReleaseProperties = requiredReleaseProperties.associateWith(::releaseProperty)
+
+val verifyReleaseConfiguration = tasks.register("verifyReleaseConfiguration") {
+    group = "verification"
+    description = "Verifies the credentials and signing key required for a Maven Central release."
+    dependsOn(verifyReleaseVersion)
+
+    doLast {
+        val missingProperties = requiredReleaseProperties.filter { configuredReleaseProperties[it] == null }
+        if (missingProperties.isNotEmpty()) {
+            throw GradleException(
+                missingProperties.joinToString(
+                    prefix = "Missing Maven Central release properties: ",
+                    separator = ", ",
+                ),
+            )
+        }
+        if (!mavenPublicationSigningConfigured) {
+            throw GradleException("The Maven publication is not configured for signing")
         }
     }
 }
@@ -665,6 +718,56 @@ publishing.publications.create<MavenPublication>("maven") {
 
         scm {
             url.set("https://github.com/Glavo/javif")
+            connection.set("scm:git:https://github.com/Glavo/javif.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Glavo/javif.git")
+            tag.set("v${project.version}")
         }
+    }
+}
+
+val mavenPublication = publishing.publications.named<MavenPublication>("maven")
+val signingKey = releaseProperty("signing.key")
+if (signingKey != null) {
+    signing {
+        useInMemoryPgpKeys(
+            releaseProperty("signing.keyId"),
+            signingKey,
+            releaseProperty("signing.password"),
+        )
+        sign(mavenPublication.get())
+    }
+    mavenPublicationSigningConfigured = true
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
+            snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
+            username.set(providers.provider { releaseProperty("sonatypeUsername") ?: "" })
+            password.set(providers.provider { releaseProperty("sonatypePassword") ?: "" })
+            stagingProfileId.set(providers.provider {
+                releaseProperty("sonatypeStagingProfileId") ?: project.group.toString()
+            })
+        }
+    }
+}
+
+val remoteReleaseTasks = setOf(
+    "publish",
+    "publishToSonatype",
+    "publishAllPublicationsToSonatypeRepository",
+    "publishMavenPublicationToSonatypeRepository",
+    "initializeSonatypeStagingRepository",
+    "closeSonatypeStagingRepository",
+    "closeStagingRepositories",
+    "releaseSonatypeStagingRepository",
+    "releaseStagingRepositories",
+    "closeAndReleaseSonatypeStagingRepository",
+    "closeAndReleaseStagingRepositories",
+)
+tasks.configureEach {
+    if (name in remoteReleaseTasks) {
+        dependsOn(verifyReleaseConfiguration)
     }
 }

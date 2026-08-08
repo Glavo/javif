@@ -1,0 +1,156 @@
+name: Release
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: maven-central-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_NAME" == "$version" \
+                || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ \
+                || "${version^^}" == *-SNAPSHOT ]]; then
+            echo "Release tag must use v<major>.<minor>.<patch> with an optional pre-release suffix" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag must point to a commit contained in main" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Require complete corpus gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          run_id="$(gh run list \
+            --workflow corpus-check.yml \
+            --commit "$GITHUB_SHA" \
+            --status success \
+            --limit 100 \
+            --json databaseId,displayTitle \
+            --jq '.[] | select(.displayTitle == "Corpus Check (all)") | .databaseId' \
+            | head -n 1)"
+          if [[ -z "$run_id" ]]; then
+            echo "Run Corpus Check with corpus=all successfully for $GITHUB_SHA before tagging a release" >&2
+            exit 1
+          fi
+          echo "Using successful Corpus Check run $run_id"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Run release gate
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: >-
+          xvfb-run -a ./gradlew -g .gradle-user-home
+          -Pversion="$RELEASE_VERSION"
+          cleanTest test javadoc assemble verifyNoRuntimeDependencies verifyReleaseVersion
+          --info --no-daemon --stacktrace
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: maven-central
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Validate signed publication
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_STAGING_PROFILE_ID: ${{ secrets.SONATYPE_STAGING_PROFILE_ID }}
+          SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: >-
+          ./gradlew -g .gradle-user-home
+          -Pversion="$RELEASE_VERSION"
+          verifyReleaseConfiguration publishMavenPublicationToMavenLocal
+          --info --no-daemon --stacktrace
+
+      - name: Publish to Maven Central
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_STAGING_PROFILE_ID: ${{ secrets.SONATYPE_STAGING_PROFILE_ID }}
+          SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: >-
+          ./gradlew -g .gradle-user-home
+          -Pversion="$RELEASE_VERSION"
+          publishToSonatype closeAndReleaseStagingRepositories
+          --info --no-daemon --stacktrace
+
+      - name: Create checksums
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          cd build/libs
+          sha256sum \
+            "avif-$RELEASE_VERSION.jar" \
+            "avif-$RELEASE_VERSION-sources.jar" \
+            "avif-$RELEASE_VERSION-javadoc.jar" \
+            > "avif-$RELEASE_VERSION-checksums.txt"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          release_flags=(--verify-tag --generate-notes --fail-on-no-commits)
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "build/libs/avif-$RELEASE_VERSION.jar#Library JAR" \
+            "build/libs/avif-$RELEASE_VERSION-sources.jar#Sources JAR" \
+            "build/libs/avif-$RELEASE_VERSION-javadoc.jar#Javadoc JAR" \
+            "build/libs/avif-$RELEASE_VERSION-checksums.txt#SHA-256 checksums" \
+            "${release_flags[@]}" \
+            --title "javif $RELEASE_VERSION"

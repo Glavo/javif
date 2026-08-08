@@ -1,4 +1,5 @@
 name: Corpus Check
+run-name: Corpus Check (${{ inputs.corpus }})
 
 on:
   workflow_dispatch:
