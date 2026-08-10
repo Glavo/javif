@@ -16,6 +16,7 @@
 package org.glavo.avif;
 
 import org.glavo.avif.av1.Av1DecoderConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -904,7 +905,47 @@ final class AvifImageReaderTest {
         );
 
         assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
-        assertTrue(exception.getMessage().contains("materialized metadata"));
+        assertTrue(exception.getMessage().contains("retained metadata"));
+    }
+
+    /// Verifies that compact zero-payload properties consume the retained-structure budget.
+    @Test
+    void openRejectsCompactPropertyStructureAmplification() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReaderFactory.DEFAULT
+                        .withMetadataSizeLimit(4 * 1024)
+                        .open(minimalAvifWithOpaquePropertyCount(128))
+        );
+
+        assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+        assertTrue(exception.getMessage().contains("item property structure"));
+    }
+
+    /// Verifies that zero-width `iloc` fields cannot encode an unbudgeted extent-object fanout.
+    @Test
+    void openRejectsCompactExtentStructureAmplification() {
+        byte[] iloc = fullBox(
+                "iloc",
+                0,
+                0,
+                new byte[]{0, 0},
+                u16(1),
+                u16(1),
+                u16(0),
+                u16(256)
+        );
+        byte[] source = concat(
+                fileTypeBox(),
+                fullBox("meta", 0, 0, handlerBox(), primaryItemBox(), iloc)
+        );
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReaderFactory.DEFAULT.withMetadataSizeLimit(4 * 1024).open(source)
+        );
+
+        assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+        assertTrue(exception.getMessage().contains("iloc extents"));
     }
 
     /// Verifies that a libavif gain-map fixture exposes its `tmap` association metadata.
@@ -1782,6 +1823,39 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
+    /// Verifies that duplicate AVIS track header boxes are rejected before state can be merged.
+    @Test
+    void rejectsAnimatedSequenceWithDuplicateTrackHeader() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithDuplicateTrackHeader())
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("tkhd"));
+    }
+
+    /// Verifies that duplicate AVIS media boxes are rejected before state can be merged.
+    @Test
+    void rejectsAnimatedSequenceWithDuplicateMediaBox() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithDuplicateMediaBox())
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("mdia"));
+    }
+
+    /// Verifies that duplicate AVIS sample-table boxes are rejected before tables can be merged.
+    @Test
+    void rejectsAnimatedSequenceWithDuplicateSampleTable() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithDuplicateSampleTable())
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+        assertTrue(exception.getMessage().contains("stbl"));
+    }
+
     /// Verifies that malformed AVIS track references are rejected.
     @Test
     void rejectsAnimatedSequenceWithMalformedTrackReference() {
@@ -1953,6 +2027,20 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that indexed sequence reads remain correct across forward, repeated, and backward access.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameIndexedCursorSupportsForwardRepeatAndRewind() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
+            assertEquals(0, reader.readFrame(0).frameIndex());
+            assertEquals(3, reader.readFrame(3).frameIndex());
+            assertEquals(3, reader.readFrame(3).frameIndex());
+            assertEquals(1, reader.readFrame(1).frameIndex());
+            assertEquals(2, reader.readFrame(2).frameIndex());
+        }
+    }
+
     /// Verifies that an indexed raw-plane AVIS read does not disturb sequential playback state.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
@@ -2108,6 +2196,59 @@ final class AvifImageReaderTest {
         byte[] iloc = itemLocationBox(itemPayloadOffset, av1Payload.length);
         byte[] meta = fullBox("meta", 0, 0,
                 handlerBox(), primaryItemBox(), iloc, itemInfoBox(), iprpBox
+        );
+        return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Builds a minimal AVIF with many compact unassociated opaque properties.
+    ///
+    /// @param propertyCount the number of zero-payload opaque properties
+    /// @return the AVIF container bytes
+    private static byte[] minimalAvifWithOpaquePropertyCount(int propertyCount) {
+        if (propertyCount < 0) {
+            throw new IllegalArgumentException("propertyCount < 0: " + propertyCount);
+        }
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        ArrayList<byte[]> properties = new ArrayList<>(propertyCount + 3);
+        properties.add(imageSpatialExtentsProperty());
+        properties.add(av1ConfigProperty());
+        properties.add(colorProperty());
+        for (int propertyIndex = 0; propertyIndex < propertyCount; propertyIndex++) {
+            properties.add(box("zzzz"));
+        }
+        byte[] iprpBox = box(
+                "iprp",
+                box("ipco", properties.toArray(byte[][]::new)),
+                fullBox(
+                        "ipma",
+                        0,
+                        0,
+                        u32(1),
+                        u16(1),
+                        new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03}
+                )
+        );
+        byte[] placeholderMeta = fullBox(
+                "meta",
+                0,
+                0,
+                handlerBox(),
+                primaryItemBox(),
+                ilocPlaceholder(),
+                itemInfoBox(),
+                iprpBox
+        );
+        int itemPayloadOffset = ftyp.length + placeholderMeta.length + 8;
+        byte[] meta = fullBox(
+                "meta",
+                0,
+                0,
+                handlerBox(),
+                primaryItemBox(),
+                itemLocationBox(itemPayloadOffset, av1Payload.length),
+                itemInfoBox(),
+                iprpBox
         );
         return concat(ftyp, meta, box("mdat", av1Payload));
     }
@@ -2509,6 +2650,62 @@ final class AvifImageReaderTest {
             assertEquals(64 * 64, pixels.length);
             assertTrue((pixels[0] >>> 24) != 0xFF, "synthetic alpha should produce non-opaque pixels");
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies all AVIF alpha sequence-header constraints independently of plane composition.
+    @Test
+    void rejectsInvalidDecodedAlphaColorConfigurations() {
+        AvifDecodeException nonMonochrome = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.validateAlphaColorConfig(
+                        testColorConfig(AvifBitDepth.EIGHT_BITS, false, true),
+                        AvifBitDepth.EIGHT_BITS,
+                        "Alpha"
+                )
+        );
+        assertTrue(nonMonochrome.getMessage().contains("monochrome"));
+
+        AvifDecodeException limitedRange = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.validateAlphaColorConfig(
+                        testColorConfig(AvifBitDepth.EIGHT_BITS, true, false),
+                        AvifBitDepth.EIGHT_BITS,
+                        "Alpha"
+                )
+        );
+        assertTrue(limitedRange.getMessage().contains("full-range"));
+
+        AvifDecodeException mismatchedBitDepth = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.validateAlphaColorConfig(
+                        testColorConfig(AvifBitDepth.TEN_BITS, true, true),
+                        AvifBitDepth.EIGHT_BITS,
+                        "Alpha"
+                )
+        );
+        assertTrue(mismatchedBitDepth.getMessage().contains("bit depth differs"));
+    }
+
+    /// Verifies that a color-coded auxiliary payload is not silently reduced to its luma plane.
+    ///
+    /// @throws IOException if the synthetic container cannot be opened
+    @Test
+    void readRawAlphaRejectsNonMonochromeAv1Payload() throws IOException {
+        byte[] source = syntheticAlphaAvif(
+                false,
+                0,
+                64,
+                64,
+                av1StillPicturePayload()
+        );
+        try (AvifImageReader reader = AvifImageReader.open(source)) {
+            AvifDecodeException exception = assertThrows(
+                    AvifDecodeException.class,
+                    () -> reader.readRawAlphaPlanes(0)
+            );
+            assertEquals(AvifErrorCode.AV1_DECODE_FAILED, exception.code());
+            assertTrue(exception.getMessage().contains("monochrome"));
         }
     }
 
@@ -2939,7 +3136,7 @@ final class AvifImageReaderTest {
     /// @return the complete AVIF test file bytes
     private static byte[] syntheticAlphaAvifWithAlphaOperatingPoint(int operatingPoint) {
         byte[] colorPayload = av1StillPicturePayload();
-        byte[] alphaPayload = av1StillPicturePayload();
+        byte[] alphaPayload = av1MonochromeStillPicturePayload();
         byte[] ftyp = fileTypeBox();
         byte[] firstMeta = buildDualItemMetaWithAlphaOperatingPoint(
                 colorPayload.length + alphaPayload.length,
@@ -2975,7 +3172,7 @@ final class AvifImageReaderTest {
                 premTargetId,
                 alphaWidth,
                 alphaHeight,
-                av1StillPicturePayload()
+                av1MonochromeStillPicturePayload(alphaWidth, alphaHeight)
         );
     }
 
@@ -3690,10 +3887,13 @@ final class AvifImageReaderTest {
         byte[] sample0 = av1StillPicturePayload();
         byte[] sample1 = av1StillPicturePayload();
         byte[] sample2 = av1StillPicturePayload();
+        byte[] alphaSample0 = av1MonochromeStillPicturePayload();
+        byte[] alphaSample1 = av1MonochromeStillPicturePayload();
+        byte[] alphaSample2 = av1MonochromeStillPicturePayload();
         byte[] chunkPadding = new byte[]{0x55, 0x66, 0x77, 0x00, 0x11};
         byte[] colorMdatPayload = concat(sample0, chunkPadding, sample1, sample2);
         byte[] alphaMdatPayload = includeMatchingAlpha
-                ? concat(sample0, chunkPadding, sample1, sample2)
+                ? concat(alphaSample0, chunkPadding, alphaSample1, alphaSample2)
                 : new byte[0];
         byte[] ftyp = sequenceFileTypeBox();
 
@@ -3702,22 +3902,20 @@ final class AvifImageReaderTest {
                 new int[]{0, 0},
                 includeMatchingAlpha,
                 premultipliedByTrackIds,
-                sample0.length,
-                sample1.length,
-                sample2.length
+                new int[]{sample0.length, sample1.length, sample2.length},
+                new int[]{alphaSample0.length, alphaSample1.length, alphaSample2.length}
         );
         int colorChunk0Offset = ftyp.length + firstMoov.length + 8;
         int colorChunk1Offset = colorChunk0Offset + sample0.length + chunkPadding.length;
         int alphaChunk0Offset = colorChunk1Offset + sample1.length + sample2.length;
-        int alphaChunk1Offset = alphaChunk0Offset + sample0.length + chunkPadding.length;
+        int alphaChunk1Offset = alphaChunk0Offset + alphaSample0.length + chunkPadding.length;
         byte[] moov = minimalAvisMoovBoxWithReferencedAlphaTrack(
                 new int[]{colorChunk0Offset, colorChunk1Offset},
                 new int[]{alphaChunk0Offset, alphaChunk1Offset},
                 includeMatchingAlpha,
                 premultipliedByTrackIds,
-                sample0.length,
-                sample1.length,
-                sample2.length
+                new int[]{sample0.length, sample1.length, sample2.length},
+                new int[]{alphaSample0.length, alphaSample1.length, alphaSample2.length}
         );
         return concat(ftyp, moov, box("mdat", concat(colorMdatPayload, alphaMdatPayload)));
     }
@@ -3831,6 +4029,79 @@ final class AvifImageReaderTest {
                         sample.length,
                         sample.length
                 )
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with duplicate `tkhd` boxes.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithDuplicateTrackHeader() {
+        byte[] sample = av1StillPicturePayload();
+        byte[] media = mediaBox(
+                "pict",
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        return concat(
+                sequenceFileTypeBox(),
+                box("moov", box("trak", trackHeaderBox(3), trackHeaderBox(3), media))
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with duplicate `mdia` boxes.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithDuplicateMediaBox() {
+        byte[] sample = av1StillPicturePayload();
+        byte[] media = mediaBox(
+                "pict",
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        return concat(
+                sequenceFileTypeBox(),
+                box("moov", box("trak", trackHeaderBox(3), media, media))
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with duplicate `stbl` boxes.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithDuplicateSampleTable() {
+        byte[] sample = av1StillPicturePayload();
+        byte[] sampleTable = sampleTableBox(
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                1,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        byte[] media = box(
+                "mdia",
+                mediaHeaderBox(3),
+                handlerBox("pict"),
+                box("minf", sampleTable, sampleTable)
+        );
+        return concat(
+                sequenceFileTypeBox(),
+                box("moov", box("trak", trackHeaderBox(3), media))
         );
     }
 
@@ -4006,14 +4277,16 @@ final class AvifImageReaderTest {
     /// @param alphaChunkOffsets the absolute alpha track chunk offsets
     /// @param includeMatchingAlpha whether to include a matching alpha track
     /// @param premultipliedByTrackIds the track IDs referenced by the color track's `prem` relationship
-    /// @param sampleSizes the color and matching alpha sample sizes
+    /// @param colorSampleSizes the color sample sizes
+    /// @param alphaSampleSizes the matching alpha sample sizes
     /// @return the `moov` box bytes
     private static byte[] minimalAvisMoovBoxWithReferencedAlphaTrack(
             int[] colorChunkOffsets,
             int[] alphaChunkOffsets,
             boolean includeMatchingAlpha,
             int[] premultipliedByTrackIds,
-            int... sampleSizes
+            int[] colorSampleSizes,
+            int[] alphaSampleSizes
     ) {
         byte[] colorTrack = avisTrackBox(
                 1,
@@ -4030,7 +4303,7 @@ final class AvifImageReaderTest {
                 1,
                 3,
                 null,
-                sampleSizes
+                colorSampleSizes
         );
         byte[] mismatchedAlphaTrack = avisTrackBox(
                 2,
@@ -4045,8 +4318,8 @@ final class AvifImageReaderTest {
                 1,
                 2,
                 null,
-                sampleSizes[0],
-                sampleSizes[1]
+                colorSampleSizes[0],
+                colorSampleSizes[1]
         );
         if (!includeMatchingAlpha) {
             return box("moov", colorTrack, mismatchedAlphaTrack);
@@ -4064,7 +4337,7 @@ final class AvifImageReaderTest {
                 1,
                 3,
                 null,
-                sampleSizes
+                alphaSampleSizes
         );
         return box("moov", colorTrack, mismatchedAlphaTrack, matchingAlphaTrack);
     }
@@ -4545,7 +4818,9 @@ final class AvifImageReaderTest {
                 u16(64),
                 u16(64),
                 new byte[50],
-                av1ConfigProperty(),
+                AUXILIARY_ALPHA_TYPE.equals(auxiliaryType)
+                        ? monochromeAv1ConfigProperty()
+                        : av1ConfigProperty(),
                 colorProperty(),
                 auxiliaryType == null ? new byte[0] : auxiliarySampleEntryBox(auxiliaryType)
         );
@@ -4822,11 +5097,132 @@ final class AvifImageReaderTest {
         return box("a1op", new byte[]{(byte) operatingPoint});
     }
 
+    /// Creates a synthetic AV1 color configuration for alpha-policy tests.
+    ///
+    /// @param bitDepth the decoded bit depth
+    /// @param monochrome whether the configuration is monochrome
+    /// @param fullRange whether the configuration uses full-range samples
+    /// @return the synthetic color configuration
+    private static Av1ColorConfig testColorConfig(
+            AvifBitDepth bitDepth,
+            boolean monochrome,
+            boolean fullRange
+    ) {
+        Av1ChromaFormat chromaFormat = monochrome
+                ? Av1ChromaFormat.MONOCHROME
+                : Av1ChromaFormat.YUV420;
+        return new Av1ColorConfig(
+                bitDepth,
+                monochrome,
+                false,
+                2,
+                2,
+                2,
+                fullRange,
+                chromaFormat,
+                0,
+                true,
+                true,
+                false
+        );
+    }
+
     /// Creates a reduced still-picture AV1 stream with one supported frame OBU.
     ///
     /// @return the AV1 OBU stream bytes
     private static byte[] av1StillPicturePayload() {
         return av1StillPicturePayload(64, 64);
+    }
+
+    /// Creates one synthetic monochrome AV1 still-picture payload.
+    ///
+    /// @return the complete AV1 low-overhead bitstream payload
+    private static byte[] av1MonochromeStillPicturePayload() {
+        return av1MonochromeStillPicturePayload(64, 64);
+    }
+
+    /// Creates one synthetic monochrome AV1 still-picture payload with custom dimensions.
+    ///
+    /// @param width the coded width
+    /// @param height the coded height
+    /// @return the complete AV1 low-overhead bitstream payload
+    private static byte[] av1MonochromeStillPicturePayload(int width, int height) {
+        if (width != 64 || height != 64) {
+            return concat(
+                    obu(1, reducedStillPictureSequenceHeaderPayload(width, height, true)),
+                    obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+            );
+        }
+        return concat(
+                obu(1, fullSuperResolvedMonochromeSequenceHeaderPayload()),
+                obu(6, fullSuperResolvedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+    }
+
+    /// Creates a non-reduced 64x64 monochrome sequence header with super-resolution enabled.
+    ///
+    /// @return the sequence header payload
+    private static byte[] fullSuperResolvedMonochromeSequenceHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(0, 3);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 5);
+        writer.writeBits(0, 12);
+        writer.writeBits(3, 3);
+        writer.writeBits(1, 2);
+        writer.writeFlag(false);
+        writer.writeBits(5, 4);
+        writer.writeBits(5, 4);
+        writer.writeBits(63, 6);
+        writer.writeBits(63, 6);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writeReducedStillPictureColorConfig(writer, true);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a combined non-reduced frame payload with super-resolution enabled.
+    ///
+    /// @param tileGroupPayload the tile-group payload
+    /// @return the combined frame payload
+    private static byte[] fullSuperResolvedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 3);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.padToByteBoundary();
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
     }
 
     /// Creates a reduced still-picture AV1 stream with custom frame dimensions.
@@ -4901,6 +5297,20 @@ final class AvifImageReaderTest {
     /// @param height the maximum frame height in `[1, 512]`
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPictureSequenceHeaderPayload(int width, int height) {
+        return reducedStillPictureSequenceHeaderPayload(width, height, false);
+    }
+
+    /// Creates a reduced still-picture sequence header payload with custom dimensions and chroma.
+    ///
+    /// @param width the maximum frame width in `[1, 1024]`
+    /// @param height the maximum frame height in `[1, 512]`
+    /// @param monochrome whether the sequence is monochrome
+    /// @return the reduced still-picture sequence header payload
+    private static byte[] reducedStillPictureSequenceHeaderPayload(
+            int width,
+            int height,
+            boolean monochrome
+    ) {
         if (width <= 0 || width > 1024 || height <= 0 || height > 512) {
             throw new IllegalArgumentException("Synthetic AV1 dimensions are out of range: " + width + "x" + height);
         }
@@ -4921,21 +5331,24 @@ final class AvifImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
-        writeReducedStillPictureColorConfig(writer);
+        writeReducedStillPictureColorConfig(writer, monochrome);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
 
-    /// Writes the reduced `8-bit YUV420` color configuration bits.
+    /// Writes reduced 8-bit color-configuration bits.
     ///
     /// @param writer the destination bit writer
-    private static void writeReducedStillPictureColorConfig(BitWriter writer) {
+    /// @param monochrome whether the sequence is monochrome
+    private static void writeReducedStillPictureColorConfig(BitWriter writer, boolean monochrome) {
         writer.writeFlag(false);
-        writer.writeFlag(false);
+        writer.writeFlag(monochrome);
         writer.writeFlag(false);
         writer.writeFlag(true);
-        writer.writeBits(1, 2);
-        writer.writeFlag(true);
+        if (!monochrome) {
+            writer.writeBits(1, 2);
+            writer.writeFlag(true);
+        }
         writer.writeFlag(false);
     }
 

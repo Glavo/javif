@@ -58,15 +58,35 @@ public final class AvifContainerParser {
     private static final long INDEFINITE_TRACK_DURATION = -1L;
     /// The maximum number of sequence samples materialized from one track's sample tables.
     private static final int MAX_SEQUENCE_SAMPLE_COUNT = 1_000_000;
-    /// The default maximum cumulative size of materialized non-image metadata.
+    /// The default maximum cumulative estimated size of retained non-image metadata.
     private static final long DEFAULT_METADATA_SIZE_LIMIT = 64L * 1024L * 1024L;
+    /// The implementation limit for estimated retained non-image metadata.
+    private static final long MAX_RETAINED_METADATA_SIZE = 256L * 1024L * 1024L;
+    /// The estimated retained size of one parsed item and its collection headers.
+    private static final long RETAINED_ITEM_SIZE = 256L;
+    /// The estimated retained size of one parsed item property.
+    private static final long RETAINED_PROPERTY_SIZE = 64L;
+    /// The estimated retained size of one item extent.
+    private static final long RETAINED_EXTENT_SIZE = 32L;
+    /// The estimated retained size of one reference stored in a collection.
+    private static final long RETAINED_REFERENCE_SIZE = 24L;
+    /// The estimated retained base size of one entity group.
+    private static final long RETAINED_ENTITY_GROUP_SIZE = 48L;
+    /// The estimated retained size of one AVIS track parser state.
+    private static final long RETAINED_MOOV_STATE_SIZE = 256L;
+    /// The estimated retained size of one boxed sample-table integer.
+    private static final long RETAINED_SAMPLE_INTEGER_SIZE = 24L;
+    /// The estimated retained size of one sample-to-chunk entry.
+    private static final long RETAINED_SAMPLE_TO_CHUNK_SIZE = 32L;
+    /// The estimated retained size of one resolved sequence payload and its array entries.
+    private static final long RETAINED_SEQUENCE_PAYLOAD_SIZE = 48L;
 
     /// The retained container data source.
     private final AvifDataSource source;
-    /// The configured cumulative limit for materialized non-image metadata, or zero for no limit.
+    /// The configured cumulative estimated limit for retained non-image metadata, or zero for no limit.
     private final long metadataSizeLimit;
-    /// The cumulative byte size reserved for materialized non-image metadata.
-    private long materializedMetadataSize;
+    /// The cumulative estimated byte size reserved for retained non-image metadata.
+    private long retainedMetadataSize;
     /// The parsed metadata state.
     private final MetaState meta = new MetaState();
     /// Whether an AVIF-compatible `ftyp` box was parsed.
@@ -115,7 +135,7 @@ public final class AvifContainerParser {
         return parse(source, DEFAULT_METADATA_SIZE_LIMIT);
     }
 
-    /// Parses AVIF container data with a cumulative metadata materialization limit.
+    /// Parses AVIF container data with a cumulative retained-metadata estimate limit.
     ///
     /// @param source the retained positional source
     /// @param metadataSizeLimit the cumulative metadata size limit in bytes, or zero for no
@@ -133,6 +153,7 @@ public final class AvifContainerParser {
     /// @throws AvifDecodeException if the container is malformed or unsupported
     private AvifContainer parse() throws AvifDecodeException {
         BoxInput input = new BoxInput(source);
+        Set<String> uniqueTopLevelBoxes = new HashSet<>();
         while (input.hasRemaining()) {
             BoxHeader header = input.readBoxHeader();
             if (header.sizeZero() && !allowsTopLevelSizeZero(header.type())) {
@@ -140,9 +161,16 @@ public final class AvifContainerParser {
             }
             BoxInput payload = input.slice(header.payloadOffset(), header.payloadSize());
             switch (header.type()) {
-                case "ftyp" -> parseFileType(payload);
-                case "meta" -> parseMeta(header, payload);
+                case "ftyp" -> {
+                    unique(uniqueTopLevelBoxes, header.type(), header.offset());
+                    parseFileType(payload);
+                }
+                case "meta" -> {
+                    unique(uniqueTopLevelBoxes, header.type(), header.offset());
+                    parseMeta(header, payload);
+                }
                 case "moov" -> {
+                    unique(uniqueTopLevelBoxes, header.type(), header.offset());
                     avisBrandSeen = true;
                     parseMoov(payload);
                 }
@@ -506,7 +534,11 @@ public final class AvifContainerParser {
                 }
                 alphaSource = Objects.requireNonNull(alphaPayloads.source, "alphaPayloads.source");
             }
-            inputs[inputIndex] = new SampleTransform.Input(colorSource, alphaSource);
+            inputs[inputIndex] = new SampleTransform.Input(
+                    colorSource,
+                    AvifBitDepth.fromBits(inputConfig.bitDepth()),
+                    alphaSource
+            );
         }
 
         if (primaryInputIndex < 0) {
@@ -947,7 +979,7 @@ public final class AvifContainerParser {
         int[] auxiliaryCellHeights = new int[cellIds.size()];
         for (int i = 0; i < cellIds.size(); i++) {
             int cellId = cellIds.get(i);
-            Item colorCellItem = meta.requireItem(cellId);
+            Item colorCellItem = requireItem(cellId, -1L);
             Item auxiliaryCellItem = findAuxiliaryItem(cellId, auxiliaryType);
             if (auxiliaryCellItem == null) {
                 return AuxiliaryPayloads.empty();
@@ -1564,7 +1596,7 @@ public final class AvifContainerParser {
         int itemCount = fullBox.version < 2 ? input.readU16() : checkedU32ToInt(input.readU32(), input.offset() - 4);
         for (int i = 0; i < itemCount; i++) {
             int itemId = fullBox.version < 2 ? input.readU16() : checkedU32ToInt(input.readU32(), input.offset() - 4);
-            Item item = meta.requireItem(itemId);
+            Item item = requireItem(itemId, input.offset());
             int constructionMethod = 0;
             if (fullBox.version > 0) {
                 int packedConstruction = input.readU16();
@@ -1579,6 +1611,12 @@ public final class AvifContainerParser {
             input.skip(2);
             long baseOffset = readUx(input, baseOffsetSize);
             int extentCount = input.readU16();
+            reserveRetainedElements(
+                    extentCount,
+                    RETAINED_EXTENT_SIZE,
+                    input.offset() - 2L,
+                    "iloc extents"
+            );
             item.extents.clear();
             item.idatStored = constructionMethod == 1;
             for (int extentIndex = 0; extentIndex < extentCount; extentIndex++) {
@@ -1622,8 +1660,9 @@ public final class AvifContainerParser {
         }
         int itemId = fullBox.version == 2 ? input.readU16() : checkedU32ToInt(input.readU32(), input.offset() - 4);
         input.skip(2);
-        Item item = meta.requireItem(itemId);
+        Item item = requireItem(itemId, input.offset());
         item.type = input.readFourCc();
+        reserveMetadataBytes(input.remaining(), input.offset(), "item information strings");
         item.name = readNullTerminatedString(input);
         if ("mime".equals(item.type)) {
             item.contentType = readNullTerminatedString(input);
@@ -1639,11 +1678,18 @@ public final class AvifContainerParser {
     /// @param input the box payload input
     /// @throws AvifDecodeException if the box is malformed
     private void parseItemProperties(BoxHeader header, BoxInput input) throws AvifDecodeException {
+        boolean propertyContainerSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "ipco" -> parseItemPropertyContainer(child, payload);
+                case "ipco" -> {
+                    if (propertyContainerSeen) {
+                        throw parseFailed("Box[iprp] contains a duplicate unique box of type 'ipco'", child.offset());
+                    }
+                    propertyContainerSeen = true;
+                    parseItemPropertyContainer(child, payload);
+                }
                 case "ipma" -> parseItemPropertyAssociation(payload);
                 default -> {
                 }
@@ -1664,6 +1710,7 @@ public final class AvifContainerParser {
         while (input.hasRemaining()) {
             BoxHeader propertyHeader = input.readBoxHeader();
             BoxInput payload = input.slice(propertyHeader.payloadOffset(), propertyHeader.payloadSize());
+            reserveMetadataBytes(RETAINED_PROPERTY_SIZE, propertyHeader.offset(), "item property structure");
             meta.properties.add(parseProperty(propertyHeader, payload));
             input.skipBoxPayload(propertyHeader);
         }
@@ -2101,6 +2148,12 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, label + " has no chunk offsets", null);
         }
         int sampleCount = track.sampleSizes.size();
+        reserveRetainedElements(
+                sampleCount,
+                RETAINED_SEQUENCE_PAYLOAD_SIZE,
+                -1L,
+                label + " resolved sample payloads"
+        );
         if (track.sampleDeltas.size() != sampleCount) {
             throw new AvifDecodeException(
                     AvifErrorCode.BMFF_PARSE_FAILED,
@@ -2240,6 +2293,7 @@ public final class AvifContainerParser {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             if ("trak".equals(child.type())) {
+                reserveMetadataBytes(RETAINED_MOOV_STATE_SIZE, child.offset(), "AVIS track state");
                 MoovState parsedTrack = new MoovState();
                 BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
                 parseMoovTrack(trakPayload, parsedTrack);
@@ -2426,13 +2480,21 @@ public final class AvifContainerParser {
 
     /// Parses a `trak` box and extracts video track metadata.
     private void parseMoovTrack(BoxInput input, MoovState track) throws AvifDecodeException {
+        boolean trackHeaderSeen = false;
+        boolean mediaSeen = false;
         boolean edtsSeen = false;
         boolean trefSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "tkhd" -> parseMoovTkhd(payload, track);
+                case "tkhd" -> {
+                    if (trackHeaderSeen) {
+                        throw parseFailed("Box[trak] contains a duplicate unique box of type 'tkhd'", child.offset());
+                    }
+                    trackHeaderSeen = true;
+                    parseMoovTkhd(payload, track);
+                }
                 case "tref" -> {
                     if (trefSeen) {
                         throw parseFailed("Box[trak] contains a duplicate unique box of type 'tref'", child.offset());
@@ -2447,7 +2509,13 @@ public final class AvifContainerParser {
                     edtsSeen = true;
                     parseMoovEdts(payload, track);
                 }
-                case "mdia" -> parseMoovMdia(payload, track);
+                case "mdia" -> {
+                    if (mediaSeen) {
+                        throw parseFailed("Box[trak] contains a duplicate unique box of type 'mdia'", child.offset());
+                    }
+                    mediaSeen = true;
+                    parseMoovMdia(payload, track);
+                }
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2482,7 +2550,7 @@ public final class AvifContainerParser {
     ///
     /// @param input the tref box payload
     /// @throws AvifDecodeException if the box is malformed
-    private static void parseMoovTref(BoxInput input, MoovState track) throws AvifDecodeException {
+    private void parseMoovTref(BoxInput input, MoovState track) throws AvifDecodeException {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
@@ -2502,7 +2570,7 @@ public final class AvifContainerParser {
     /// @param target the destination track-id list
     /// @param type the reference box type
     /// @throws AvifDecodeException if the reference payload is malformed
-    private static void parseMoovTrackReference(
+    private void parseMoovTrackReference(
             BoxInput input,
             List<Integer> target,
             String type
@@ -2510,6 +2578,12 @@ public final class AvifContainerParser {
         if (input.remaining() == 0 || (input.remaining() & 3) != 0) {
             throw parseFailed("Box[tref]/" + type + " must contain one or more 32-bit track IDs", input.offset());
         }
+        reserveRetainedElements(
+                input.remaining() / Integer.BYTES,
+                RETAINED_SAMPLE_INTEGER_SIZE,
+                input.offset(),
+                "AVIS " + type + " track references"
+        );
         while (input.hasRemaining()) {
             int trackId = checkedU32ToInt(input.readU32(), input.offset() - 4);
             if (trackId <= 0) {
@@ -2581,13 +2655,27 @@ public final class AvifContainerParser {
             }
             handlerScan.skipBoxPayload(child);
         }
+        boolean mediaHeaderSeen = false;
+        boolean mediaInfoSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
-                case "mdhd" -> parseMoovMdhd(payload, track);
+                case "mdhd" -> {
+                    if (mediaHeaderSeen) {
+                        throw parseFailed("Box[mdia] contains a duplicate unique box of type 'mdhd'", child.offset());
+                    }
+                    mediaHeaderSeen = true;
+                    parseMoovMdhd(payload, track);
+                }
                 case "hdlr" -> {}
-                case "minf" -> parseMoovMinf(payload, track);
+                case "minf" -> {
+                    if (mediaInfoSeen) {
+                        throw parseFailed("Box[mdia] contains a duplicate unique box of type 'minf'", child.offset());
+                    }
+                    mediaInfoSeen = true;
+                    parseMoovMinf(payload, track);
+                }
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2623,9 +2711,14 @@ public final class AvifContainerParser {
 
     /// Parses a `minf` box to reach the sample table.
     private void parseMoovMinf(BoxInput input, MoovState track) throws AvifDecodeException {
+        boolean sampleTableSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             if ("stbl".equals(child.type())) {
+                if (sampleTableSeen) {
+                    throw parseFailed("Box[minf] contains a duplicate unique box of type 'stbl'", child.offset());
+                }
+                sampleTableSeen = true;
                 BoxInput stblPayload = input.slice(child.payloadOffset(), child.payloadSize());
                 parseMoovStbl(stblPayload, track);
             }
@@ -2759,7 +2852,7 @@ public final class AvifContainerParser {
     }
 
     /// Parses `stts` for sample timing deltas.
-    private static void parseMoovStts(BoxInput input, MoovState track) throws AvifDecodeException {
+    private void parseMoovStts(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
         enforceSequenceTableEntryCount(n, "stts", input.offset() - 4);
@@ -2778,33 +2871,42 @@ public final class AvifContainerParser {
                     "stts",
                     input.offset() - 8
             );
+            reserveRetainedElements(
+                    sc,
+                    RETAINED_SAMPLE_INTEGER_SIZE,
+                    input.offset() - 8L,
+                    "stts expanded sample deltas"
+            );
             for (int j = 0; j < sc; j++) track.sampleDeltas.add(sd);
         }
     }
 
     /// Parses `stco` for chunk offsets.
-    private static void parseMoovStco(BoxInput input, MoovState track) throws AvifDecodeException {
+    private void parseMoovStco(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
         enforceSequenceTableEntryCount(n, "stco", input.offset() - 4);
+        reserveRetainedElements(n, RETAINED_SAMPLE_INTEGER_SIZE, input.offset() - 4L, "stco chunk offsets");
         for (int i = 0; i < n; i++)
             track.chunkOffsets.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
     }
 
     /// Parses `co64` for 64-bit chunk offsets.
-    private static void parseMoovCo64(BoxInput input, MoovState track) throws AvifDecodeException {
+    private void parseMoovCo64(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
         enforceSequenceTableEntryCount(n, "co64", input.offset() - 4);
+        reserveRetainedElements(n, RETAINED_SAMPLE_INTEGER_SIZE, input.offset() - 4L, "co64 chunk offsets");
         for (int i = 0; i < n; i++)
             track.chunkOffsets.add(checkedU64ToInt(input.readU64(), input.offset() - 8));
     }
 
     /// Parses `stsc` for sample-to-chunk layout.
-    private static void parseMoovStsc(BoxInput input, MoovState track) throws AvifDecodeException {
+    private void parseMoovStsc(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
         enforceSequenceTableEntryCount(n, "stsc", input.offset() - 4);
+        reserveRetainedElements(n, RETAINED_SAMPLE_TO_CHUNK_SIZE, input.offset() - 4L, "stsc entries");
         for (int i = 0; i < n; i++) {
             int firstChunk = checkedU32ToInt(input.readU32(), input.offset() - 4);
             int samplesPerChunk = checkedU32ToInt(input.readU32(), input.offset() - 4);
@@ -2832,7 +2934,7 @@ public final class AvifContainerParser {
     }
 
     /// Parses `stsz` for sample sizes.
-    private static void parseMoovStsz(BoxInput input, MoovState track) throws AvifDecodeException {
+    private void parseMoovStsz(BoxInput input, MoovState track) throws AvifDecodeException {
         input.skip(4);
         int ss = checkedU32ToInt(input.readU32(), input.offset() - 4);
         int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
@@ -2842,6 +2944,7 @@ public final class AvifContainerParser {
                 "stsz",
                 input.offset() - 4
         );
+        reserveRetainedElements(sc, RETAINED_SAMPLE_INTEGER_SIZE, input.offset() - 4L, "stsz sample sizes");
         if (ss == 0) {
             for (int i = 0; i < sc; i++)
                 track.sampleSizes.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
@@ -2915,7 +3018,7 @@ public final class AvifContainerParser {
         int entryCount = checkedU32ToInt(input.readU32(), input.offset() - 4);
         for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
             int itemId = fullBox.version == 0 ? input.readU16() : checkedU32ToInt(input.readU32(), input.offset() - 4);
-            Item item = meta.requireItem(itemId);
+            Item item = requireItem(itemId, input.offset());
             int associationCount = input.readU8();
             for (int associationIndex = 0; associationIndex < associationCount; associationIndex++) {
                 int rawAssociation = widePropertyIndex ? input.readU16() : input.readU8();
@@ -2947,6 +3050,7 @@ public final class AvifContainerParser {
                 if (!essential && transformativePropertyType != null) {
                     continue;
                 }
+                reserveMetadataBytes(RETAINED_REFERENCE_SIZE, input.offset(), "item property association");
                 item.properties.add(property);
             }
         }
@@ -2983,10 +3087,10 @@ public final class AvifContainerParser {
             BoxInput payload = input.slice(reference.payloadOffset(), reference.payloadSize());
             int fromId = fullBox.version == 0 ? payload.readU16() : checkedU32ToInt(payload.readU32(), payload.offset() - 4);
             int referenceCount = payload.readU16();
-            Item fromItem = meta.requireItem(fromId);
+            Item fromItem = requireItem(fromId, payload.offset());
             for (int i = 0; i < referenceCount; i++) {
                 int toId = fullBox.version == 0 ? payload.readU16() : checkedU32ToInt(payload.readU32(), payload.offset() - 4);
-                Item toItem = meta.requireItem(toId);
+                Item toItem = requireItem(toId, payload.offset());
                 if ("auxl".equals(reference.type())) {
                     fromItem.auxForId = toItem.id;
                 }
@@ -2994,10 +3098,12 @@ public final class AvifContainerParser {
                     fromItem.premultipliedById = toItem.id;
                 }
                 if ("dimg".equals(reference.type())) {
+                    reserveMetadataBytes(RETAINED_REFERENCE_SIZE, payload.offset(), "dimg item reference");
                     toItem.dimgForId = fromItem.id;
                     fromItem.dimgCellIds.add(toItem.id);
                 }
                 if ("prog".equals(reference.type())) {
+                    reserveMetadataBytes(RETAINED_REFERENCE_SIZE, payload.offset(), "prog item reference");
                     fromItem.progDeps.add(toItem.id);
                 }
                 if ("cdsc".equals(reference.type())) {
@@ -3019,6 +3125,8 @@ public final class AvifContainerParser {
             readFullBox(payload);
             int groupId = checkedU32ToInt(payload.readU32(), payload.offset() - 4);
             int entityCount = checkedU32ToInt(payload.readU32(), payload.offset() - 4);
+            reserveMetadataBytes(RETAINED_ENTITY_GROUP_SIZE, group.offset(), "entity group structure");
+            reserveRetainedElements(entityCount, Integer.BYTES, payload.offset() - 4L, "entity group identifiers");
             int[] entityIds = new int[entityCount];
             for (int i = 0; i < entityCount; i++) {
                 entityIds[i] = checkedU32ToInt(payload.readU32(), payload.offset() - 4);
@@ -3543,26 +3651,78 @@ public final class AvifContainerParser {
         }
     }
 
-    /// Reserves bytes from the cumulative non-image metadata materialization budget.
+    /// Returns an existing item or creates one within the retained-metadata budget.
     ///
-    /// @param byteCount the number of bytes about to be materialized
+    /// @param itemId the item identifier
+    /// @param offset the associated source offset, or `-1` when unavailable
+    /// @return the existing or newly created item
+    /// @throws AvifDecodeException if creating the item would exceed the metadata limit
+    private Item requireItem(int itemId, long offset) throws AvifDecodeException {
+        @Nullable Item existing = meta.item(itemId);
+        if (existing != null) {
+            return existing;
+        }
+        reserveMetadataBytes(RETAINED_ITEM_SIZE, offset, "item structure");
+        Item created = new Item(itemId);
+        meta.items.put(itemId, created);
+        return created;
+    }
+
+    /// Reserves a repeated retained structure within the metadata budget.
+    ///
+    /// @param elementCount the number of retained elements
+    /// @param estimatedElementSize the estimated retained size of each element
+    /// @param offset the associated source offset, or `-1` when unavailable
+    /// @param description the structure description used in diagnostics
+    /// @throws AvifDecodeException if retaining the elements would exceed the metadata limit
+    private void reserveRetainedElements(
+            long elementCount,
+            long estimatedElementSize,
+            long offset,
+            String description
+    ) throws AvifDecodeException {
+        if (elementCount < 0 || estimatedElementSize < 0) {
+            throw new IllegalArgumentException("negative retained-metadata estimate");
+        }
+        long byteCount;
+        try {
+            byteCount = Math.multiplyExact(elementCount, estimatedElementSize);
+        } catch (ArithmeticException exception) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.INPUT_TOO_LARGE,
+                    "AVIF retained metadata size overflows the supported range: " + description,
+                    offset >= 0 ? offset : null,
+                    exception
+            );
+        }
+        reserveMetadataBytes(byteCount, offset, description);
+    }
+
+    /// Reserves bytes from the cumulative retained non-image metadata budget.
+    ///
+    /// @param byteCount the actual or estimated number of bytes about to be retained
     /// @param offset the associated source offset, or `-1` when the metadata spans extents
     /// @param description the metadata description used in diagnostics
-    /// @throws AvifDecodeException if the configured metadata limit would be exceeded
+    /// @throws AvifDecodeException if the configured or implementation metadata limit would be exceeded
     private void reserveMetadataBytes(long byteCount, long offset, String description)
             throws AvifDecodeException {
         if (byteCount < 0) {
             throw new IllegalArgumentException("byteCount < 0: " + byteCount);
         }
-        if (metadataSizeLimit != 0 && byteCount > metadataSizeLimit - materializedMetadataSize) {
+        long effectiveLimit = metadataSizeLimit == 0
+                ? MAX_RETAINED_METADATA_SIZE
+                : Math.min(metadataSizeLimit, MAX_RETAINED_METADATA_SIZE);
+        if (byteCount > effectiveLimit - retainedMetadataSize) {
+            boolean configuredLimitApplies = metadataSizeLimit != 0 && metadataSizeLimit <= MAX_RETAINED_METADATA_SIZE;
             throw new AvifDecodeException(
                     AvifErrorCode.INPUT_TOO_LARGE,
-                    "AVIF materialized metadata exceeds configured size limit: "
-                            + description + " (" + metadataSizeLimit + " bytes)",
+                    "AVIF retained metadata exceeds "
+                            + (configuredLimitApplies ? "configured" : "implementation")
+                            + " size limit: " + description + " (" + effectiveLimit + " bytes)",
                     offset >= 0 ? offset : null
             );
         }
-        materializedMetadataSize += byteCount;
+        retainedMetadataSize += byteCount;
     }
 
     /// Reads one full-box header.
@@ -3825,7 +3985,7 @@ public final class AvifContainerParser {
         private EntityGroup(String type, int groupId, int[] entityIds) {
             this.type = Objects.requireNonNull(type, "type");
             this.groupId = groupId;
-            this.entityIds = entityIds.clone();
+            this.entityIds = Objects.requireNonNull(entityIds, "entityIds");
         }
     }
 
@@ -3854,14 +4014,6 @@ public final class AvifContainerParser {
         private int idatLength;
         /// The parsed AVIS moov state.
         private MoovState moovState = new MoovState();
-
-        /// Returns an existing item or creates a new one.
-        ///
-        /// @param itemId the item id
-        /// @return an existing item or a new item
-        private Item requireItem(int itemId) {
-            return items.computeIfAbsent(itemId, Item::new);
-        }
 
         /// Returns one item by id.
         ///

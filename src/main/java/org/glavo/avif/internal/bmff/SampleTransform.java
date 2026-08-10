@@ -569,15 +569,23 @@ public final class SampleTransform {
     public static final class Input {
         /// The color image source.
         private final AvifImageSource colorSource;
+        /// The coded bit depth required for a matching alpha image.
+        private final AvifBitDepth colorBitDepth;
         /// The alpha image source, or `null` when the transform has no alpha.
         private final @Nullable AvifImageSource alphaSource;
 
         /// Creates an ordered Sample Transform input.
         ///
         /// @param colorSource the color image source
+        /// @param colorBitDepth the coded color-image bit depth
         /// @param alphaSource the matching alpha image source, or `null`
-        public Input(AvifImageSource colorSource, @Nullable AvifImageSource alphaSource) {
+        public Input(
+                AvifImageSource colorSource,
+                AvifBitDepth colorBitDepth,
+                @Nullable AvifImageSource alphaSource
+        ) {
             this.colorSource = Objects.requireNonNull(colorSource, "colorSource");
+            this.colorBitDepth = Objects.requireNonNull(colorBitDepth, "colorBitDepth");
             this.alphaSource = alphaSource;
         }
 
@@ -586,6 +594,13 @@ public final class SampleTransform {
         /// @return the color image source
         public AvifImageSource colorSource() {
             return colorSource;
+        }
+
+        /// Returns the coded color-image bit depth required for matching alpha.
+        ///
+        /// @return the coded color-image bit depth
+        public AvifBitDepth colorBitDepth() {
+            return colorBitDepth;
         }
 
         /// Returns the matching alpha image source.

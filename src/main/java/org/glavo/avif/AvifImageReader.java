@@ -61,6 +61,12 @@ public final class AvifImageReader implements AutoCloseable {
     private final AvifDataSource source;
     /// The parsed container data.
     private final AvifContainer container;
+    /// The retained color sequence sample descriptors, or `null` for a still image.
+    private final AvifPayload @Nullable @Unmodifiable [] sequenceSamplePayloads;
+    /// The retained alpha sequence sample descriptors, or `null` when absent.
+    private final AvifPayload @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads;
+    /// The retained depth sequence sample descriptors, or `null` when absent.
+    private final AvifPayload @Nullable @Unmodifiable [] sequenceDepthSamplePayloads;
     /// The next frame index for sequential reads.
     private int nextFrameIndex;
     /// Whether this reader has been closed.
@@ -75,6 +81,12 @@ public final class AvifImageReader implements AutoCloseable {
     private int sequenceAlphaAv1FrameIndex;
     /// Whether a sequence frame failed after sequential decoding began.
     private boolean sequentialSequenceReadFailed;
+    /// The reusable indexed color-sequence cursor, or `null` before the first indexed read.
+    private @Nullable SequenceDecoderCursor indexedColorSequenceCursor;
+    /// The reusable indexed alpha-sequence cursor, or `null` before the first indexed read.
+    private @Nullable SequenceDecoderCursor indexedAlphaSequenceCursor;
+    /// The reusable indexed depth-sequence cursor, or `null` before the first indexed read.
+    private @Nullable SequenceDecoderCursor indexedDepthSequenceCursor;
 
     /// Creates an AVIF image reader.
     ///
@@ -86,6 +98,9 @@ public final class AvifImageReader implements AutoCloseable {
         this.source = Objects.requireNonNull(source, "source");
         try {
             this.container = AvifContainerParser.parse(source, factory.metadataSizeLimit());
+            this.sequenceSamplePayloads = container.samplePayloads();
+            this.sequenceAlphaSamplePayloads = container.sequenceAlphaSamplePayloads();
+            this.sequenceDepthSamplePayloads = container.sequenceDepthSamplePayloads();
         } catch (AvifDecodeException | RuntimeException | Error exception) {
             try {
                 source.close();
@@ -209,6 +224,10 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Reads the decoded frame at the supplied index.
     ///
+    /// For image sequences, forward indexed reads reuse decoder state. Reading an index lower than
+    /// the most recently decoded indexed frame restarts the indexed decoder from the beginning and
+    /// does not affect sequential [#readFrame()] state.
+    ///
     /// @param frameIndex the zero-based frame index
     /// @return the decoded frame
     /// @throws IOException if the frame cannot be decoded or the reader was opened from a
@@ -250,7 +269,11 @@ public final class AvifImageReader implements AutoCloseable {
         AvifImageSource alphaSource = container.alphaSource();
         if (alphaSource != null) {
             DecodedPlanes alphaPlanes = alphaPlanesFromDecodedImage(
-                    decodeImageSource(alphaSource, "Alpha auxiliary AV1 image").planes()
+                    decodeAlphaImageSource(
+                            alphaSource,
+                            "Alpha auxiliary AV1 image",
+                            decodedColor.colorConfig().bitDepth()
+                    ).planes()
             );
             if (alphaPlanes.codedWidth() != rawFrame.width() || alphaPlanes.codedHeight() != rawFrame.height()) {
                 throw new AvifDecodeException(
@@ -317,15 +340,21 @@ public final class AvifImageReader implements AutoCloseable {
             return null;
         }
         if (container.isSequence()) {
-            AvifPayload @Nullable [] alphaPayloads = container.sequenceAlphaSamplePayloads();
+            AvifPayload @Nullable [] alphaPayloads = sequenceAlphaSamplePayloads;
             if (alphaPayloads == null) {
                 return null;
             }
-            return alphaPlanesFromDecodedImage(readSequenceRawAuxiliaryPlanes(
+            DecodedRawImage decodedAlpha = readSequenceRawImage(
                     frameIndex,
                     alphaPayloads,
                     "Alpha sequence frame"
-            ));
+            );
+            validateAlphaColorConfig(
+                    decodedAlpha.colorConfig(),
+                    container.info().bitDepth(),
+                    "Alpha sequence frame"
+            );
+            return alphaPlanesFromDecodedImage(decodedAlpha.planes());
         }
         SampleTransform sampleTransform = container.sampleTransform();
         if (sampleTransform != null) {
@@ -333,7 +362,11 @@ public final class AvifImageReader implements AutoCloseable {
         }
         AvifImageSource alphaSource = container.alphaSource();
         return alphaSource != null
-                ? alphaPlanesFromDecodedImage(decodeImageSource(alphaSource, "Alpha auxiliary AV1 image").planes())
+                ? alphaPlanesFromDecodedImage(decodeAlphaImageSource(
+                        alphaSource,
+                        "Alpha auxiliary AV1 image",
+                        container.info().bitDepth()
+                ).planes())
                 : null;
     }
 
@@ -466,7 +499,7 @@ public final class AvifImageReader implements AutoCloseable {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
         if (container.isSequence()) {
-            AvifPayload @Nullable [] depthPayloads = container.sequenceDepthSamplePayloads();
+            AvifPayload @Nullable [] depthPayloads = sequenceDepthSamplePayloads;
             if (depthPayloads == null) {
                 return null;
             }
@@ -488,7 +521,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the decoded frame
     /// @throws IOException if decoding fails
     private AvifFrame readSequenceFrameSequential(int frameIndex) throws IOException {
-        AvifPayload @Nullable [] payloads = container.samplePayloads();
+        AvifPayload @Nullable [] payloads = sequenceSamplePayloads;
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -538,11 +571,11 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return raw decoded color planes
     /// @throws IOException if decoding fails
     private DecodedPlanes readSequenceRawColorPlanes(int frameIndex) throws IOException {
-        AvifPayload @Nullable [] payloads = container.samplePayloads();
+        AvifPayload @Nullable [] payloads = sequenceSamplePayloads;
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        return readSequenceRawPlanes(frameIndex, payloads, "Sequence frame");
+        return readSequenceRawImage(frameIndex, payloads, "Sequence frame").planes();
     }
 
     /// Decodes raw planes for one image-sequence auxiliary frame without mutating playback state.
@@ -560,7 +593,7 @@ public final class AvifImageReader implements AutoCloseable {
         if (frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        return readSequenceRawPlanes(frameIndex, payloads, label);
+        return readSequenceRawImage(frameIndex, payloads, label).planes();
     }
 
     /// Decodes raw planes for one image-sequence frame without mutating playback state.
@@ -570,32 +603,49 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param label the diagnostic label for failures
     /// @return raw decoded planes
     /// @throws IOException if decoding fails
-    private DecodedPlanes readSequenceRawPlanes(
+    private DecodedRawImage readSequenceRawImage(
             int frameIndex,
             AvifPayload @Unmodifiable [] payloads,
             String label
     ) throws IOException {
-        try (Av1Decoder rawDecoder = Av1Decoder.open(
-                AvifPayload.openInput(payloads),
-                factory.av1DecoderConfig()
-        )) {
-            @Nullable Av1DecodedOutput output = null;
-            for (int index = 0; index <= frameIndex; index++) {
-                output = rawDecoder.readOutput();
-                if (output == null) {
-                    throw new AvifDecodeException(
-                            AvifErrorCode.AV1_DECODE_FAILED,
-                            label + " ended before frame " + frameIndex,
-                            null
-                    );
-                }
-            }
-            return Objects.requireNonNull(output, "output").planes();
+        try {
+            Av1DecodedOutput requiredOutput = indexedSequenceCursor(payloads, label).read(frameIndex);
+            return new DecodedRawImage(requiredOutput.planes(), requiredOutput.colorConfig());
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
             throw wrapAv1DecodeFailure(exception);
         }
+    }
+
+    /// Returns the reusable indexed decoder cursor for one retained sequence payload array.
+    ///
+    /// @param payloads the retained color, alpha, or depth payload array
+    /// @param label the diagnostic sequence label used when creating a cursor
+    /// @return the matching reusable decoder cursor
+    private SequenceDecoderCursor indexedSequenceCursor(
+            AvifPayload @Unmodifiable [] payloads,
+            String label
+    ) {
+        if (payloads == sequenceSamplePayloads) {
+            if (indexedColorSequenceCursor == null) {
+                indexedColorSequenceCursor = new SequenceDecoderCursor(payloads, label);
+            }
+            return indexedColorSequenceCursor;
+        }
+        if (payloads == sequenceAlphaSamplePayloads) {
+            if (indexedAlphaSequenceCursor == null) {
+                indexedAlphaSequenceCursor = new SequenceDecoderCursor(payloads, label);
+            }
+            return indexedAlphaSequenceCursor;
+        }
+        if (payloads == sequenceDepthSamplePayloads) {
+            if (indexedDepthSequenceCursor == null) {
+                indexedDepthSequenceCursor = new SequenceDecoderCursor(payloads, label);
+            }
+            return indexedDepthSequenceCursor;
+        }
+        throw new IllegalArgumentException("payloads are not retained by this reader");
     }
 
     /// Decodes one AV1 item payload and selects its requested output spatial layer.
@@ -674,7 +724,9 @@ public final class AvifImageReader implements AutoCloseable {
                 );
             }
             String label = "Sample Transform " + (alpha ? "alpha " : "color ") + "input " + inputIndex;
-            DecodedRawImage decoded = decodeImageSource(source, label);
+            DecodedRawImage decoded = alpha
+                    ? decodeAlphaImageSource(source, label, input.colorBitDepth())
+                    : decodeImageSource(source, label);
             inputPlanes[inputIndex] = alpha ? alphaPlanesFromDecodedImage(decoded.planes()) : decoded.planes();
             if (inputIndex == sampleTransform.primaryInputIndex()) {
                 primaryColorConfig = decoded.colorConfig();
@@ -709,6 +761,36 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return decoded raw planes and their AV1 color configuration
     /// @throws IOException if the image source cannot be decoded
     private DecodedRawImage decodeImageSource(AvifImageSource source, String label) throws IOException {
+        return decodeImageSource(source, label, null);
+    }
+
+    /// Decodes an alpha AV1 image source and validates its required AVIF signaling.
+    ///
+    /// @param source the alpha image source
+    /// @param label the diagnostic label for failures
+    /// @param expectedBitDepth the associated master-image bit depth
+    /// @return decoded raw alpha planes and their AV1 color configuration
+    /// @throws IOException if the source cannot be decoded or violates AVIF alpha requirements
+    private DecodedRawImage decodeAlphaImageSource(
+            AvifImageSource source,
+            String label,
+            AvifBitDepth expectedBitDepth
+    ) throws IOException {
+        return decodeImageSource(source, label, expectedBitDepth);
+    }
+
+    /// Decodes one standalone or grid-derived AV1 image source with optional alpha validation.
+    ///
+    /// @param source the image source
+    /// @param label the diagnostic label for failures
+    /// @param expectedAlphaBitDepth the required alpha bit depth, or `null` for a color image
+    /// @return decoded raw planes and their AV1 color configuration
+    /// @throws IOException if the image source cannot be decoded
+    private DecodedRawImage decodeImageSource(
+            AvifImageSource source,
+            String label,
+            @Nullable AvifBitDepth expectedAlphaBitDepth
+    ) throws IOException {
         if (!source.isGrid()) {
             DecodedRawImage decoded = decodeRawImage(
                     source.payload(0),
@@ -717,6 +799,9 @@ public final class AvifImageReader implements AutoCloseable {
                     source.selectedSpatialLayer(0)
             );
             validateDecodedItemDimensions(source, 0, decoded.planes(), label);
+            if (expectedAlphaBitDepth != null) {
+                validateAlphaColorConfig(decoded.colorConfig(), expectedAlphaBitDepth, label);
+            }
             return decoded;
         }
         enforceGridFrameSizeLimit(source, label);
@@ -743,6 +828,13 @@ public final class AvifImageReader implements AutoCloseable {
                     decoded.planes(),
                     label + " grid cell " + cellIndex
             );
+            if (expectedAlphaBitDepth != null) {
+                validateAlphaColorConfig(
+                        decoded.colorConfig(),
+                        expectedAlphaBitDepth,
+                        label + " grid cell " + cellIndex
+                );
+            }
             cellPlanes[cellIndex] = decoded.planes();
             if (colorConfig == null) {
                 colorConfig = decoded.colorConfig();
@@ -1277,26 +1369,12 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the decoded frame
     /// @throws IOException if decoding fails
     private AvifFrame readSequenceFrameRandomAccess(int frameIndex) throws IOException {
-        AvifPayload @Nullable [] payloads = container.samplePayloads();
+        AvifPayload @Nullable [] payloads = sequenceSamplePayloads;
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        try (Av1Decoder randomAccessDecoder = Av1Decoder.open(
-                AvifPayload.openInput(payloads),
-                factory.av1DecoderConfig()
-        )) {
-            @Nullable Av1DecodedOutput output = null;
-            for (int index = 0; index <= frameIndex; index++) {
-                output = randomAccessDecoder.readOutput();
-                if (output == null) {
-                    throw new AvifDecodeException(
-                            AvifErrorCode.AV1_DECODE_FAILED,
-                            "Sequence ended before frame " + frameIndex,
-                            null
-                    );
-                }
-            }
-            Av1DecodedOutput requiredOutput = Objects.requireNonNull(output, "output");
+        try {
+            Av1DecodedOutput requiredOutput = indexedSequenceCursor(payloads, "Sequence").read(frameIndex);
             AvifFrame rawFrame = adaptRawPlanes(
                     requiredOutput.planes(),
                     requiredOutput.colorConfig(),
@@ -1362,6 +1440,12 @@ public final class AvifImageReader implements AutoCloseable {
             }
             sequenceAlphaAv1Decoder = null;
         }
+        failure = closeSequenceCursor(indexedColorSequenceCursor, failure);
+        indexedColorSequenceCursor = null;
+        failure = closeSequenceCursor(indexedAlphaSequenceCursor, failure);
+        indexedAlphaSequenceCursor = null;
+        failure = closeSequenceCursor(indexedDepthSequenceCursor, failure);
+        indexedDepthSequenceCursor = null;
         try {
             source.close();
         } catch (IOException exception) {
@@ -1374,6 +1458,29 @@ public final class AvifImageReader implements AutoCloseable {
         if (failure != null) {
             throw failure;
         }
+    }
+
+    /// Closes one indexed sequence cursor and combines any failure with an earlier failure.
+    ///
+    /// @param cursor the cursor to close, or `null`
+    /// @param failure the earlier close failure, or `null`
+    /// @return the first close failure with later failures suppressed, or `null`
+    private static @Nullable IOException closeSequenceCursor(
+            @Nullable SequenceDecoderCursor cursor,
+            @Nullable IOException failure
+    ) {
+        if (cursor == null) {
+            return failure;
+        }
+        try {
+            cursor.close();
+        } catch (IOException exception) {
+            if (failure == null) {
+                return exception;
+            }
+            failure.addSuppressed(exception);
+        }
+        return failure;
     }
 
     /// Ensures that this reader is open.
@@ -1670,7 +1777,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the color frame with sequence alpha applied, or the original frame
     /// @throws IOException if the alpha sample cannot be decoded
     private AvifFrame combineFrameWithSequenceAlphaSequential(AvifFrame colorFrame, int frameIndex) throws IOException {
-        AvifPayload @Nullable [] alphaPayloads = container.sequenceAlphaSamplePayloads();
+        AvifPayload @Nullable [] alphaPayloads = sequenceAlphaSamplePayloads;
         if (alphaPayloads == null) {
             return colorFrame;
         }
@@ -1708,8 +1815,15 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         sequenceAlphaAv1FrameIndex++;
+        validateAlphaColorConfig(
+                alphaOutput.colorConfig(),
+                container.info().bitDepth(),
+                "Sequence alpha frame " + frameIndex
+        );
         return combineFrameWithDecodedAlpha(
-                colorFrame, alphaOutput.planes(), frameIndex
+                colorFrame,
+                alphaPlanesFromDecodedImage(alphaOutput.planes()),
+                frameIndex
         );
     }
 
@@ -1721,31 +1835,26 @@ public final class AvifImageReader implements AutoCloseable {
     /// @throws IOException if the alpha sample cannot be decoded
     private AvifFrame combineFrameWithSequenceAlphaRandomAccess(AvifFrame colorFrame, int frameIndex)
             throws IOException {
-        AvifPayload @Nullable [] alphaPayloads = container.sequenceAlphaSamplePayloads();
+        AvifPayload @Nullable [] alphaPayloads = sequenceAlphaSamplePayloads;
         if (alphaPayloads == null) {
             return colorFrame;
         }
-        try (Av1Decoder alphaDecoder = Av1Decoder.open(
-                AvifPayload.openInput(alphaPayloads),
-                factory.av1DecoderConfig()
-        )) {
-            @Nullable Av1DecodedOutput alphaOutput = null;
-            for (int index = 0; index <= frameIndex; index++) {
-                alphaOutput = alphaDecoder.readOutput();
-                if (alphaOutput == null) {
-                    throw new AvifDecodeException(
-                            AvifErrorCode.AV1_DECODE_FAILED,
-                            "Sequence alpha ended before frame " + frameIndex,
-                            null
-                    );
-                }
-            }
-            Av1DecodedOutput requiredOutput = Objects.requireNonNull(alphaOutput, "alphaOutput");
+        try {
+            Av1DecodedOutput requiredOutput = indexedSequenceCursor(alphaPayloads, "Sequence alpha").read(frameIndex);
+            validateAlphaColorConfig(
+                    requiredOutput.colorConfig(),
+                    container.info().bitDepth(),
+                    "Sequence alpha frame " + frameIndex
+            );
             return combineFrameWithDecodedAlpha(
                     colorFrame,
-                    requiredOutput.planes(),
+                    alphaPlanesFromDecodedImage(requiredOutput.planes()),
                     frameIndex
             );
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -1816,8 +1925,51 @@ public final class AvifImageReader implements AutoCloseable {
                     null
             );
         }
+        if (alphaPlanes.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    "Decoded alpha planes are not monochrome",
+                    null
+            );
+        }
         validateAlphaLumaPlane(alphaPlanes.lumaPlane(), expectedWidth, expectedHeight, "Alpha");
         return alphaPlanes;
+    }
+
+    /// Validates the AV1 sequence-header requirements for an AVIF alpha image.
+    ///
+    /// @param colorConfig the decoded alpha image's AV1 color configuration
+    /// @param expectedBitDepth the associated master-image bit depth
+    /// @param label the diagnostic alpha source label
+    /// @throws AvifDecodeException if the alpha configuration is not monochrome, full range, or
+    ///                             the same bit depth as its master image
+    static void validateAlphaColorConfig(
+            Av1ColorConfig colorConfig,
+            AvifBitDepth expectedBitDepth,
+            String label
+    ) throws AvifDecodeException {
+        if (!colorConfig.monochrome() || colorConfig.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " must be coded as a monochrome AV1 image",
+                    null
+            );
+        }
+        if (!colorConfig.colorRange()) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " must use full-range AV1 samples",
+                    null
+            );
+        }
+        if (colorConfig.bitDepth() != expectedBitDepth) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " bit depth differs from its master image: "
+                            + colorConfig.bitDepth().bits() + " != " + expectedBitDepth.bits(),
+                    null
+            );
+        }
     }
 
     /// Validates one alpha luma plane against the expected decoded dimensions.
@@ -2000,6 +2152,106 @@ public final class AvifImageReader implements AutoCloseable {
             return sample;
         }
         return ((long) sample * 65_535 + maxSample / 2) / maxSample;
+    }
+
+    /// Maintains reusable AV1 decoder state for indexed reads of one image sequence.
+    ///
+    /// Forward reads continue from the current decoder position. Reading an earlier frame closes
+    /// and reopens the decoder, then advances from the beginning. The most recently returned frame
+    /// remains cached so repeated reads of the same index do not decode it again.
+    @NotNullByDefault
+    private final class SequenceDecoderCursor implements AutoCloseable {
+        /// The immutable sequence payload descriptors.
+        private final AvifPayload @Unmodifiable [] payloads;
+        /// The diagnostic sequence label.
+        private final String label;
+        /// The active AV1 decoder, or `null` before the first read or after closure.
+        private @Nullable Av1Decoder decoder;
+        /// The index to be read next from the active decoder.
+        private int nextFrameIndex;
+        /// The most recently decoded frame index, or `-1` before any successful read.
+        private int lastFrameIndex = -1;
+        /// The most recently decoded output, or `null` before any successful read.
+        private @Nullable Av1DecodedOutput lastOutput;
+
+        /// Creates an indexed decoder cursor.
+        ///
+        /// @param payloads the immutable sequence payload descriptors
+        /// @param label the diagnostic sequence label
+        private SequenceDecoderCursor(AvifPayload @Unmodifiable [] payloads, String label) {
+            this.payloads = Objects.requireNonNull(payloads, "payloads");
+            this.label = Objects.requireNonNull(label, "label");
+        }
+
+        /// Reads one indexed output, reusing forward decoder state when possible.
+        ///
+        /// @param frameIndex the zero-based frame index
+        /// @return the decoded output
+        /// @throws IOException if the decoder cannot be opened, advanced, or reset
+        private Av1DecodedOutput read(int frameIndex) throws IOException {
+            if (frameIndex < 0 || frameIndex >= payloads.length) {
+                throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+            }
+            if (frameIndex == lastFrameIndex) {
+                return Objects.requireNonNull(lastOutput, "lastOutput");
+            }
+            if (frameIndex < lastFrameIndex) {
+                reset();
+            }
+            if (decoder == null) {
+                decoder = Av1Decoder.open(
+                        AvifPayload.openInput(payloads),
+                        factory.av1DecoderConfig()
+                );
+            }
+            try {
+                while (nextFrameIndex <= frameIndex) {
+                    @Nullable Av1DecodedOutput output = decoder.readOutput();
+                    if (output == null) {
+                        throw new AvifDecodeException(
+                                AvifErrorCode.AV1_DECODE_FAILED,
+                                label + " ended before frame " + frameIndex,
+                                null
+                        );
+                    }
+                    lastOutput = output;
+                    lastFrameIndex = nextFrameIndex;
+                    nextFrameIndex++;
+                }
+                return Objects.requireNonNull(lastOutput, "lastOutput");
+            } catch (IOException | RuntimeException exception) {
+                try {
+                    reset();
+                } catch (IOException closeException) {
+                    exception.addSuppressed(closeException);
+                }
+                throw exception;
+            }
+        }
+
+        /// Resets this cursor to the beginning of its payload sequence.
+        ///
+        /// @throws IOException if the active decoder cannot be closed
+        private void reset() throws IOException {
+            @Nullable Av1Decoder activeDecoder = decoder;
+            decoder = null;
+            nextFrameIndex = 0;
+            lastFrameIndex = -1;
+            lastOutput = null;
+            if (activeDecoder != null) {
+                activeDecoder.close();
+            }
+        }
+
+        /// Closes the active decoder and clears cached output.
+        ///
+        /// Repeated calls have no effect.
+        ///
+        /// @throws IOException if the active decoder cannot be closed
+        @Override
+        public void close() throws IOException {
+            reset();
+        }
     }
 
     /// Raw decoded image planes and the active AV1 color configuration.

@@ -312,7 +312,11 @@ final class SampleTransformTest {
     private static SampleTransform.Input @Unmodifiable [] inputs(int inputCount) {
         SampleTransform.Input[] inputs = new SampleTransform.Input[inputCount];
         for (int i = 0; i < inputCount; i++) {
-            inputs[i] = new SampleTransform.Input(AvifImageSource.item(new byte[]{0}, 0, 1, 1), null);
+            inputs[i] = new SampleTransform.Input(
+                    AvifImageSource.item(new byte[]{0}, 0, 1, 1),
+                    AvifBitDepth.EIGHT_BITS,
+                    null
+            );
         }
         return inputs;
     }
