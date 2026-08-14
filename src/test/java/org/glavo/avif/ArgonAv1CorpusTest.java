@@ -602,9 +602,9 @@ final class ArgonAv1CorpusTest {
             try (Av1Decoder reader = testCase.annexB()
                     ? Av1Decoder.openAnnexB(input, config)
                     : Av1Decoder.open(input, config)) {
-                @Nullable DecodedPlanes decodedPlanes;
+                @Nullable Av1DecodedPlanes decodedPlanes;
                 while ((decodedPlanes = reader.readPlanes()) != null) {
-                    DecodedPlanes requiredPlanes = decodedPlanes;
+                    Av1DecodedPlanes requiredPlanes = decodedPlanes;
                     if (tileListLayouts == null) {
                         updateYuvDigest(actualDigest, requiredPlanes);
                     } else {
@@ -652,7 +652,7 @@ final class ArgonAv1CorpusTest {
     /// @param frameIndex the zero-based output frame index
     /// @param planes the decoded pre-grain planes
     /// @return the frame diagnostic summary
-    private static String frameDiagnostic(int frameIndex, DecodedPlanes planes) throws NoSuchAlgorithmException {
+    private static String frameDiagnostic(int frameIndex, Av1DecodedPlanes planes) throws NoSuchAlgorithmException {
         MessageDigest frameDigest = MessageDigest.getInstance("MD5");
         updateYuvDigest(frameDigest, planes);
         return "frame=" + frameIndex
@@ -670,7 +670,7 @@ final class ArgonAv1CorpusTest {
     /// @param plane the decoded plane, or `null`
     /// @param bitDepth the decoded bit depth
     /// @return the plane digest, or `none`
-    private static String planeDigest(@Nullable DecodedPlane plane, int bitDepth) throws NoSuchAlgorithmException {
+    private static String planeDigest(@Nullable Av1DecodedPlane plane, int bitDepth) throws NoSuchAlgorithmException {
         if (plane == null) {
             return "none";
         }
@@ -704,10 +704,10 @@ final class ArgonAv1CorpusTest {
     ///
     /// @param digest the digest to update
     /// @param planes the decoded pre-grain planes
-    private static void updateYuvDigest(MessageDigest digest, DecodedPlanes planes) {
+    private static void updateYuvDigest(MessageDigest digest, Av1DecodedPlanes planes) {
         updatePlaneDigest(digest, planes.lumaPlane(), planes.bitDepth().bits());
-        @Nullable DecodedPlane chromaUPlane = planes.chromaUPlane();
-        @Nullable DecodedPlane chromaVPlane = planes.chromaVPlane();
+        @Nullable Av1DecodedPlane chromaUPlane = planes.chromaUPlane();
+        @Nullable Av1DecodedPlane chromaVPlane = planes.chromaVPlane();
         if (chromaUPlane != null && chromaVPlane != null) {
             updatePlaneDigest(digest, chromaUPlane, planes.bitDepth().bits());
             updatePlaneDigest(digest, chromaVPlane, planes.bitDepth().bits());
@@ -724,7 +724,7 @@ final class ArgonAv1CorpusTest {
     /// @param layout the output grid and populated tile count
     private static void updateLargeScaleTileDigest(
             MessageDigest digest,
-            DecodedPlanes planes,
+            Av1DecodedPlanes planes,
             LargeScaleTileDigestLayout layout
     ) {
         assertEquals(0, planes.codedWidth() % layout.outputColumns(), "tile-list luma width");
@@ -743,8 +743,8 @@ final class ArgonAv1CorpusTest {
                     tileWidth,
                     tileHeight
             );
-            @Nullable DecodedPlane chromaUPlane = planes.chromaUPlane();
-            @Nullable DecodedPlane chromaVPlane = planes.chromaVPlane();
+            @Nullable Av1DecodedPlane chromaUPlane = planes.chromaUPlane();
+            @Nullable Av1DecodedPlane chromaVPlane = planes.chromaVPlane();
             if (chromaUPlane != null && chromaVPlane != null) {
                 assertEquals(0, chromaUPlane.width() % layout.outputColumns(), "tile-list chroma width");
                 assertEquals(0, chromaUPlane.height() % layout.outputRows(), "tile-list chroma height");
@@ -810,7 +810,7 @@ final class ArgonAv1CorpusTest {
     /// @param digest the digest to update
     /// @param plane the decoded plane
     /// @param bitDepth the decoded bit depth
-    private static void updatePlaneDigest(MessageDigest digest, DecodedPlane plane, int bitDepth) {
+    private static void updatePlaneDigest(MessageDigest digest, Av1DecodedPlane plane, int bitDepth) {
         updatePlaneRegionDigest(digest, plane, bitDepth, 0, 0, plane.width(), plane.height());
     }
 
@@ -825,7 +825,7 @@ final class ArgonAv1CorpusTest {
     /// @param height the region height in samples
     private static void updatePlaneRegionDigest(
             MessageDigest digest,
-            DecodedPlane plane,
+            Av1DecodedPlane plane,
             int bitDepth,
             int x,
             int y,

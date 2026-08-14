@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.av1;
 
-import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.Av1DecodedPlanes;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -305,7 +305,7 @@ public final class Av1Decoder implements AutoCloseable {
     ///
     /// @return the next decoded plane snapshot, or `null` at end-of-stream
     /// @throws IOException if the source is unreadable or the bitstream is malformed
-    public @Nullable DecodedPlanes readPlanes() throws IOException {
+    public @Nullable Av1DecodedPlanes readPlanes() throws IOException {
         @Nullable Av1DecodedOutput output = readOutput();
         return output == null ? null : output.planes();
     }

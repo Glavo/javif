@@ -458,7 +458,7 @@ final class LibavifFFmpegAvifReferenceTest {
             assertEquals(AvifBitDepth.SIXTEEN_BITS, reader.info().bitDepth());
             assertEquals(fallback.sourceMetadata().chromaFormat(), reader.info().chromaFormat());
 
-            DecodedPlanes derived = reader.readRawColorPlanes(0);
+            Av1DecodedPlanes derived = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, derived.bitDepth());
             assertEquals(fallback.width(), derived.codedWidth());
             assertEquals(fallback.height(), derived.codedHeight());
@@ -540,7 +540,7 @@ final class LibavifFFmpegAvifReferenceTest {
         String resourceName = reference.resourceName();
         SourcePlanes expected = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            DecodedPlanes actual = reader.readRawColorPlanes(0);
+            Av1DecodedPlanes actual = reader.readRawColorPlanes(0);
             SourcePlaneTolerance tolerance = sourcePlaneReference.tolerance();
             assertEquals(expected.width(), actual.codedWidth());
             assertEquals(expected.height(), actual.codedHeight());
@@ -556,8 +556,8 @@ final class LibavifFFmpegAvifReferenceTest {
                     tolerance
             );
             if (expected.sourceMetadata().chromaFormat() != Av1ChromaFormat.MONOCHROME) {
-                DecodedPlane chromaUPlane = actual.chromaUPlane();
-                DecodedPlane chromaVPlane = actual.chromaVPlane();
+                Av1DecodedPlane chromaUPlane = actual.chromaUPlane();
+                Av1DecodedPlane chromaVPlane = actual.chromaVPlane();
                 assertNotNull(chromaUPlane);
                 assertNotNull(chromaVPlane);
                 assertPlaneMatches(
@@ -648,7 +648,7 @@ final class LibavifFFmpegAvifReferenceTest {
             String label,
             int expectedWidth,
             int expectedHeight,
-            DecodedPlane actual,
+            Av1DecodedPlane actual,
             SourceSample expectedSample,
             SourcePlaneTolerance tolerance
     ) {

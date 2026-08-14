@@ -20,13 +20,13 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// Immutable decoded image planes.
+/// Immutable decoded AV1 image planes.
 ///
 /// The render dimensions retain the AV1 display hint; they do not crop or resample the stored
 /// planes. AVIF readers expose these planes before auxiliary alpha composition and item transforms
 /// such as `clap`, `irot`, and `imir` are applied.
 @NotNullByDefault
-public final class DecodedPlanes {
+public final class Av1DecodedPlanes {
     /// The decoded sample bit depth.
     private final AvifBitDepth bitDepth;
     /// The decoded AV1 chroma sampling layout.
@@ -40,13 +40,13 @@ public final class DecodedPlanes {
     /// The presentation render height.
     private final int renderHeight;
     /// The decoded luma plane.
-    private final DecodedPlane lumaPlane;
+    private final Av1DecodedPlane lumaPlane;
     /// The decoded chroma U plane, or `null` for monochrome images.
-    private final @Nullable DecodedPlane chromaUPlane;
+    private final @Nullable Av1DecodedPlane chromaUPlane;
     /// The decoded chroma V plane, or `null` for monochrome images.
-    private final @Nullable DecodedPlane chromaVPlane;
+    private final @Nullable Av1DecodedPlane chromaVPlane;
 
-    /// Creates decoded image planes.
+    /// Creates decoded AV1 image planes.
     ///
     /// @param bitDepth the decoded sample bit depth
     /// @param chromaFormat the decoded AV1 chroma sampling layout
@@ -57,16 +57,16 @@ public final class DecodedPlanes {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane, or `null` for monochrome images
     /// @param chromaVPlane the decoded chroma V plane, or `null` for monochrome images
-    public DecodedPlanes(
+    public Av1DecodedPlanes(
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
             int codedWidth,
             int codedHeight,
             int renderWidth,
             int renderHeight,
-            DecodedPlane lumaPlane,
-            @Nullable DecodedPlane chromaUPlane,
-            @Nullable DecodedPlane chromaVPlane
+            Av1DecodedPlane lumaPlane,
+            @Nullable Av1DecodedPlane chromaUPlane,
+            @Nullable Av1DecodedPlane chromaVPlane
     ) {
         if (codedWidth <= 0) {
             throw new IllegalArgumentException("codedWidth <= 0: " + codedWidth);
@@ -138,21 +138,21 @@ public final class DecodedPlanes {
     /// Returns the decoded luma plane.
     ///
     /// @return the decoded luma plane
-    public DecodedPlane lumaPlane() {
+    public Av1DecodedPlane lumaPlane() {
         return lumaPlane;
     }
 
     /// Returns the decoded chroma U plane.
     ///
     /// @return the decoded chroma U plane, or `null` for monochrome images
-    public @Nullable DecodedPlane chromaUPlane() {
+    public @Nullable Av1DecodedPlane chromaUPlane() {
         return chromaUPlane;
     }
 
     /// Returns the decoded chroma V plane.
     ///
     /// @return the decoded chroma V plane, or `null` for monochrome images
-    public @Nullable DecodedPlane chromaVPlane() {
+    public @Nullable Av1DecodedPlane chromaVPlane() {
         return chromaVPlane;
     }
 

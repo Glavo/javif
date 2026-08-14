@@ -22,7 +22,7 @@ import java.util.Objects;
 
 /// Frame metadata needed when internal output conversion materializes one decoded frame object.
 ///
-/// Output dimensions, bit depth, and chroma layout come from `DecodedPlanes`; this metadata only
+/// Output dimensions, bit depth, and chroma layout come from `Av1DecodedPlanes`; this metadata only
 /// carries the public frame attributes that do not belong to the plane snapshot itself.
 @NotNullByDefault
 public final class OutputFrameMetadata {

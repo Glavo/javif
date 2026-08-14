@@ -118,7 +118,7 @@ final class AomAvifTestFilesCorpusTest {
             assertNotNull(colorInfo, resourceName + " color info");
             assertEquals(10, colorInfo.matrixCoefficients(), resourceName + " matrix coefficients");
 
-            DecodedPlanes planes = reader.readRawColorPlanes(0);
+            Av1DecodedPlanes planes = reader.readRawColorPlanes(0);
             assertTrue(planes.codedWidth() > 0, resourceName + " coded width");
             assertTrue(planes.codedHeight() > 0, resourceName + " coded height");
             assertEquals(info.bitDepth(), planes.bitDepth(), resourceName + " bit depth");

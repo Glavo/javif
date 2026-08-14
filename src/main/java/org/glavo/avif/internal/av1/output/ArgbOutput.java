@@ -28,7 +28,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.Objects;
 
-/// Internal entry points for converting complete `DecodedPlanes` snapshots into opaque ARGB output.
+/// Internal entry points for converting complete `Av1DecodedPlanes` snapshots into opaque ARGB output.
 ///
 /// Conversion covers every stored luma sample and uses point-sampled chroma expansion for `YUV420`,
 /// `YUV422`, and `YUV444`. AV1 render dimensions are display hints and do not crop or resample the
@@ -115,7 +115,7 @@ public final class ArgbOutput {
     /// This convenience overload uses `BT.601` full-range coefficients.
     ///
     /// @param decodedPlanes the decoded planes to convert
-    /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
+    /// @param metadata the decoded-frame metadata that is not stored in `Av1DecodedPlanes`
     /// @return one opaque decoded frame backed by ARGB_8888 storage
     public static Av1DecodedFrame toOpaqueArgb8Frame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
         return toOpaqueArgb8Frame(decodedPlanes, metadata, DEFAULT_TRANSFORM);
@@ -124,7 +124,7 @@ public final class ArgbOutput {
     /// Converts one decoded-plane snapshot into a `Av1DecodedFrame` backed by ARGB_8888 storage.
     ///
     /// This overload accepts the public frame metadata directly, which keeps later integration code
-    /// simple when it already has those values separately from `DecodedPlanes`.
+    /// simple when it already has those values separately from `Av1DecodedPlanes`.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param frameType the AV1 frame category
@@ -165,7 +165,7 @@ public final class ArgbOutput {
     /// Converts one decoded-plane snapshot into a `Av1DecodedFrame` backed by ARGB_8888 storage.
     ///
     /// @param decodedPlanes the decoded planes to convert
-    /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
+    /// @param metadata the decoded-frame metadata that is not stored in `Av1DecodedPlanes`
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque decoded frame backed by ARGB_8888 storage
     public static Av1DecodedFrame toOpaqueArgb8Frame(
@@ -263,7 +263,7 @@ public final class ArgbOutput {
     /// This convenience overload uses `BT.601` full-range coefficients.
     ///
     /// @param decodedPlanes the decoded planes to convert
-    /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
+    /// @param metadata the decoded-frame metadata that is not stored in `Av1DecodedPlanes`
     /// @return one opaque high-bit-depth decoded frame
     public static Av1DecodedFrame toOpaqueArgbHighBitDepthFrame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
         return toOpaqueArgbHighBitDepthFrame(decodedPlanes, metadata, DEFAULT_TRANSFORM);
@@ -310,7 +310,7 @@ public final class ArgbOutput {
     /// Converts one decoded-plane snapshot into a high-bit-depth `Av1DecodedFrame`.
     ///
     /// @param decodedPlanes the decoded planes to convert
-    /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
+    /// @param metadata the decoded-frame metadata that is not stored in `Av1DecodedPlanes`
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque high-bit-depth decoded frame
     public static Av1DecodedFrame toOpaqueArgbHighBitDepthFrame(

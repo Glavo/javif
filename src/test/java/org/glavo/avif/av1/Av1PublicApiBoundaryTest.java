@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.av1;
 
-import org.glavo.avif.DecodedPlane;
-import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.Av1DecodedPlane;
+import org.glavo.avif.Av1DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -63,8 +63,8 @@ final class Av1PublicApiBoundaryTest {
             assertPublicSignatures(apiType);
         }
         for (Class<?> sharedApiType : List.of(
-                DecodedPlane.class,
-                DecodedPlanes.class
+                Av1DecodedPlane.class,
+                Av1DecodedPlanes.class
         )) {
             assertPublicSignatures(sharedApiType);
         }

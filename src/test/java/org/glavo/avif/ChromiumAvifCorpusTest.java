@@ -419,7 +419,7 @@ final class ChromiumAvifCorpusTest {
             assertNotNull(gainMapInfo.metadata());
             assertEquals(testCase.gainMapWidth(), gainMapInfo.gainMapWidth());
             assertEquals(testCase.gainMapHeight(), gainMapInfo.gainMapHeight());
-            DecodedPlanes gainMap = reader.readRawGainMapPlanes(0);
+            Av1DecodedPlanes gainMap = reader.readRawGainMapPlanes(0);
             assertNotNull(gainMap);
             assertEquals(testCase.gainMapWidth(), gainMap.codedWidth());
             assertEquals(testCase.gainMapHeight(), gainMap.codedHeight());

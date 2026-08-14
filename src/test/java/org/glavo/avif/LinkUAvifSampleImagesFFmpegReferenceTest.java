@@ -70,7 +70,7 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
     private static void assertSourcePlanesMatchFFmpeg(String resourceName) throws IOException, URISyntaxException {
         SourcePlanes expected = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            DecodedPlanes actual = reader.readRawColorPlanes(0);
+            Av1DecodedPlanes actual = reader.readRawColorPlanes(0);
             assertSourcePlanesMatch(resourceName, expected, actual);
         }
     }
@@ -80,7 +80,7 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
     /// @param label the diagnostic label
     /// @param expected the FFmpeg source planes
     /// @param actual the javif source planes
-    private static void assertSourcePlanesMatch(String label, SourcePlanes expected, DecodedPlanes actual) {
+    private static void assertSourcePlanesMatch(String label, SourcePlanes expected, Av1DecodedPlanes actual) {
         assertEquals(expected.width(), actual.codedWidth(), label + " width");
         assertEquals(expected.height(), actual.codedHeight(), label + " height");
         assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), label + " bit depth");
@@ -99,8 +99,8 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
             assertNull(actual.chromaVPlane(), label + " V plane");
             return;
         }
-        DecodedPlane chromaUPlane = actual.chromaUPlane();
-        DecodedPlane chromaVPlane = actual.chromaVPlane();
+        Av1DecodedPlane chromaUPlane = actual.chromaUPlane();
+        Av1DecodedPlane chromaVPlane = actual.chromaVPlane();
         assertNotNull(chromaUPlane, label + " U plane");
         assertNotNull(chromaVPlane, label + " V plane");
         assertPlaneMatches(
@@ -138,7 +138,7 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
             String label,
             int expectedWidth,
             int expectedHeight,
-            DecodedPlane actual,
+            Av1DecodedPlane actual,
             IntBinaryOperator expectedSample,
             AvifBitDepth bitDepth
     ) {

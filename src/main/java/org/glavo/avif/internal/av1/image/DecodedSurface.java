@@ -17,8 +17,8 @@ package org.glavo.avif.internal.av1.image;
 
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.DecodedPlane;
-import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.Av1DecodedPlane;
+import org.glavo.avif.Av1DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -188,8 +188,8 @@ public final class DecodedSurface {
     /// internal rows below the visible plane height.
     ///
     /// @return the public decoded planes
-    public DecodedPlanes toDecodedPlanes() {
-        return new DecodedPlanes(
+    public Av1DecodedPlanes toDecodedPlanes() {
+        return new Av1DecodedPlanes(
                 AvifBitDepth.fromBits(bitDepth),
                 chromaFormat,
                 codedWidth,
@@ -206,15 +206,15 @@ public final class DecodedSurface {
     ///
     /// @param plane the internal padded plane
     /// @return the public visible plane
-    private static DecodedPlane toDecodedPlane(PaddedPlane plane) {
-        return new DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.sampleBuffer());
+    private static Av1DecodedPlane toDecodedPlane(PaddedPlane plane) {
+        return new Av1DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.sampleBuffer());
     }
 
     /// Creates a public visible plane over one optional internal padded plane.
     ///
     /// @param plane the internal padded plane, or `null`
     /// @return the public visible plane, or `null`
-    private static @Nullable DecodedPlane toNullableDecodedPlane(@Nullable PaddedPlane plane) {
+    private static @Nullable Av1DecodedPlane toNullableDecodedPlane(@Nullable PaddedPlane plane) {
         return plane == null ? null : toDecodedPlane(plane);
     }
 

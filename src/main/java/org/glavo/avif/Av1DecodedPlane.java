@@ -23,12 +23,12 @@ import java.nio.ShortBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Immutable decoded image plane.
+/// Immutable decoded AV1 sample plane.
 ///
 /// Samples are unsigned values stored in the low bits of each `short`. `stride` is measured in
 /// samples, not bytes.
 @NotNullByDefault
-public final class DecodedPlane {
+public final class Av1DecodedPlane {
     /// The plane width in samples.
     private final int width;
     /// The plane height in samples.
@@ -38,17 +38,17 @@ public final class DecodedPlane {
     /// The immutable row-major sample storage.
     private final @Unmodifiable ShortBuffer samples;
 
-    /// Creates one immutable decoded plane from an array.
+    /// Creates one immutable decoded AV1 plane from an array.
     ///
     /// @param width the plane width in samples
     /// @param height the plane height in samples
     /// @param stride the plane row stride in samples
     /// @param samples the unsigned plane samples in row-major order
-    public DecodedPlane(int width, int height, int stride, short[] samples) {
+    public Av1DecodedPlane(int width, int height, int stride, short[] samples) {
         this(width, height, stride, immutableSamples(Objects.requireNonNull(samples, "samples")));
     }
 
-    /// Creates one immutable decoded plane from a buffer.
+    /// Creates one immutable decoded AV1 plane from a buffer.
     ///
     /// The sample buffer is stored as a read-only slice without copying. Callers must only pass
     /// immutable storage or storage they will never mutate after construction.
@@ -57,7 +57,7 @@ public final class DecodedPlane {
     /// @param height the plane height in samples
     /// @param stride the plane row stride in samples
     /// @param samples the unsigned plane samples in row-major order
-    public DecodedPlane(int width, int height, int stride, @Unmodifiable ShortBuffer samples) {
+    public Av1DecodedPlane(int width, int height, int stride, @Unmodifiable ShortBuffer samples) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }

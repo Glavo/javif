@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.av1;
 
-import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.Av1DecodedPlanes;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.runtime.OutputFrameFactory;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -32,7 +32,7 @@ public final class Av1DecodedOutput {
     /// The internal postprocessed presentation surface used for color conversion.
     private final DecodedSurface surface;
     /// The public visible presentation planes.
-    private final DecodedPlanes planes;
+    private final Av1DecodedPlanes planes;
     /// The color configuration used to interpret the planes.
     private final Av1ColorConfig colorConfig;
     /// The frame category of the presented surface.
@@ -88,7 +88,7 @@ public final class Av1DecodedOutput {
     /// Returns the postprocessed YUV presentation planes.
     ///
     /// @return the immutable presentation planes
-    public DecodedPlanes planes() {
+    public Av1DecodedPlanes planes() {
         return planes;
     }
 

@@ -29,12 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Contract tests for 8-bit ARGB output built on `DecodedPlanes`.
+/// Contract tests for 8-bit ARGB output built on `Av1DecodedPlanes`.
 ///
 /// These tests exercise the stable frame-returning `ArgbOutput` API directly and validate
 /// deterministic `MONOCHROME`, `YUV420`, `YUV422`, and `YUV444` pixel packing behavior.
 @NotNullByDefault
-final class DecodedPlanesArgbIntOutputTest {
+final class Av1DecodedPlanesArgbIntOutputTest {
     /// The test frame type supplied to frame-returning converters.
     private static final Av1FrameType TEST_FRAME_TYPE = Av1FrameType.KEY;
 

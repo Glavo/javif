@@ -27,13 +27,13 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/// Contract tests for high-bit-depth ARGB output built on `DecodedPlanes`.
+/// Contract tests for high-bit-depth ARGB output built on `Av1DecodedPlanes`.
 ///
 /// These tests validate the completed Track E long-output path directly through `ArgbOutput`,
 /// covering exact `0xAAAA_RRRR_GGGG_BBBB` packing, `YUV444` per-pixel chroma sampling, public
 /// frame metadata materialization, and the `8-bit` contract for long-output entry points.
 @NotNullByDefault
-final class DecodedPlanesArgbLongOutputTest {
+final class Av1DecodedPlanesArgbLongOutputTest {
     /// The fixed transform contract used by the convenience long-output overloads.
     private static final YuvToRgbTransform DEFAULT_TRANSFORM = YuvToRgbTransform.BT601_FULL_RANGE;
 

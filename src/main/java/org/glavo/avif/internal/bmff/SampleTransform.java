@@ -17,8 +17,8 @@ package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.DecodedPlane;
-import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.Av1DecodedPlane;
+import org.glavo.avif.Av1DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -203,7 +203,7 @@ public final class SampleTransform {
     ///
     /// @param inputPlanes decoded planes in `dimg` reference order
     /// @return the reconstructed planes
-    public DecodedPlanes apply(DecodedPlanes @Unmodifiable [] inputPlanes) {
+    public Av1DecodedPlanes apply(Av1DecodedPlanes @Unmodifiable [] inputPlanes) {
         return applyPlanes(inputPlanes, fullRange);
     }
 
@@ -214,7 +214,7 @@ public final class SampleTransform {
     ///
     /// @param inputPlanes decoded alpha planes in `dimg` reference order
     /// @return the reconstructed alpha planes
-    public DecodedPlanes applyAlpha(DecodedPlanes @Unmodifiable [] inputPlanes) {
+    public Av1DecodedPlanes applyAlpha(Av1DecodedPlanes @Unmodifiable [] inputPlanes) {
         return applyPlanes(inputPlanes, true);
     }
 
@@ -223,29 +223,29 @@ public final class SampleTransform {
     /// @param inputPlanes decoded planes in `dimg` reference order
     /// @param outputFullRange whether the output uses the full unsigned sample range
     /// @return the reconstructed planes
-    private DecodedPlanes applyPlanes(
-            DecodedPlanes @Unmodifiable [] inputPlanes,
+    private Av1DecodedPlanes applyPlanes(
+            Av1DecodedPlanes @Unmodifiable [] inputPlanes,
             boolean outputFullRange
     ) {
-        DecodedPlanes[] checkedInputs = Objects.requireNonNull(inputPlanes, "inputPlanes");
+        Av1DecodedPlanes[] checkedInputs = Objects.requireNonNull(inputPlanes, "inputPlanes");
         if (checkedInputs.length != inputs.length) {
             throw new IllegalArgumentException(
                     "Decoded Sample Transform input count mismatch: " + checkedInputs.length + " != " + inputs.length
             );
         }
-        DecodedPlanes first = Objects.requireNonNull(checkedInputs[0], "inputPlanes[0]");
+        Av1DecodedPlanes first = Objects.requireNonNull(checkedInputs[0], "inputPlanes[0]");
         for (int i = 1; i < checkedInputs.length; i++) {
             validateCompatiblePlanes(first, Objects.requireNonNull(checkedInputs[i], "inputPlanes[" + i + "]"));
         }
 
-        DecodedPlane lumaPlane = applyPlane(lumaPlanes(checkedInputs), false, outputFullRange);
-        @Nullable DecodedPlane chromaUPlane = null;
-        @Nullable DecodedPlane chromaVPlane = null;
+        Av1DecodedPlane lumaPlane = applyPlane(lumaPlanes(checkedInputs), false, outputFullRange);
+        @Nullable Av1DecodedPlane chromaUPlane = null;
+        @Nullable Av1DecodedPlane chromaVPlane = null;
         if (first.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
             chromaUPlane = applyPlane(chromaPlanes(checkedInputs, true), true, outputFullRange);
             chromaVPlane = applyPlane(chromaPlanes(checkedInputs, false), true, outputFullRange);
         }
-        return new DecodedPlanes(
+        return new Av1DecodedPlanes(
                 bitDepth,
                 first.chromaFormat(),
                 first.codedWidth(),
@@ -298,7 +298,7 @@ public final class SampleTransform {
     ///
     /// @param expected the first decoded input
     /// @param actual another decoded input
-    private static void validateCompatiblePlanes(DecodedPlanes expected, DecodedPlanes actual) {
+    private static void validateCompatiblePlanes(Av1DecodedPlanes expected, Av1DecodedPlanes actual) {
         if (actual.chromaFormat() != expected.chromaFormat()
                 || actual.codedWidth() != expected.codedWidth()
                 || actual.codedHeight() != expected.codedHeight()) {
@@ -310,8 +310,8 @@ public final class SampleTransform {
     ///
     /// @param inputPlanes the decoded inputs
     /// @return the ordered luma planes
-    private static DecodedPlane @Unmodifiable [] lumaPlanes(DecodedPlanes @Unmodifiable [] inputPlanes) {
-        DecodedPlane[] planes = new DecodedPlane[inputPlanes.length];
+    private static Av1DecodedPlane @Unmodifiable [] lumaPlanes(Av1DecodedPlanes @Unmodifiable [] inputPlanes) {
+        Av1DecodedPlane[] planes = new Av1DecodedPlane[inputPlanes.length];
         for (int i = 0; i < inputPlanes.length; i++) {
             planes[i] = inputPlanes[i].lumaPlane();
         }
@@ -323,13 +323,13 @@ public final class SampleTransform {
     /// @param inputPlanes the decoded inputs
     /// @param chromaU whether to collect U rather than V
     /// @return the ordered chroma planes
-    private static DecodedPlane @Unmodifiable [] chromaPlanes(
-            DecodedPlanes @Unmodifiable [] inputPlanes,
+    private static Av1DecodedPlane @Unmodifiable [] chromaPlanes(
+            Av1DecodedPlanes @Unmodifiable [] inputPlanes,
             boolean chromaU
     ) {
-        DecodedPlane[] planes = new DecodedPlane[inputPlanes.length];
+        Av1DecodedPlane[] planes = new Av1DecodedPlane[inputPlanes.length];
         for (int i = 0; i < inputPlanes.length; i++) {
-            @Nullable DecodedPlane plane = chromaU ? inputPlanes[i].chromaUPlane() : inputPlanes[i].chromaVPlane();
+            @Nullable Av1DecodedPlane plane = chromaU ? inputPlanes[i].chromaUPlane() : inputPlanes[i].chromaVPlane();
             if (plane == null) {
                 throw new IllegalArgumentException("Sample Transform chroma input is missing");
             }
@@ -344,16 +344,16 @@ public final class SampleTransform {
     /// @param chroma whether the component is chroma rather than luma
     /// @param outputFullRange whether the output uses the full unsigned sample range
     /// @return the reconstructed component plane
-    private DecodedPlane applyPlane(
-            DecodedPlane @Unmodifiable [] inputPlanes,
+    private Av1DecodedPlane applyPlane(
+            Av1DecodedPlane @Unmodifiable [] inputPlanes,
             boolean chroma,
             boolean outputFullRange
     ) {
-        DecodedPlane first = inputPlanes[0];
+        Av1DecodedPlane first = inputPlanes[0];
         int width = first.width();
         int height = first.height();
         for (int i = 1; i < inputPlanes.length; i++) {
-            DecodedPlane plane = inputPlanes[i];
+            Av1DecodedPlane plane = inputPlanes[i];
             if (plane.width() != width || plane.height() != height) {
                 throw new IllegalArgumentException("Sample Transform input component dimensions differ");
             }
@@ -372,7 +372,7 @@ public final class SampleTransform {
                 output[y * width + x] = (short) Math.max(minSample, Math.min(maxSample, value));
             }
         }
-        return new DecodedPlane(width, height, width, output);
+        return new Av1DecodedPlane(width, height, width, output);
     }
 
     /// Evaluates one output sample.
@@ -383,7 +383,7 @@ public final class SampleTransform {
     /// @param stack reusable expression stack storage
     /// @return the signed expression result before final unsigned clamping
     private long evaluateSample(
-            DecodedPlane @Unmodifiable [] inputPlanes,
+            Av1DecodedPlane @Unmodifiable [] inputPlanes,
             int x,
             int y,
             long[] stack

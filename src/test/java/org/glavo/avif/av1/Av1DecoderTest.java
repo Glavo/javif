@@ -19,7 +19,7 @@ import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.DecodedPlanes;
+import org.glavo.avif.Av1DecodedPlanes;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -1087,7 +1087,7 @@ final class Av1DecoderTest {
             assertEquals(firstOutput.spatialId(), firstFrame.spatialId());
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
-            DecodedPlanes firstPlanes = firstOutput.planes();
+            Av1DecodedPlanes firstPlanes = firstOutput.planes();
             assertReferenceStateStoredForLastSyntaxResult(reader);
             ReferenceFrameSyntaxState storedSyntaxState =
                     Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
@@ -1190,7 +1190,7 @@ final class Av1DecoderTest {
             assertFullRangeOpaqueGrayStillPictureFrame(firstOutput.toFrame(), 0);
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
-            DecodedPlanes firstPlanes = firstOutput.planes();
+            Av1DecodedPlanes firstPlanes = firstOutput.planes();
             ReferenceFrameSyntaxState storedSyntaxState =
                     Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
 
