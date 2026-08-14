@@ -83,57 +83,6 @@ public final class AvifFXImage extends WritableImage {
         this(List.of(frame), null);
     }
 
-    /// Creates a JavaFX image from a list of decoded frames.
-    ///
-    /// The input list is snapshotted and the first frame is written immediately. All frames must
-    /// have the same dimensions. Call [#getAnimation()] to control playback.
-    ///
-    /// @param frames  the decoded frames in presentation order
-    /// @param autoPlay whether to start playing the animation automatically
-    /// @throws IllegalArgumentException if the frame list is empty or its dimensions differ
-    public AvifFXImage(List<AvifFrame> frames, boolean autoPlay) {
-        this(frames, autoPlay, 30);
-    }
-
-    /// Creates a JavaFX image from a list of decoded frames with an explicit frame rate.
-    ///
-    /// The input list is snapshotted. All frames must have the same dimensions. Values of `fps`
-    /// below one are treated as one frame per second.
-    ///
-    /// @param frames  the decoded frames in presentation order
-    /// @param autoPlay whether to start playing the animation automatically
-    /// @param fps      the frames per second for playback timing
-    /// @throws IllegalArgumentException if the frame list is empty or its dimensions differ
-    public AvifFXImage(List<AvifFrame> frames, boolean autoPlay, int fps) {
-        this(frames, null);
-
-        if (autoPlay && isAnimated()) {
-            Timeline animation = Objects.requireNonNull(getAnimation(fps));
-            animation.play();
-        }
-    }
-
-    /// Creates a JavaFX image using the frame timing and repetition metadata from an AVIS sequence.
-    ///
-    /// The input list is snapshotted. When timing metadata is absent, playback falls back to 30
-    /// frames per second. An unknown or infinite repetition count produces indefinite playback; a
-    /// non-negative repetition count is interpreted as the number of repetitions after the first
-    /// playback.
-    ///
-    /// @param frames the decoded frames in presentation order
-    /// @param sequenceInfo the timing and repetition metadata for the frames
-    /// @param autoPlay whether to start playing the animation automatically
-    /// @throws IllegalArgumentException if the frame list is empty, its dimensions differ, or its
-    /// size does not match `sequenceInfo.frameCount()`
-    public AvifFXImage(List<AvifFrame> frames, AvifSequenceInfo sequenceInfo, boolean autoPlay) {
-        this(frames, Objects.requireNonNull(sequenceInfo, "sequenceInfo"));
-
-        if (autoPlay && isAnimated()) {
-            Timeline animation = Objects.requireNonNull(getAnimation());
-            animation.play();
-        }
-    }
-
     /// Creates a JavaFX image with optional container sequence metadata.
     ///
     /// @param frames the decoded frames in presentation order
@@ -165,9 +114,10 @@ public final class AvifFXImage extends WritableImage {
 
     /// Returns the JavaFX timeline that drives this image's animation.
     ///
-    /// Container frame durations and repetition metadata are used when supplied at construction;
-    /// otherwise playback uses 30 frames per second and repeats indefinitely. The timeline is
-    /// created lazily; repeated calls return the same mutable JavaFX timeline.
+    /// Container frame durations are used when available; otherwise playback uses 30 frames per
+    /// second. Container repetition metadata is honored when available, and playback otherwise
+    /// repeats indefinitely. The timeline is created lazily; repeated calls return the same
+    /// mutable JavaFX timeline.
     ///
     /// @return the timeline, or `null` if not animated
     public @Nullable Timeline getAnimation() {
@@ -182,23 +132,6 @@ public final class AvifFXImage extends WritableImage {
                 int cycleCount = info == null ? Animation.INDEFINITE : sequenceCycleCount(info);
                 timeline = createTimeline(createUniformKeyFrames(30), cycleCount);
             }
-        }
-        return timeline;
-    }
-
-    /// Returns the JavaFX timeline that drives this image's animation.
-    ///
-    /// If a timeline has already been created, this method returns it without changing its timing.
-    /// Values below one are treated as one frame per second.
-    ///
-    /// @param fps the frames per second for fixed-rate playback timing
-    /// @return the timeline, or `null` if not animated
-    public @Nullable Timeline getAnimation(int fps) {
-        if (!animated) {
-            return null;
-        }
-        if (timeline == null) {
-            timeline = createTimeline(createUniformKeyFrames(Math.max(1, fps)), Animation.INDEFINITE);
         }
         return timeline;
     }

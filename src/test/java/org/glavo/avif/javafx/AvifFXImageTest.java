@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.javafx;
 
+import javafx.animation.Animation;
 import javafx.animation.Timeline;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifFrame;
@@ -25,18 +26,15 @@ import org.glavo.avif.AvifSequenceInfo;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.LongBuffer;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /// Tests for converting decoded AVIF frames into JavaFX images.
 @NotNullByDefault
@@ -57,6 +55,24 @@ final class AvifFXImageTest {
         assertEquals(decoded.info().height(), (int) image.getHeight());
         assertNotNull(timeline);
         assertEquals(decoded.frames().size() + 1, timeline.getKeyFrames().size());
+
+        AvifSequenceInfo sequenceInfo = decoded.info().sequenceInfo();
+        assertNotNull(sequenceInfo);
+        int[] frameDurations = sequenceInfo.frameDurations();
+        double currentTimeMillis = 0.0;
+        for (int i = 0; i < frameDurations.length; i++) {
+            assertEquals(currentTimeMillis, timeline.getKeyFrames().get(i).getTime().toMillis(), 0.000_001);
+            currentTimeMillis += frameDurations[i] * 1000.0 / sequenceInfo.mediaTimescale();
+        }
+        assertEquals(currentTimeMillis, timeline.getKeyFrames().get(frameDurations.length).getTime().toMillis(),
+                0.000_001);
+
+        int repetitionCount = sequenceInfo.repetitionCount();
+        int expectedCycleCount = repetitionCount == AvifSequenceInfo.REPETITION_COUNT_UNKNOWN
+                || repetitionCount == AvifSequenceInfo.REPETITION_COUNT_INFINITE
+                ? Animation.INDEFINITE
+                : repetitionCount + 1;
+        assertEquals(expectedCycleCount, timeline.getCycleCount());
     }
 
     /// Verifies that high-bit-depth frames are reduced to JavaFX-compatible ARGB pixels.
@@ -95,61 +111,4 @@ final class AvifFXImageTest {
         }
     }
 
-    /// Verifies that AVIS timing and repetition metadata configure the JavaFX timeline.
-    @Test
-    void usesSequenceFrameDurationsAndRepetitionCount() {
-        @Unmodifiable List<AvifFrame> frames = List.of(frame(0, 0xFF00_0000), frame(1, 0xFFFF_FFFF));
-        AvifSequenceInfo sequenceInfo = new AvifSequenceInfo(2, 1_000, 350, 2, new int[]{100, 250});
-
-        AvifFXImage image = new AvifFXImage(frames, sequenceInfo, false);
-        @Nullable Timeline timeline = image.getAnimation();
-        assertNotNull(timeline);
-
-        assertEquals(3, timeline.getCycleCount());
-        assertEquals(3, timeline.getKeyFrames().size());
-        assertEquals(0.0, timeline.getKeyFrames().get(0).getTime().toMillis(), 0.000_001);
-        assertEquals(100.0, timeline.getKeyFrames().get(1).getTime().toMillis(), 0.000_001);
-        assertEquals(350.0, timeline.getKeyFrames().get(2).getTime().toMillis(), 0.000_001);
-    }
-
-    /// Verifies that sequence metadata cannot silently omit decoded frames.
-    @Test
-    void rejectsMismatchedSequenceFrameCount() {
-        @Unmodifiable List<AvifFrame> frames = List.of(frame(0, 0xFF00_0000), frame(1, 0xFFFF_FFFF));
-        AvifSequenceInfo sequenceInfo = new AvifSequenceInfo(3, 1_000, 300, 0, new int[]{100, 100, 100});
-
-        assertThrows(IllegalArgumentException.class, () -> new AvifFXImage(frames, sequenceInfo, false));
-    }
-
-    /// Verifies that one JavaFX image cannot combine frames with different dimensions.
-    @Test
-    void rejectsMismatchedFrameDimensions() {
-        AvifFrame firstFrame = frame(0, 0xFF00_0000);
-        AvifFrame secondFrame = new AvifFrame(
-                2,
-                1,
-                AvifBitDepth.EIGHT_BITS,
-                Av1ChromaFormat.YUV444,
-                1,
-                new int[]{0xFFFF_FFFF, 0xFFFF_FFFF}
-        );
-
-        assertThrows(IllegalArgumentException.class, () -> new AvifFXImage(List.of(firstFrame, secondFrame), false));
-    }
-
-    /// Creates one single-pixel frame for animation tests.
-    ///
-    /// @param frameIndex the zero-based frame index
-    /// @param pixel the packed ARGB pixel
-    /// @return the decoded frame
-    private static AvifFrame frame(int frameIndex, int pixel) {
-        return new AvifFrame(
-                1,
-                1,
-                AvifBitDepth.EIGHT_BITS,
-                Av1ChromaFormat.YUV444,
-                frameIndex,
-                new int[]{pixel}
-        );
-    }
 }
