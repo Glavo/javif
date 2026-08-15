@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Glavo
+// SPDX-License-Identifier: MPL-2.0
+
 package org.glavo.avif.testutil;
 
 import org.glavo.avif.internal.av1.model.FrameHeader;

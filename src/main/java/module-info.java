@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Glavo
+// SPDX-License-Identifier: MPL-2.0
 /// Provides pure-Java AV1 decoding, AVIF container reading, and optional JavaFX integration.
 module org.glavo.avif {
     requires static org.jetbrains.annotations;
