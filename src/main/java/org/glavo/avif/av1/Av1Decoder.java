@@ -763,7 +763,7 @@ public final class Av1Decoder implements AutoCloseable {
             validateReferenceState(assembly, packet);
         }
         @Nullable ReferenceFrameSyntaxState cdfReferenceState = selectCdfReferenceFrameSyntaxState(frameHeader);
-        FrameSyntaxDecodeResult syntaxDecodeResult;
+        @Nullable FrameSyntaxDecodeResult syntaxDecodeResult;
         try {
             syntaxDecodeResult = new FrameSyntaxDecoder(
                     cdfReferenceState,
@@ -815,7 +815,15 @@ public final class Av1Decoder implements AutoCloseable {
 
         @Nullable DecodedSurface postprocessedPlanes = null;
         if (decodedPlanes != null) {
-            postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+            FramePostprocessor.PreparedFrame preparedPostprocessing = framePostprocessor.prepare(
+                    decodedPlanes,
+                    frameHeader,
+                    syntaxDecodeResult
+            );
+            // The prepared postfilter state retains compact maps only. Drop the multi-million-object
+            // syntax tree before any pixel-domain postfilter allocates another full-frame surface.
+            syntaxDecodeResult = null;
+            postprocessedPlanes = framePostprocessor.finish(preparedPostprocessing);
             if (needsSurfaceSnapshot || needsAnchorSnapshot) {
                 ReferenceSurfaceSnapshot snapshot = new ReferenceSurfaceSnapshot(
                         frameHeader,

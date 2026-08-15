@@ -131,6 +131,7 @@ jobs:
         run: >-
           ./gradlew -g .gradle-user-home
           argonAv1Test -PargonAv1Case=${{ matrix.category }}/all
+          -PargonAv1MaxHeap=8g
           --info --no-daemon --stacktrace
 
   argon-extended:
@@ -242,7 +243,7 @@ jobs:
 
   argon-stress:
     if: ${{ inputs.corpus == 'argon' || inputs.corpus == 'all' }}
-    name: Argon stress (${{ matrix.category }})
+    name: Argon stress (${{ matrix.category }}, ${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
@@ -252,6 +253,11 @@ jobs:
           - profile0_stress
           - profile1_stress
           - profile2_stress
+        shard:
+          - '1/4'
+          - '2/4'
+          - '3/4'
+          - '4/4'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -268,11 +274,12 @@ jobs:
         run: >-
           ./gradlew -g .gradle-user-home
           argonAv1Test -PargonAv1Case=${{ matrix.category }}/all
+          -PargonAv1Shard=${{ matrix.shard }}
           --info --no-daemon --stacktrace
 
   argon-extended-stress:
     if: ${{ inputs.corpus == 'argon' || inputs.corpus == 'all' }}
-    name: Argon film grain stress (${{ matrix.category }})
+    name: Argon film grain stress (${{ matrix.category }}, ${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
@@ -282,6 +289,11 @@ jobs:
           - profile0_stress
           - profile1_stress
           - profile2_stress
+        shard:
+          - '1/4'
+          - '2/4'
+          - '3/4'
+          - '4/4'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -298,5 +310,6 @@ jobs:
         run: >-
           ./gradlew -g .gradle-user-home
           argonAv1Test -PargonAv1Case=${{ matrix.category }}/all
+          -PargonAv1Shard=${{ matrix.shard }}
           -PargonAv1Output=film-grain
           --info --no-daemon --stacktrace

@@ -6,7 +6,6 @@ import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
-import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
@@ -17,6 +16,7 @@ import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -48,6 +48,18 @@ public final class LoopFilterApplier {
     /// Packed filter-mask bit indicating a flat extended neighborhood.
     private static final int FILTER_MASK_FLAT2 = 1 << 3;
 
+    /// Bit mask for one effective loop-filter level in compact block state.
+    private static final int FILTER_STATE_LEVEL_MASK = 0x3F;
+
+    /// Bit shift for the second effective loop-filter level in compact block state.
+    private static final int FILTER_STATE_SECOND_LEVEL_SHIFT = 6;
+
+    /// Compact block-state bit indicating a skipped inter block.
+    private static final int FILTER_STATE_SKIPPED_INTER = 1 << 12;
+
+    /// Transform-size constants indexed by their declaration ordinal.
+    private static final TransformSize @Unmodifiable [] TRANSFORM_SIZES = TransformSize.values();
+
     /// Applies loop filtering to one reconstructed frame.
     ///
     /// @param decodedPlanes the reconstructed planes to post-process
@@ -74,18 +86,81 @@ public final class LoopFilterApplier {
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
         DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        return applyPrepared(
+                checkedDecodedPlanes,
+                prepare(checkedDecodedPlanes, Objects.requireNonNull(frameHeader, "frameHeader"), syntaxDecodeResult)
+        );
+    }
+
+    /// Extracts the compact frame state required while applying loop filtering.
+    ///
+    /// The returned state does not retain `syntaxDecodeResult`. Callers may therefore release the
+    /// complete frame syntax tree before [#applyPrepared(DecodedSurface, PreparedApplication)]
+    /// allocates destination planes.
+    ///
+    /// @param decodedPlanes the reconstructed planes to post-process
+    /// @param frameHeader the normalized frame header that owns the planes
+    /// @param syntaxDecodeResult the decoded frame syntax that carries block and transform edges, or `null`
+    /// @return the compact prepared loop-filter state
+    PreparedApplication prepare(
+            DecodedSurface decodedPlanes,
+            FrameHeader frameHeader,
+            @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
+    ) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         FrameHeader.LoopFilterInfo loopFilter = checkedFrameHeader.loopFilter();
         if (!hasActiveLevels(loopFilter, checkedDecodedPlanes.hasChroma())) {
-            return checkedDecodedPlanes;
+            return PreparedApplication.inactive(checkedDecodedPlanes);
         }
         if (syntaxDecodeResult == null) {
             throw new IllegalStateException("Active AV1 loop filtering requires decoded block edge state");
         }
 
-        LoopFilterBlockMap blockMap = LoopFilterBlockMap.create(syntaxDecodeResult, checkedDecodedPlanes);
+        int activePlaneMask = 0;
+        if (loopFilter.levelY(0) != 0 || loopFilter.levelY(1) != 0) {
+            activePlaneMask |= 1;
+        }
+        if (checkedDecodedPlanes.hasChroma() && loopFilter.levelU() != 0) {
+            activePlaneMask |= 1 << 1;
+        }
+        if (checkedDecodedPlanes.hasChroma() && loopFilter.levelV() != 0) {
+            activePlaneMask |= 1 << 2;
+        }
+        return new PreparedApplication(
+                checkedDecodedPlanes,
+                loopFilter.sharpness(),
+                activePlaneMask,
+                LoopFilterBlockMap.create(syntaxDecodeResult, checkedDecodedPlanes, checkedFrameHeader)
+        );
+    }
+
+    /// Applies one previously prepared loop-filter operation.
+    ///
+    /// @param decodedPlanes the same reconstructed surface used to prepare the operation
+    /// @param preparedApplication the compact prepared loop-filter state
+    /// @return the post-loop-filter planes
+    DecodedSurface applyPrepared(
+            DecodedSurface decodedPlanes,
+            PreparedApplication preparedApplication
+    ) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        PreparedApplication prepared = Objects.requireNonNull(preparedApplication, "preparedApplication");
+        prepared.validateSurface(checkedDecodedPlanes);
+        if (!prepared.active()) {
+            return checkedDecodedPlanes;
+        }
+
+        LoopFilterBlockMap blockMap = Objects.requireNonNull(prepared.blockMap, "blockMap");
         PlaneBuffer luma = PlaneBuffer.create(checkedDecodedPlanes.lumaPlane(), checkedDecodedPlanes.bitDepth());
-        applyPlane(luma, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 0);
+        applyPlane(
+                luma,
+                checkedDecodedPlanes.chromaFormat(),
+                blockMap,
+                prepared.sharpness,
+                prepared.activePlaneMask,
+                0
+        );
 
         @Nullable PlaneBuffer chromaU = null;
         @Nullable PlaneBuffer chromaV = null;
@@ -98,8 +173,22 @@ public final class LoopFilterApplier {
                     Objects.requireNonNull(checkedDecodedPlanes.chromaVPlane(), "decodedPlanes.chromaVPlane()"),
                     checkedDecodedPlanes.bitDepth()
             );
-            applyPlane(chromaU, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 1);
-            applyPlane(chromaV, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 2);
+            applyPlane(
+                    chromaU,
+                    checkedDecodedPlanes.chromaFormat(),
+                    blockMap,
+                    prepared.sharpness,
+                    prepared.activePlaneMask,
+                    1
+            );
+            applyPlane(
+                    chromaV,
+                    checkedDecodedPlanes.chromaFormat(),
+                    blockMap,
+                    prepared.sharpness,
+                    prepared.activePlaneMask,
+                    2
+            );
         }
 
         return new DecodedSurface(
@@ -118,15 +207,17 @@ public final class LoopFilterApplier {
     /// Applies both loop-filter passes to one plane.
     ///
     /// @param plane the mutable plane buffer
-    /// @param frameHeader the normalized frame header that owns the plane
     /// @param chromaFormat the decoded chroma format
     /// @param blockMap the decoded block and transform map
+    /// @param sharpness the frame loop-filter sharpness
+    /// @param activePlaneMask the bit mask of planes with active frame-level filtering
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
     private static void applyPlane(
             PlaneBuffer plane,
-            FrameHeader frameHeader,
             Av1ChromaFormat chromaFormat,
             LoopFilterBlockMap blockMap,
+            int sharpness,
+            int activePlaneMask,
             int planeIndex
     ) {
         int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(chromaFormat);
@@ -135,27 +226,26 @@ public final class LoopFilterApplier {
                 alignedPlaneBoundaryDimension(plane.width(), subX),
                 alignedPlaneBoundaryDimension(plane.height(), subY)
         );
-        if (planeFilterLevel(frameHeader.loopFilter(), planeIndex, 0) == 0
-                && planeFilterLevel(frameHeader.loopFilter(), planeIndex, 1) == 0) {
+        if ((activePlaneMask & (1 << planeIndex)) == 0) {
             return;
         }
-        applyPass(plane, frameHeader, chromaFormat, blockMap, planeIndex, 0);
-        applyPass(plane, frameHeader, chromaFormat, blockMap, planeIndex, 1);
+        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 0);
+        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 1);
     }
 
     /// Applies one vertical or horizontal loop-filter pass to one plane.
     ///
     /// @param plane the mutable plane buffer
-    /// @param frameHeader the normalized frame header that owns the plane
     /// @param chromaFormat the decoded chroma format
     /// @param blockMap the decoded block and transform map
+    /// @param sharpness the frame loop-filter sharpness
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
     /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
     private static void applyPass(
             PlaneBuffer plane,
-            FrameHeader frameHeader,
             Av1ChromaFormat chromaFormat,
             LoopFilterBlockMap blockMap,
+            int sharpness,
             int planeIndex,
             int pass
     ) {
@@ -166,13 +256,13 @@ public final class LoopFilterApplier {
         if (pass == 0) {
             for (int row4 = 0; row4 < blockMap.height4(); row4 += rowStep) {
                 for (int col4 = colStep; col4 < blockMap.width4(); col4 += colStep) {
-                    filterEdge(plane, frameHeader, blockMap, planeIndex, pass, row4, col4, subX, subY);
+                    filterEdge(plane, blockMap, sharpness, planeIndex, pass, row4, col4, subX, subY);
                 }
             }
         } else {
             for (int row4 = rowStep; row4 < blockMap.height4(); row4 += rowStep) {
                 for (int col4 = 0; col4 < blockMap.width4(); col4 += colStep) {
-                    filterEdge(plane, frameHeader, blockMap, planeIndex, pass, row4, col4, subX, subY);
+                    filterEdge(plane, blockMap, sharpness, planeIndex, pass, row4, col4, subX, subY);
                 }
             }
         }
@@ -181,8 +271,8 @@ public final class LoopFilterApplier {
     /// Applies loop filtering along one 4x4-grid edge when the decoded syntax permits it.
     ///
     /// @param plane the mutable plane buffer
-    /// @param frameHeader the normalized frame header that owns the plane
     /// @param blockMap the decoded block and transform map
+    /// @param sharpness the frame loop-filter sharpness
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
     /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
     /// @param row4 the luma 4x4 row coordinate of the edge
@@ -191,8 +281,8 @@ public final class LoopFilterApplier {
     /// @param subY the plane vertical subsampling shift
     private static void filterEdge(
             PlaneBuffer plane,
-            FrameHeader frameHeader,
             LoopFilterBlockMap blockMap,
+            int sharpness,
             int planeIndex,
             int pass,
             int row4,
@@ -202,21 +292,28 @@ public final class LoopFilterApplier {
     ) {
         int prevCol4 = col4 - (pass == 0 ? Math.max(1, 1 << subX) : 0);
         int prevRow4 = row4 - (pass == 1 ? Math.max(1, 1 << subY) : 0);
-        @Nullable TileBlockHeaderReader.BlockHeader currentHeader = blockMap.headerAt(col4, row4, planeIndex);
-        @Nullable TileBlockHeaderReader.BlockHeader previousHeader =
-                blockMap.headerAt(prevCol4, prevRow4, planeIndex);
-        @Nullable TransformUnit currentTransform = blockMap.transformAt(col4, row4, planeIndex);
-        @Nullable TransformUnit previousTransform = blockMap.transformAt(prevCol4, prevRow4, planeIndex);
-        if (currentHeader == null || previousHeader == null || currentTransform == null || previousTransform == null) {
+        int currentIndex = blockMap.indexAt(col4, row4);
+        int previousIndex = blockMap.indexAt(prevCol4, prevRow4);
+        if (currentIndex < 0 || previousIndex < 0) {
             return;
         }
 
-        boolean blockEdge = currentHeader != previousHeader;
-        boolean transformEdge = currentTransform != previousTransform;
+        int currentBlockId = blockMap.blockIdAt(currentIndex, planeIndex);
+        int previousBlockId = blockMap.blockIdAt(previousIndex, planeIndex);
+        int currentTransformId = blockMap.transformIdAt(currentIndex, planeIndex);
+        int previousTransformId = blockMap.transformIdAt(previousIndex, planeIndex);
+        if (currentBlockId == 0 || previousBlockId == 0 || currentTransformId == 0 || previousTransformId == 0) {
+            return;
+        }
+
+        boolean blockEdge = currentBlockId != previousBlockId;
+        boolean transformEdge = currentTransformId != previousTransformId;
         if (!blockEdge && !transformEdge) {
             return;
         }
-        if (!blockEdge && isSkippedInter(currentHeader) && isSkippedInter(previousHeader)) {
+        if (!blockEdge
+                && blockMap.isSkippedInterAt(currentIndex, planeIndex)
+                && blockMap.isSkippedInterAt(previousIndex, planeIndex)) {
             return;
         }
 
@@ -235,17 +332,17 @@ public final class LoopFilterApplier {
         int dx = pass == 0 ? 1 : 0;
         int dy = pass == 0 ? 0 : 1;
         int filterSize = filterSize(
-                currentTransform.size(),
-                previousTransform.size(),
+                blockMap.transformSizeAt(currentIndex, planeIndex),
+                blockMap.transformSizeAt(previousIndex, planeIndex),
                 planeIndex,
                 pass
         );
-        int level = filterLevel(frameHeader, currentHeader, planeIndex, pass);
-        int strength = filterStrength(level, frameHeader.loopFilter().sharpness());
+        int level = blockMap.filterLevelAt(currentIndex, planeIndex, pass);
+        int strength = filterStrength(level, sharpness);
         if (strengthLevel(strength) == 0) {
             strength = filterStrength(
-                    filterLevel(frameHeader, previousHeader, planeIndex, pass),
-                    frameHeader.loopFilter().sharpness()
+                    blockMap.filterLevelAt(previousIndex, planeIndex, pass),
+                    sharpness
             );
         }
         if (strengthLevel(strength) == 0) {
@@ -269,6 +366,20 @@ public final class LoopFilterApplier {
     /// @return whether the block is a skipped inter block
     private static boolean isSkippedInter(TileBlockHeaderReader.BlockHeader header) {
         return header.skip() && !header.intra() && !header.useIntrabc();
+    }
+
+    /// Packs two effective filter levels and the skipped-inter flag into one compact cell value.
+    ///
+    /// @param firstLevel the first effective filter level
+    /// @param secondLevel the second effective filter level
+    /// @param skippedInter whether the owning block is a skipped inter block
+    /// @return the packed compact cell value
+    private static short packFilterState(int firstLevel, int secondLevel, boolean skippedInter) {
+        int state = firstLevel | (secondLevel << FILTER_STATE_SECOND_LEVEL_SHIFT);
+        if (skippedInter) {
+            state |= FILTER_STATE_SKIPPED_INTER;
+        }
+        return (short) state;
     }
 
     /// Applies one sample filter at a block edge.
@@ -927,7 +1038,85 @@ public final class LoopFilterApplier {
         }
     }
 
-    /// Decoded block and transform lookup state indexed in luma 4x4 units.
+    /// Compact loop-filter state that remains valid after the complete frame syntax tree is released.
+    @NotNullByDefault
+    static final class PreparedApplication {
+        /// The expected decoded bit depth.
+        private final int bitDepth;
+
+        /// The expected chroma format.
+        private final Av1ChromaFormat chromaFormat;
+
+        /// The expected coded luma width.
+        private final int codedWidth;
+
+        /// The expected coded luma height.
+        private final int codedHeight;
+
+        /// The frame loop-filter sharpness.
+        private final int sharpness;
+
+        /// The bit mask of planes with active frame-level filtering.
+        private final int activePlaneMask;
+
+        /// The compact decoded block map, or `null` when loop filtering is inactive.
+        private final @Nullable LoopFilterBlockMap blockMap;
+
+        /// Creates one prepared loop-filter operation.
+        ///
+        /// @param decodedPlanes the surface for which the operation was prepared
+        /// @param sharpness the frame loop-filter sharpness
+        /// @param activePlaneMask the bit mask of planes with active frame-level filtering
+        /// @param blockMap the exclusively owned compact decoded block map, or `null`
+        private PreparedApplication(
+                DecodedSurface decodedPlanes,
+                int sharpness,
+                int activePlaneMask,
+                @Nullable LoopFilterBlockMap blockMap
+        ) {
+            DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+            this.bitDepth = checkedDecodedPlanes.bitDepth();
+            this.chromaFormat = checkedDecodedPlanes.chromaFormat();
+            this.codedWidth = checkedDecodedPlanes.codedWidth();
+            this.codedHeight = checkedDecodedPlanes.codedHeight();
+            this.sharpness = sharpness;
+            this.activePlaneMask = activePlaneMask;
+            this.blockMap = blockMap;
+        }
+
+        /// Creates an inactive prepared operation for one decoded surface.
+        ///
+        /// @param decodedPlanes the surface for which loop filtering is inactive
+        /// @return the inactive prepared operation
+        private static PreparedApplication inactive(DecodedSurface decodedPlanes) {
+            return new PreparedApplication(decodedPlanes, 0, 0, null);
+        }
+
+        /// Returns whether this operation applies any loop filtering.
+        ///
+        /// @return whether loop filtering is active
+        private boolean active() {
+            return blockMap != null;
+        }
+
+        /// Verifies that an operation is applied to the surface for which it was prepared.
+        ///
+        /// @param decodedPlanes the candidate reconstructed surface
+        private void validateSurface(DecodedSurface decodedPlanes) {
+            DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+            if (checkedDecodedPlanes.bitDepth() != bitDepth
+                    || checkedDecodedPlanes.chromaFormat() != chromaFormat
+                    || checkedDecodedPlanes.codedWidth() != codedWidth
+                    || checkedDecodedPlanes.codedHeight() != codedHeight) {
+                throw new IllegalArgumentException("Prepared loop-filter state does not match decoded surface");
+            }
+        }
+    }
+
+    /// Compact block and transform lookup state indexed in luma 4x4 units.
+    ///
+    /// The map stores only primitive values so it does not retain decoded partition, block, or
+    /// transform objects after preparation completes.
     @NotNullByDefault
     private static final class LoopFilterBlockMap {
         /// The frame width rounded up to 4x4 units.
@@ -936,17 +1125,29 @@ public final class LoopFilterApplier {
         /// The frame height rounded up to 4x4 units.
         private final int height4;
 
-        /// The decoded luma block header covering each 4x4 cell.
-        private final @Nullable TileBlockHeaderReader.BlockHeader[] lumaHeaders;
+        /// The luma block identity covering each 4x4 cell, or zero for no block.
+        private final int @Unmodifiable [] lumaBlockIds;
 
-        /// The decoded luma transform unit covering each 4x4 cell.
-        private final @Nullable TransformUnit[] lumaTransforms;
+        /// The luma transform identity covering each 4x4 cell, or zero for no transform.
+        private final int @Unmodifiable [] lumaTransformIds;
 
-        /// The decoded chroma-reference block header covering each 4x4 cell.
-        private final @Nullable TileBlockHeaderReader.BlockHeader[] chromaHeaders;
+        /// The luma transform-size ordinal covering each 4x4 cell.
+        private final byte @Unmodifiable [] lumaTransformSizeOrdinals;
 
-        /// The decoded chroma transform unit covering each 4x4 cell.
-        private final @Nullable TransformUnit[] chromaTransforms;
+        /// The packed luma filter levels and skipped-inter flag covering each 4x4 cell.
+        private final short @Unmodifiable [] lumaFilterStates;
+
+        /// The chroma block identity covering each luma-grid 4x4 cell, or zero for no block.
+        private final int @Unmodifiable [] chromaBlockIds;
+
+        /// The chroma transform identity covering each luma-grid 4x4 cell, or zero for no transform.
+        private final int @Unmodifiable [] chromaTransformIds;
+
+        /// The chroma transform-size ordinal covering each luma-grid 4x4 cell.
+        private final byte @Unmodifiable [] chromaTransformSizeOrdinals;
+
+        /// The packed U/V filter levels and skipped-inter flag covering each luma-grid 4x4 cell.
+        private final short @Unmodifiable [] chromaFilterStates;
 
         /// The chroma horizontal subsampling shift.
         private final int chromaSubsamplingX;
@@ -954,7 +1155,13 @@ public final class LoopFilterApplier {
         /// The chroma vertical subsampling shift.
         private final int chromaSubsamplingY;
 
-        /// Creates one decoded block and transform lookup map.
+        /// The next nonzero block identity assigned during construction.
+        private int nextBlockId;
+
+        /// The next nonzero transform identity assigned during construction.
+        private int nextTransformId;
+
+        /// Creates one compact block and transform lookup map.
         ///
         /// @param width4 the frame width rounded up to 4x4 units
         /// @param height4 the frame height rounded up to 4x4 units
@@ -964,22 +1171,30 @@ public final class LoopFilterApplier {
             this.width4 = width4;
             this.height4 = height4;
             int cellCount = width4 * height4;
-            this.lumaHeaders = new TileBlockHeaderReader.BlockHeader[cellCount];
-            this.lumaTransforms = new TransformUnit[cellCount];
-            this.chromaHeaders = new TileBlockHeaderReader.BlockHeader[cellCount];
-            this.chromaTransforms = new TransformUnit[cellCount];
+            this.lumaBlockIds = new int[cellCount];
+            this.lumaTransformIds = new int[cellCount];
+            this.lumaTransformSizeOrdinals = new byte[cellCount];
+            this.lumaFilterStates = new short[cellCount];
+            this.chromaBlockIds = new int[cellCount];
+            this.chromaTransformIds = new int[cellCount];
+            this.chromaTransformSizeOrdinals = new byte[cellCount];
+            this.chromaFilterStates = new short[cellCount];
             this.chromaSubsamplingX = chromaSubsamplingX;
             this.chromaSubsamplingY = chromaSubsamplingY;
+            this.nextBlockId = 1;
+            this.nextTransformId = 1;
         }
 
-        /// Creates one decoded block and transform lookup map.
+        /// Creates one compact block and transform lookup map.
         ///
         /// @param syntaxDecodeResult the decoded frame syntax
         /// @param decodedPlanes the reconstructed planes to post-process
-        /// @return one decoded block and transform lookup map
-        public static LoopFilterBlockMap create(
+        /// @param frameHeader the normalized frame header used to derive effective filter levels
+        /// @return one compact block and transform lookup map
+        private static LoopFilterBlockMap create(
                 FrameSyntaxDecodeResult syntaxDecodeResult,
-                DecodedSurface decodedPlanes
+                DecodedSurface decodedPlanes,
+                FrameHeader frameHeader
         ) {
             LoopFilterBlockMap map = new LoopFilterBlockMap(
                     (decodedPlanes.codedWidth() + MI_SIZE - 1) / MI_SIZE,
@@ -990,7 +1205,7 @@ public final class LoopFilterApplier {
             TilePartitionTreeReader.Node[][] frameLocalTileRoots = syntaxDecodeResult.tileRoots();
             for (TilePartitionTreeReader.Node[] tileRoots : frameLocalTileRoots) {
                 for (TilePartitionTreeReader.Node root : tileRoots) {
-                    map.addNode(root);
+                    map.addNode(root, frameHeader);
                 }
             }
             return map;
@@ -999,110 +1214,183 @@ public final class LoopFilterApplier {
         /// Returns the frame width rounded up to 4x4 units.
         ///
         /// @return the frame width rounded up to 4x4 units
-        public int width4() {
+        private int width4() {
             return width4;
         }
 
         /// Returns the frame height rounded up to 4x4 units.
         ///
         /// @return the frame height rounded up to 4x4 units
-        public int height4() {
+        private int height4() {
             return height4;
         }
 
-        /// Returns the plane-specific block header at one luma 4x4 coordinate.
+        /// Returns the flat cell index for one luma-grid coordinate.
         ///
         /// @param x4 the luma 4x4 X coordinate
         /// @param y4 the luma 4x4 Y coordinate
-        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-        /// @return the plane-specific block header, or `null`
-        public @Nullable TileBlockHeaderReader.BlockHeader headerAt(int x4, int y4, int planeIndex) {
+        /// @return the flat cell index, or `-1` when outside the map
+        private int indexAt(int x4, int y4) {
             if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
-                return null;
+                return -1;
             }
-            return (planeIndex == 0 ? lumaHeaders : chromaHeaders)[y4 * width4 + x4];
+            return y4 * width4 + x4;
         }
 
-        /// Returns the plane-specific transform unit at one luma 4x4 coordinate.
+        /// Returns the plane-specific block identity at one cell.
         ///
-        /// @param x4 the luma 4x4 X coordinate
-        /// @param y4 the luma 4x4 Y coordinate
+        /// @param index the flat cell index
         /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-        /// @return the plane-specific transform unit, or `null`
-        public @Nullable TransformUnit transformAt(int x4, int y4, int planeIndex) {
-            if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
-                return null;
-            }
-            return (planeIndex == 0 ? lumaTransforms : chromaTransforms)[y4 * width4 + x4];
+        /// @return the nonzero block identity, or zero when no block covers the cell
+        private int blockIdAt(int index, int planeIndex) {
+            return (planeIndex == 0 ? lumaBlockIds : chromaBlockIds)[index];
+        }
+
+        /// Returns the plane-specific transform identity at one cell.
+        ///
+        /// @param index the flat cell index
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return the nonzero transform identity, or zero when no transform covers the cell
+        private int transformIdAt(int index, int planeIndex) {
+            return (planeIndex == 0 ? lumaTransformIds : chromaTransformIds)[index];
+        }
+
+        /// Returns the plane-specific transform size at one covered cell.
+        ///
+        /// @param index the flat cell index
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return the transform size covering the cell
+        private TransformSize transformSizeAt(int index, int planeIndex) {
+            int ordinal = Byte.toUnsignedInt(
+                    (planeIndex == 0 ? lumaTransformSizeOrdinals : chromaTransformSizeOrdinals)[index]
+            );
+            return TRANSFORM_SIZES[ordinal];
+        }
+
+        /// Returns one effective plane/pass filter level at one covered cell.
+        ///
+        /// @param index the flat cell index
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
+        /// @return the effective filter level
+        private int filterLevelAt(int index, int planeIndex, int pass) {
+            int state = Short.toUnsignedInt((planeIndex == 0 ? lumaFilterStates : chromaFilterStates)[index]);
+            int levelIndex = planeIndex == 0 ? pass : planeIndex - 1;
+            return (state >> (levelIndex * FILTER_STATE_SECOND_LEVEL_SHIFT)) & FILTER_STATE_LEVEL_MASK;
+        }
+
+        /// Returns whether the plane-specific block at one cell is a skipped inter block.
+        ///
+        /// @param index the flat cell index
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return whether the block is a skipped inter block
+        private boolean isSkippedInterAt(int index, int planeIndex) {
+            int state = Short.toUnsignedInt((planeIndex == 0 ? lumaFilterStates : chromaFilterStates)[index]);
+            return (state & FILTER_STATE_SKIPPED_INTER) != 0;
         }
 
         /// Adds one partition node and all descendant leaves to this map.
         ///
         /// @param node the decoded partition node
-        private void addNode(TilePartitionTreeReader.Node node) {
+        /// @param frameHeader the normalized frame header used to derive effective filter levels
+        private void addNode(TilePartitionTreeReader.Node node, FrameHeader frameHeader) {
             if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
-                addLeaf(leafNode);
+                addLeaf(leafNode, frameHeader);
                 return;
             }
             TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
             for (int childIndex = 0; childIndex < partitionNode.childCount(); childIndex++) {
-                addNode(partitionNode.child(childIndex));
+                addNode(partitionNode.child(childIndex), frameHeader);
             }
         }
 
         /// Adds one leaf to every 4x4 cell that it covers.
         ///
         /// @param leafNode the decoded partition leaf
-        private void addLeaf(TilePartitionTreeReader.LeafNode leafNode) {
+        /// @param frameHeader the normalized frame header used to derive effective filter levels
+        private void addLeaf(TilePartitionTreeReader.LeafNode leafNode, FrameHeader frameHeader) {
             TileBlockHeaderReader.BlockHeader header = leafNode.header();
             int startX4 = Math.max(0, header.position().x4());
             int startY4 = Math.max(0, header.position().y4());
             TransformLayout transformLayout = leafNode.transformLayout();
             int endX4 = Math.min(width4, startX4 + transformLayout.visibleWidth4());
             int endY4 = Math.min(height4, startY4 + transformLayout.visibleHeight4());
+            int blockId = nextBlockId++;
+            boolean skippedInter = isSkippedInter(header);
+            short lumaFilterState = packFilterState(
+                    filterLevel(frameHeader, header, 0, 0),
+                    filterLevel(frameHeader, header, 0, 1),
+                    skippedInter
+            );
             for (int y4 = startY4; y4 < endY4; y4++) {
                 for (int x4 = startX4; x4 < endX4; x4++) {
                     int index = y4 * width4 + x4;
-                    lumaHeaders[index] = header;
+                    lumaBlockIds[index] = blockId;
+                    lumaFilterStates[index] = lumaFilterState;
                 }
             }
 
             if (transformLayout.lumaUnitCount() == 0) {
-                TransformUnit fallbackUnit = new TransformUnit(
-                        new BlockPosition(startX4, startY4),
+                fillDefaultLumaTransform(
+                        startX4,
+                        startY4,
+                        endX4,
+                        endY4,
+                        nextTransformId++,
                         transformLayout.maxLumaTransformSize()
                 );
-                fillDefaultTransformUnits(startX4, startY4, endX4, endY4, fallbackUnit);
             } else {
                 TransformUnit firstUnit = transformLayout.lumaUnit(0);
-                fillDefaultTransformUnits(startX4, startY4, endX4, endY4, firstUnit);
+                int firstTransformId = nextTransformId++;
+                fillDefaultLumaTransform(
+                        startX4,
+                        startY4,
+                        endX4,
+                        endY4,
+                        firstTransformId,
+                        firstUnit.size()
+                );
                 for (int unitIndex = 0; unitIndex < transformLayout.lumaUnitCount(); unitIndex++) {
-                    fillTransformUnits(
-                            lumaTransforms,
+                    TransformUnit transformUnit = transformLayout.lumaUnit(unitIndex);
+                    int transformId = unitIndex == 0 ? firstTransformId : nextTransformId++;
+                    fillLumaTransform(
                             startX4,
                             startY4,
                             endX4,
                             endY4,
-                            transformLayout.lumaUnit(unitIndex),
-                            0,
-                            0
+                            transformUnit,
+                            transformId
                     );
                 }
             }
             if (header.hasChroma()) {
+                short chromaFilterState = packFilterState(
+                        filterLevel(frameHeader, header, 1, 0),
+                        filterLevel(frameHeader, header, 2, 0),
+                        skippedInter
+                );
                 for (int unitIndex = 0; unitIndex < transformLayout.chromaUnitCount(); unitIndex++) {
-                    fillChromaCells(header, transformLayout.chromaUnit(unitIndex));
+                    fillChromaTransform(
+                            blockId,
+                            chromaFilterState,
+                            transformLayout.chromaUnit(unitIndex),
+                            nextTransformId++
+                    );
                 }
             }
         }
 
         /// Fills the luma-grid coverage of one decoded chroma transform unit.
         ///
-        /// @param header the chroma-reference block header that owns the transform unit
+        /// @param blockId the owning block identity
+        /// @param filterState the packed U/V filter levels and skipped-inter flag
         /// @param transformUnit the decoded chroma transform unit
-        private void fillChromaCells(
-                TileBlockHeaderReader.BlockHeader header,
-                TransformUnit transformUnit
+        /// @param transformId the transform identity
+        private void fillChromaTransform(
+                int blockId,
+                short filterState,
+                TransformUnit transformUnit,
+                int transformId
         ) {
             int unitStartX4 = Math.max(0, transformUnit.position().x4());
             int unitStartY4 = Math.max(0, transformUnit.position().y4());
@@ -1114,69 +1402,70 @@ public final class LoopFilterApplier {
                     height4,
                     transformUnit.position().y4() + (transformUnit.size().height4() << chromaSubsamplingY)
             );
+            byte transformSizeOrdinal = (byte) transformUnit.size().ordinal();
             for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
                 for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
                     int index = y4 * width4 + x4;
-                    chromaHeaders[index] = header;
-                    chromaTransforms[index] = transformUnit;
+                    chromaBlockIds[index] = blockId;
+                    chromaFilterStates[index] = filterState;
+                    chromaTransformIds[index] = transformId;
+                    chromaTransformSizeOrdinals[index] = transformSizeOrdinal;
                 }
             }
         }
 
-        /// Initializes every cell in one leaf with a default luma transform unit.
+        /// Initializes every cell in one leaf with one default luma transform.
         ///
         /// @param startX4 the leaf start X in luma 4x4 units
         /// @param startY4 the leaf start Y in luma 4x4 units
         /// @param endX4 the exclusive leaf end X in luma 4x4 units
         /// @param endY4 the exclusive leaf end Y in luma 4x4 units
-        /// @param defaultUnit the transform unit used until decoded units overwrite its coverage
-        private void fillDefaultTransformUnits(
+        /// @param transformId the default transform identity
+        /// @param transformSize the default transform size
+        private void fillDefaultLumaTransform(
                 int startX4,
                 int startY4,
                 int endX4,
                 int endY4,
-                TransformUnit defaultUnit
+                int transformId,
+                TransformSize transformSize
         ) {
+            byte transformSizeOrdinal = (byte) transformSize.ordinal();
             for (int y4 = startY4; y4 < endY4; y4++) {
                 for (int x4 = startX4; x4 < endX4; x4++) {
-                    lumaTransforms[y4 * width4 + x4] = defaultUnit;
+                    int index = y4 * width4 + x4;
+                    lumaTransformIds[index] = transformId;
+                    lumaTransformSizeOrdinals[index] = transformSizeOrdinal;
                 }
             }
         }
 
-        /// Fills bounded 4x4-grid coverage with one decoded transform-unit reference.
+        /// Fills bounded luma-grid coverage with one decoded transform.
         ///
-        /// @param destination the plane-specific transform-unit map
         /// @param startX4 the inclusive coverage bound in luma 4x4 units
         /// @param startY4 the inclusive coverage bound in luma 4x4 units
         /// @param endX4 the exclusive coverage bound in luma 4x4 units
         /// @param endY4 the exclusive coverage bound in luma 4x4 units
         /// @param transformUnit the transform unit to fill
-        /// @param subsamplingX the horizontal plane subsampling shift
-        /// @param subsamplingY the vertical plane subsampling shift
-        private void fillTransformUnits(
-                @Nullable TransformUnit[] destination,
+        /// @param transformId the transform identity
+        private void fillLumaTransform(
                 int startX4,
                 int startY4,
                 int endX4,
                 int endY4,
                 TransformUnit transformUnit,
-                int subsamplingX,
-                int subsamplingY
+                int transformId
         ) {
             int unitStartX4 = Math.max(startX4, transformUnit.position().x4());
             int unitStartY4 = Math.max(startY4, transformUnit.position().y4());
-            int unitEndX4 = Math.min(
-                    endX4,
-                    transformUnit.position().x4() + (transformUnit.size().width4() << subsamplingX)
-            );
-            int unitEndY4 = Math.min(
-                    endY4,
-                    transformUnit.position().y4() + (transformUnit.size().height4() << subsamplingY)
-            );
+            int unitEndX4 = Math.min(endX4, transformUnit.position().x4() + transformUnit.size().width4());
+            int unitEndY4 = Math.min(endY4, transformUnit.position().y4() + transformUnit.size().height4());
+            byte transformSizeOrdinal = (byte) transformUnit.size().ordinal();
             for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
                 for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
-                    destination[y4 * width4 + x4] = transformUnit;
+                    int index = y4 * width4 + x4;
+                    lumaTransformIds[index] = transformId;
+                    lumaTransformSizeOrdinals[index] = transformSizeOrdinal;
                 }
             }
         }

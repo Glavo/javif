@@ -71,26 +71,82 @@ public final class CdefApplier {
             FrameHeader.CdefInfo cdef,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
-        Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        return applyPrepared(
+                checkedDecodedPlanes,
+                prepare(checkedDecodedPlanes, Objects.requireNonNull(cdef, "cdef"), syntaxDecodeResult)
+        );
+    }
+
+    /// Extracts the compact frame state required while applying CDEF.
+    ///
+    /// The returned state does not retain `syntaxDecodeResult`. Callers may therefore release the
+    /// complete frame syntax tree before [#applyPrepared(DecodedSurface, PreparedApplication)]
+    /// allocates destination planes.
+    ///
+    /// @param decodedPlanes the decoded planes after loop filtering
+    /// @param cdef the normalized frame-level CDEF state
+    /// @param syntaxDecodeResult the decoded block syntax that carries CDEF indices, or `null`
+    /// @return the compact prepared CDEF state
+    PreparedApplication prepare(
+            DecodedSurface decodedPlanes,
+            FrameHeader.CdefInfo cdef,
+            @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
+    ) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader.CdefInfo checkedCdef = Objects.requireNonNull(cdef, "cdef");
         int[] yStrengths = checkedCdef.yStrengths();
         int[] uvStrengths = checkedCdef.uvStrengths();
-        if (!hasActiveStrengths(yStrengths, uvStrengths, decodedPlanes.hasChroma())) {
-            return decodedPlanes;
+        if (!hasActiveStrengths(yStrengths, uvStrengths, checkedDecodedPlanes.hasChroma())) {
+            return PreparedApplication.inactive(checkedDecodedPlanes);
         }
         if (syntaxDecodeResult == null) {
             throw new IllegalStateException("Active AV1 CDEF filtering requires decoded block CDEF indices");
         }
 
-        int unitColumns = cdefUnitCount(decodedPlanes.codedWidth());
-        int unitRows = cdefUnitCount(decodedPlanes.codedHeight());
-        CdefWorkspace workspace = new CdefWorkspace();
+        int unitColumns = cdefUnitCount(checkedDecodedPlanes.codedWidth());
+        int unitRows = cdefUnitCount(checkedDecodedPlanes.codedHeight());
         CdefUnitMap cdefUnitMap = buildCdefUnitMap(syntaxDecodeResult, unitColumns, unitRows);
-        int bitDepthShift = decodedPlanes.bitDepth() - 8;
+        int bitDepthShift = checkedDecodedPlanes.bitDepth() - 8;
         int damping = checkedCdef.damping() + bitDepthShift;
+        return new PreparedApplication(
+                checkedDecodedPlanes,
+                yStrengths,
+                uvStrengths,
+                unitColumns,
+                unitRows,
+                bitDepthShift,
+                damping,
+                cdefUnitMap
+        );
+    }
+
+    /// Applies one previously prepared CDEF operation.
+    ///
+    /// @param decodedPlanes the same loop-filtered surface used to prepare the operation
+    /// @param preparedApplication the compact prepared CDEF state
+    /// @return the post-CDEF planes
+    DecodedSurface applyPrepared(
+            DecodedSurface decodedPlanes,
+            PreparedApplication preparedApplication
+    ) {
+        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        PreparedApplication prepared = Objects.requireNonNull(preparedApplication, "preparedApplication");
+        prepared.validateSurface(checkedDecodedPlanes);
+        if (!prepared.active()) {
+            return checkedDecodedPlanes;
+        }
+
+        int[] yStrengths = prepared.yStrengths;
+        int[] uvStrengths = prepared.uvStrengths;
+        int unitColumns = prepared.unitColumns;
+        int unitRows = prepared.unitRows;
+        int bitDepthShift = prepared.bitDepthShift;
+        int damping = prepared.damping;
+        CdefUnitMap cdefUnitMap = Objects.requireNonNull(prepared.cdefUnitMap, "cdefUnitMap");
         CdefDirectionMap directionMap = buildDirectionMap(
-                decodedPlanes.lumaPlane(),
-                decodedPlanes.bitDepth(),
+                checkedDecodedPlanes.lumaPlane(),
+                checkedDecodedPlanes.bitDepth(),
                 yStrengths,
                 uvStrengths,
                 cdefUnitMap,
@@ -98,12 +154,12 @@ public final class CdefApplier {
                 unitRows,
                 unitColumns * CDEF_UNIT_SIZE,
                 unitRows * CDEF_UNIT_SIZE,
-                decodedPlanes.hasChroma(),
-                workspace
+                checkedDecodedPlanes.hasChroma(),
+                new CdefWorkspace()
         );
 
         PaddedPlane lumaPlane = applyPlane(
-                decodedPlanes.lumaPlane(),
+                checkedDecodedPlanes.lumaPlane(),
                 bitDepthShift,
                 damping,
                 yStrengths,
@@ -116,12 +172,18 @@ public final class CdefApplier {
                 true,
                 false
         );
-        @Nullable PaddedPlane chromaUPlane = decodedPlanes.chromaUPlane();
-        @Nullable PaddedPlane chromaVPlane = decodedPlanes.chromaVPlane();
-        if (decodedPlanes.hasChroma()) {
-            int chromaUnitWidth = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingX(decodedPlanes.chromaFormat()));
-            int chromaUnitHeight = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingY(decodedPlanes.chromaFormat()));
-            boolean i422Chroma = decodedPlanes.chromaFormat() == Av1ChromaFormat.YUV422;
+        @Nullable PaddedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
+        @Nullable PaddedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
+        if (checkedDecodedPlanes.hasChroma()) {
+            int chromaUnitWidth = Math.max(
+                    1,
+                    CDEF_UNIT_SIZE >> chromaSubsamplingX(checkedDecodedPlanes.chromaFormat())
+            );
+            int chromaUnitHeight = Math.max(
+                    1,
+                    CDEF_UNIT_SIZE >> chromaSubsamplingY(checkedDecodedPlanes.chromaFormat())
+            );
+            boolean i422Chroma = checkedDecodedPlanes.chromaFormat() == Av1ChromaFormat.YUV422;
             chromaUPlane = applyPlane(
                     Objects.requireNonNull(chromaUPlane, "chromaUPlane"),
                     bitDepthShift,
@@ -152,18 +214,18 @@ public final class CdefApplier {
             );
         }
 
-        if (lumaPlane == decodedPlanes.lumaPlane()
-                && chromaUPlane == decodedPlanes.chromaUPlane()
-                && chromaVPlane == decodedPlanes.chromaVPlane()) {
-            return decodedPlanes;
+        if (lumaPlane == checkedDecodedPlanes.lumaPlane()
+                && chromaUPlane == checkedDecodedPlanes.chromaUPlane()
+                && chromaVPlane == checkedDecodedPlanes.chromaVPlane()) {
+            return checkedDecodedPlanes;
         }
         return new DecodedSurface(
-                decodedPlanes.bitDepth(),
-                decodedPlanes.chromaFormat(),
-                decodedPlanes.codedWidth(),
-                decodedPlanes.codedHeight(),
-                decodedPlanes.renderWidth(),
-                decodedPlanes.renderHeight(),
+                checkedDecodedPlanes.bitDepth(),
+                checkedDecodedPlanes.chromaFormat(),
+                checkedDecodedPlanes.codedWidth(),
+                checkedDecodedPlanes.codedHeight(),
+                checkedDecodedPlanes.renderWidth(),
+                checkedDecodedPlanes.renderHeight(),
                 lumaPlane,
                 chromaUPlane,
                 chromaVPlane
@@ -871,6 +933,117 @@ public final class CdefApplier {
     /// @return the clamped value
     private static int clamp(int value, int minimum, int maximum) {
         return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    /// Compact CDEF state that remains valid after the complete frame syntax tree is released.
+    @NotNullByDefault
+    static final class PreparedApplication {
+        /// The expected decoded bit depth.
+        private final int bitDepth;
+
+        /// The expected chroma format.
+        private final Av1ChromaFormat chromaFormat;
+
+        /// The expected coded luma width.
+        private final int codedWidth;
+
+        /// The expected coded luma height.
+        private final int codedHeight;
+
+        /// The encoded luma strength table.
+        private final int @Unmodifiable [] yStrengths;
+
+        /// The encoded chroma strength table.
+        private final int @Unmodifiable [] uvStrengths;
+
+        /// The luma CDEF-unit column count.
+        private final int unitColumns;
+
+        /// The luma CDEF-unit row count.
+        private final int unitRows;
+
+        /// The decoded bit-depth shift from eight-bit samples.
+        private final int bitDepthShift;
+
+        /// The bit-depth-adjusted luma damping value.
+        private final int damping;
+
+        /// The compact decoded CDEF-unit syntax, or `null` when CDEF is inactive.
+        private final @Nullable CdefUnitMap cdefUnitMap;
+
+        /// Creates one prepared CDEF operation.
+        ///
+        /// The supplied strength arrays and compact maps are retained without copying. Their
+        /// callers must relinquish them after construction.
+        ///
+        /// @param decodedPlanes the surface for which the operation was prepared
+        /// @param yStrengths the exclusively owned luma strength table
+        /// @param uvStrengths the exclusively owned chroma strength table
+        /// @param unitColumns the luma CDEF-unit column count
+        /// @param unitRows the luma CDEF-unit row count
+        /// @param bitDepthShift the decoded bit-depth shift
+        /// @param damping the bit-depth-adjusted luma damping value
+        /// @param cdefUnitMap the compact decoded CDEF-unit syntax, or `null` for inactive CDEF
+        private PreparedApplication(
+                DecodedSurface decodedPlanes,
+                int[] yStrengths,
+                int[] uvStrengths,
+                int unitColumns,
+                int unitRows,
+                int bitDepthShift,
+                int damping,
+                @Nullable CdefUnitMap cdefUnitMap
+        ) {
+            DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+            this.bitDepth = checkedDecodedPlanes.bitDepth();
+            this.chromaFormat = checkedDecodedPlanes.chromaFormat();
+            this.codedWidth = checkedDecodedPlanes.codedWidth();
+            this.codedHeight = checkedDecodedPlanes.codedHeight();
+            this.yStrengths = Objects.requireNonNull(yStrengths, "yStrengths");
+            this.uvStrengths = Objects.requireNonNull(uvStrengths, "uvStrengths");
+            this.unitColumns = unitColumns;
+            this.unitRows = unitRows;
+            this.bitDepthShift = bitDepthShift;
+            this.damping = damping;
+            this.cdefUnitMap = cdefUnitMap;
+        }
+
+        /// Creates an inactive prepared operation for one decoded surface.
+        ///
+        /// @param decodedPlanes the surface for which CDEF is inactive
+        /// @return the inactive prepared operation
+        private static PreparedApplication inactive(DecodedSurface decodedPlanes) {
+            return new PreparedApplication(
+                    decodedPlanes,
+                    new int[0],
+                    new int[0],
+                    0,
+                    0,
+                    0,
+                    0,
+                    null
+            );
+        }
+
+        /// Returns whether this operation applies any CDEF filtering.
+        ///
+        /// @return whether CDEF is active
+        private boolean active() {
+            return cdefUnitMap != null;
+        }
+
+        /// Verifies that an operation is applied to the surface for which it was prepared.
+        ///
+        /// @param decodedPlanes the candidate loop-filtered surface
+        private void validateSurface(DecodedSurface decodedPlanes) {
+            DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+            if (checkedDecodedPlanes.bitDepth() != bitDepth
+                    || checkedDecodedPlanes.chromaFormat() != chromaFormat
+                    || checkedDecodedPlanes.codedWidth() != codedWidth
+                    || checkedDecodedPlanes.codedHeight() != codedHeight) {
+                throw new IllegalArgumentException("Prepared CDEF state does not match decoded surface");
+            }
+        }
     }
 
     /// Reusable per-frame storage for CDEF direction detection.

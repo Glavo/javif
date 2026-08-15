@@ -121,6 +121,27 @@ public final class RestorationApplier {
             FrameHeader.RestorationInfo restoration,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
+        return applyPrepared(
+                decodedPlanes,
+                boundaryPlanes,
+                restoration,
+                syntaxDecodeResult == null ? null : syntaxDecodeResult.restorationUnitMap()
+        );
+    }
+
+    /// Applies restoration using a compact restoration-unit map extracted from frame syntax.
+    ///
+    /// @param decodedPlanes the decoded planes after CDEF
+    /// @param boundaryPlanes the decoded planes after loop filtering and before CDEF
+    /// @param restoration the normalized frame-level restoration state
+    /// @param unitMap the compact restoration-unit map, or `null` when syntax is unavailable
+    /// @return the post-restoration planes
+    DecodedSurface applyPrepared(
+            DecodedSurface decodedPlanes,
+            DecodedSurface boundaryPlanes,
+            FrameHeader.RestorationInfo restoration,
+            @Nullable RestorationUnitMap unitMap
+    ) {
         DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         DecodedSurface checkedBoundaryPlanes = Objects.requireNonNull(boundaryPlanes, "boundaryPlanes");
         FrameHeader.RestorationInfo checkedRestoration = Objects.requireNonNull(restoration, "restoration");
@@ -131,11 +152,10 @@ public final class RestorationApplier {
                 || checkedBoundaryPlanes.chromaFormat() != checkedDecodedPlanes.chromaFormat()) {
             throw new IllegalArgumentException("Boundary planes must match decoded plane format");
         }
-        if (syntaxDecodeResult == null) {
+        if (unitMap == null) {
             throw new IllegalStateException("Active AV1 loop restoration requires decoded restoration unit syntax");
         }
 
-        RestorationUnitMap unitMap = syntaxDecodeResult.restorationUnitMap();
         RestorationWorkspace workspace = new RestorationWorkspace();
         PaddedPlane lumaPlane = applyPlane(
                 checkedDecodedPlanes.lumaPlane(),
