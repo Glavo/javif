@@ -142,8 +142,23 @@ final class Av1DecoderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void readFrameReturnsNullAtEndOfStream() throws IOException {
-        try (Av1Decoder reader = Av1Decoder.open(ByteBuffer.allocate(0))) {
+        try (Av1Decoder reader = openInspectingDecoder(ByteBuffer.allocate(0))) {
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that normal decoding releases full structural results after reconstruction.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void normalDecoderDoesNotRetainFrameSyntaxResult() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+        try (Av1Decoder reader = Av1Decoder.open(ByteBuffer.wrap(stream))) {
+            assertNotNull(reader.readFrame());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
         }
     }
 
@@ -163,7 +178,7 @@ final class Av1DecoderTest {
         int originalPosition = source.position();
         int originalLimit = source.limit();
 
-        try (Av1Decoder reader = Av1Decoder.open(source)) {
+        try (Av1Decoder reader = openInspectingDecoder(source)) {
             assertNull(reader.readFrame());
         }
 
@@ -177,7 +192,7 @@ final class Av1DecoderTest {
     @Test
     void channelEntryPointTransfersCloseOwnership() throws IOException {
         TrackingChannel channel = new TrackingChannel(new byte[0]);
-        Av1Decoder reader = Av1Decoder.open(channel);
+        Av1Decoder reader = openInspectingDecoder(channel);
 
         reader.close();
 
@@ -193,8 +208,8 @@ final class Av1DecoderTest {
         try (Pipe.SourceChannel source = pipe.source(); Pipe.SinkChannel sink = pipe.sink()) {
             source.configureBlocking(false);
 
-            assertThrows(IllegalArgumentException.class, () -> Av1Decoder.open(source));
-            assertThrows(IllegalArgumentException.class, () -> Av1Decoder.openAnnexB(source));
+            assertThrows(IllegalArgumentException.class, () -> openInspectingDecoder(source));
+            assertThrows(IllegalArgumentException.class, () -> openInspectingAnnexBDecoder(source));
             assertTrue(source.isOpen());
         }
     }
@@ -204,7 +219,7 @@ final class Av1DecoderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void closeIsIdempotent() throws IOException {
-        Av1Decoder reader = Av1Decoder.open(
+        Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN))
         );
         reader.close();
@@ -216,7 +231,7 @@ final class Av1DecoderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void readFrameFailsAfterClose() throws IOException {
-        Av1Decoder reader = Av1Decoder.open(
+        Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN))
         );
         reader.close();
@@ -242,7 +257,7 @@ final class Av1DecoderTest {
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withOperatingPoint(1);
 
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                     config
             )) {
@@ -264,7 +279,7 @@ final class Av1DecoderTest {
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withOperatingPoint(0);
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
@@ -288,7 +303,7 @@ final class Av1DecoderTest {
                 obu(2, new byte[0])
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             Av1DecodedFrame frame = reader.readFrame();
@@ -308,7 +323,7 @@ final class Av1DecoderTest {
                 obu(6, reducedStillPictureCombinedFramePayload())
         ));
 
-        try (Av1Decoder reader = Av1Decoder.openAnnexB(ByteBuffer.wrap(stream))) {
+        try (Av1Decoder reader = openInspectingAnnexBDecoder(ByteBuffer.wrap(stream))) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
             assertNull(reader.readFrame());
         }
@@ -330,7 +345,7 @@ final class Av1DecoderTest {
                 annexBTemporalUnit(annexBFrameUnit(obu(6, 0, 0, framePayload)))
         );
 
-        try (Av1Decoder reader = Av1Decoder.openAnnexB(
+        try (Av1Decoder reader = openInspectingAnnexBDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             Av1DecodedFrame firstTemporalUnit = reader.readFrame();
@@ -359,7 +374,7 @@ final class Av1DecoderTest {
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withOutputAllLayers(true);
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
@@ -379,7 +394,7 @@ final class Av1DecoderTest {
     @Test
     void readAllFramesReturnsEmptyListForSequenceHeaderOnlyStream() throws IOException {
         byte[] stream = obu(1, reducedStillPicturePayload());
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             List<Av1DecodedFrame> frames = reader.readAllFrames();
@@ -393,7 +408,7 @@ final class Av1DecoderTest {
     void readFrameRejectsFrameDataBeforeSequenceHeader() {
         byte[] stream = obu(3, new byte[]{0});
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
@@ -410,7 +425,7 @@ final class Av1DecoderTest {
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
         );
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -447,7 +462,7 @@ final class Av1DecoderTest {
                 obu(3, reducedStillPictureFrameHeaderPayload())
         );
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
@@ -466,7 +481,7 @@ final class Av1DecoderTest {
                 obu(3, reducedStillPictureFrameHeaderPayload()),
                 obu(4, singleTileGroupPayload())
         );
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -485,7 +500,7 @@ final class Av1DecoderTest {
                 obu(6, reducedStillPictureCombinedFramePayload())
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -504,7 +519,7 @@ final class Av1DecoderTest {
                 obu(1, reducedStillPicturePayload())
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -699,7 +714,7 @@ final class Av1DecoderTest {
                 obu(4, SUPPORTED_SINGLE_TILE_PAYLOAD)
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
@@ -802,7 +817,7 @@ final class Av1DecoderTest {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(referenceState.referenceSurfaceSnapshot());
         byte[] stream = obu(6, showExistingFrameHeaderPayload(0));
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             injectShowExistingReferenceState(reader, referenceState);
@@ -958,7 +973,7 @@ final class Av1DecoderTest {
                 obu(4, singleTileGroupPayload())
         );
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
@@ -977,7 +992,7 @@ final class Av1DecoderTest {
                 obu(1, reducedStillPicturePayload())
         );
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
@@ -997,7 +1012,7 @@ final class Av1DecoderTest {
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withFrameSizeLimit(4095);
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                     config
             )) {
@@ -1018,7 +1033,7 @@ final class Av1DecoderTest {
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withFrameSizeLimit(0);
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                     config
             )) {
@@ -1038,7 +1053,7 @@ final class Av1DecoderTest {
                 obu(3, showExistingFrameHeaderPayload(0))
         );
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
@@ -1101,7 +1116,7 @@ final class Av1DecoderTest {
                 obu(3, showExistingFrameHeaderPayload(0))
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(ByteBuffer.wrap(stream))) {
+        try (Av1Decoder reader = openInspectingDecoder(ByteBuffer.wrap(stream))) {
             Av1DecodeException exception = assertThrows(Av1DecodeException.class, reader::readFrame);
             assertEquals(Av1DecodeErrorCode.UNSUPPORTED_FEATURE, exception.code());
             assertEquals(Av1DecodeStage.OUTPUT_CONVERSION, exception.stage());
@@ -1230,7 +1245,7 @@ final class Av1DecoderTest {
                 obu(6, showExistingFrameHeaderPayload(0))
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertFullRangeOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -1631,7 +1646,7 @@ final class Av1DecoderTest {
                 obu(6, concat(showExistingFrameHeaderPayload(0), new byte[]{0x00}))
         );
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
@@ -1646,7 +1661,7 @@ final class Av1DecoderTest {
     @Test
     void configReturnsSuppliedConfiguration() {
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withApplyFilmGrain(false);
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
@@ -1677,19 +1692,19 @@ final class Av1DecoderTest {
             Av1DecoderConfig config,
             ReaderAssertion assertion
     ) throws IOException {
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
             assertion.accept(reader);
         }
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfInputStream(new ByteArrayInputStream(stream)),
                 config
         )) {
             assertion.accept(reader);
         }
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteChannel(Channels.newChannel(new ByteArrayInputStream(stream))),
                 config
         )) {
@@ -1733,7 +1748,7 @@ final class Av1DecoderTest {
                 obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
         );
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(sourceStream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
@@ -2817,7 +2832,7 @@ final class Av1DecoderTest {
                 Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
         byte[] stream = obu(6, showExistingFrameHeaderPayload(0));
 
-        try (Av1Decoder reader = Av1Decoder.open(
+        try (Av1Decoder reader = openInspectingDecoder(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             injectShowExistingReferenceState(reader, referenceState);
@@ -2850,7 +2865,7 @@ final class Av1DecoderTest {
         assertEquals(64, referenceSurfaceSnapshot.decodedPlanes().codedWidth());
 
         if (combinedShowExisting) {
-            try (Av1Decoder reader = Av1Decoder.open(
+            try (Av1Decoder reader = openInspectingDecoder(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 injectShowExistingReferenceState(reader, referenceState);
@@ -4026,6 +4041,65 @@ final class Av1DecoderTest {
     /// @return the rounded-up quotient
     private static int ceilDivideByPowerOfTwo(int value, int shift) {
         return (value + (1 << shift) - 1) >> shift;
+    }
+
+    /// Opens a byte-buffer decoder that retains structural frame results for test inspection.
+    ///
+    /// @param source the encoded AV1 source
+    /// @return the inspecting decoder
+    private static Av1Decoder openInspectingDecoder(ByteBuffer source) {
+        return retainSyntaxResults(Av1Decoder.open(source));
+    }
+
+    /// Opens a configured byte-buffer decoder that retains structural frame results for inspection.
+    ///
+    /// @param source the encoded AV1 source
+    /// @param config the decoder configuration
+    /// @return the inspecting decoder
+    private static Av1Decoder openInspectingDecoder(ByteBuffer source, Av1DecoderConfig config) {
+        return retainSyntaxResults(Av1Decoder.open(source, config));
+    }
+
+    /// Opens a channel decoder that retains structural frame results for test inspection.
+    ///
+    /// @param source the encoded AV1 source
+    /// @return the inspecting decoder
+    private static Av1Decoder openInspectingDecoder(ReadableByteChannel source) {
+        return retainSyntaxResults(Av1Decoder.open(source));
+    }
+
+    /// Opens a configured channel decoder that retains structural frame results for inspection.
+    ///
+    /// @param source the encoded AV1 source
+    /// @param config the decoder configuration
+    /// @return the inspecting decoder
+    private static Av1Decoder openInspectingDecoder(ReadableByteChannel source, Av1DecoderConfig config) {
+        return retainSyntaxResults(Av1Decoder.open(source, config));
+    }
+
+    /// Opens an Annex B byte-buffer decoder that retains structural frame results for inspection.
+    ///
+    /// @param source the encoded Annex B AV1 source
+    /// @return the inspecting decoder
+    private static Av1Decoder openInspectingAnnexBDecoder(ByteBuffer source) {
+        return retainSyntaxResults(Av1Decoder.openAnnexB(source));
+    }
+
+    /// Opens an Annex B channel decoder that retains structural frame results for inspection.
+    ///
+    /// @param source the encoded Annex B AV1 source
+    /// @return the inspecting decoder
+    private static Av1Decoder openInspectingAnnexBDecoder(ReadableByteChannel source) {
+        return retainSyntaxResults(Av1Decoder.openAnnexB(source));
+    }
+
+    /// Enables syntax-result retention on one decoder used by structural tests.
+    ///
+    /// @param decoder the decoder to configure
+    /// @return the same decoder
+    private static Av1Decoder retainSyntaxResults(Av1Decoder decoder) {
+        decoder.retainFrameSyntaxDecodeResultsForInspection();
+        return decoder;
     }
 
     /// Captures every currently populated reference-surface slot from one reader.

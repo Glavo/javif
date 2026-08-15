@@ -49,6 +49,7 @@ final class CdefApplierTest {
                 primarySource.payload(0).openInput(),
                 Av1DecoderConfig.DEFAULT
         )) {
+            retainFrameSyntaxDecodeResultsForInspection(reader);
             reader.readFrame();
             FrameSyntaxDecodeResult syntaxDecodeResult =
                     Objects.requireNonNull(lastFrameSyntaxDecodeResult(reader), "lastFrameSyntaxDecodeResult");
@@ -334,6 +335,19 @@ final class CdefApplierTest {
             field.setAccessible(true);
             return (FrameSyntaxDecodeResult) field.get(reader);
         } catch (IllegalAccessException | NoSuchFieldException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
+    /// Enables retaining decoded frame syntax on one reader for this structural postfilter test.
+    ///
+    /// @param reader the reader to configure before decoding
+    private static void retainFrameSyntaxDecodeResultsForInspection(Av1Decoder reader) {
+        try {
+            Method method = Av1Decoder.class.getDeclaredMethod("retainFrameSyntaxDecodeResultsForInspection");
+            method.setAccessible(true);
+            method.invoke(reader);
+        } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException exception) {
             throw new AssertionError(exception);
         }
     }

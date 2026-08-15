@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.nio.ShortBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -255,13 +256,11 @@ public final class AvifImageReader implements AutoCloseable {
         );
         AvifImageSource alphaSource = container.alphaSource();
         if (alphaSource != null) {
-            Av1DecodedPlanes alphaPlanes = alphaPlanesFromDecodedImage(
-                    decodeAlphaImageSource(
-                            alphaSource,
-                            "Alpha auxiliary AV1 image",
-                            decodedColor.colorConfig().bitDepth()
-                    ).planes()
-            );
+            Av1DecodedPlanes alphaPlanes = decodeAlphaImageSource(
+                    alphaSource,
+                    "Alpha auxiliary AV1 image",
+                    decodedColor.colorConfig().bitDepth()
+            ).planes();
             if (alphaPlanes.codedWidth() != rawFrame.width() || alphaPlanes.codedHeight() != rawFrame.height()) {
                 throw new AvifDecodeException(
                         AvifErrorCode.AV1_DECODE_FAILED,
@@ -312,7 +311,9 @@ public final class AvifImageReader implements AutoCloseable {
     /// Reads raw decoded alpha auxiliary planes for the frame at the supplied index.
     ///
     /// The returned planes expose an alpha auxiliary AV1 image before AVIF item transforms are
-    /// applied. A `null` return value means the frame has no alpha auxiliary image.
+    /// applied. They are monochrome and full range; color-coded legacy alpha images expose only
+    /// their luma plane, and legacy limited-range alpha samples are expanded to full range. A
+    /// `null` return value means the frame has no alpha auxiliary image.
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded alpha auxiliary planes, or `null` when no alpha auxiliary image is present
@@ -336,12 +337,12 @@ public final class AvifImageReader implements AutoCloseable {
                     alphaPayloads,
                     "Alpha sequence frame"
             );
-            validateAlphaColorConfig(
+            return normalizeAlphaPlanes(
+                    decodedAlpha.planes(),
                     decodedAlpha.colorConfig(),
                     container.info().bitDepth(),
                     "Alpha sequence frame"
             );
-            return alphaPlanesFromDecodedImage(decodedAlpha.planes());
         }
         SampleTransform sampleTransform = container.sampleTransform();
         if (sampleTransform != null) {
@@ -349,11 +350,11 @@ public final class AvifImageReader implements AutoCloseable {
         }
         AvifImageSource alphaSource = container.alphaSource();
         return alphaSource != null
-                ? alphaPlanesFromDecodedImage(decodeAlphaImageSource(
+                ? decodeAlphaImageSource(
                         alphaSource,
                         "Alpha auxiliary AV1 image",
                         container.info().bitDepth()
-                ).planes())
+                ).planes()
                 : null;
     }
 
@@ -714,7 +715,7 @@ public final class AvifImageReader implements AutoCloseable {
             DecodedRawImage decoded = alpha
                     ? decodeAlphaImageSource(source, label, input.colorBitDepth())
                     : decodeImageSource(source, label);
-            inputPlanes[inputIndex] = alpha ? alphaPlanesFromDecodedImage(decoded.planes()) : decoded.planes();
+            inputPlanes[inputIndex] = decoded.planes();
             if (inputIndex == sampleTransform.primaryInputIndex()) {
                 primaryColorConfig = decoded.colorConfig();
             }
@@ -787,7 +788,15 @@ public final class AvifImageReader implements AutoCloseable {
             );
             validateDecodedItemDimensions(source, 0, decoded.planes(), label);
             if (expectedAlphaBitDepth != null) {
-                validateAlphaColorConfig(decoded.colorConfig(), expectedAlphaBitDepth, label);
+                return new DecodedRawImage(
+                        normalizeAlphaPlanes(
+                                decoded.planes(),
+                                decoded.colorConfig(),
+                                expectedAlphaBitDepth,
+                                label
+                        ),
+                        decoded.colorConfig()
+                );
             }
             return decoded;
         }
@@ -816,13 +825,15 @@ public final class AvifImageReader implements AutoCloseable {
                     label + " grid cell " + cellIndex
             );
             if (expectedAlphaBitDepth != null) {
-                validateAlphaColorConfig(
+                cellPlanes[cellIndex] = normalizeAlphaPlanes(
+                        decoded.planes(),
                         decoded.colorConfig(),
                         expectedAlphaBitDepth,
                         label + " grid cell " + cellIndex
                 );
+            } else {
+                cellPlanes[cellIndex] = decoded.planes();
             }
-            cellPlanes[cellIndex] = decoded.planes();
             if (colorConfig == null) {
                 colorConfig = decoded.colorConfig();
             }
@@ -1025,11 +1036,35 @@ public final class AvifImageReader implements AutoCloseable {
         return plane != null ? toDecodedPlane(plane) : null;
     }
 
-    /// Creates alpha-only public planes from a decoded auxiliary image.
+    /// Normalizes decoded auxiliary-image planes for use as AVIF alpha.
     ///
-    /// @param planes the decoded auxiliary image planes
-    /// @return alpha-only public planes exposing only the luma plane
-    private static Av1DecodedPlanes alphaPlanesFromDecodedImage(Av1DecodedPlanes planes) {
+    /// Color-coded auxiliary images are accepted for compatibility and only their luma plane is
+    /// retained. Limited-range luma is converted to full range as permitted for legacy AVIF 1.0
+    /// alpha images.
+    ///
+    /// @param planes the decoded auxiliary-image planes
+    /// @param colorConfig the auxiliary image's AV1 color configuration
+    /// @param expectedBitDepth the associated master-image bit depth
+    /// @param label the diagnostic alpha source label
+    /// @return monochrome, full-range alpha planes
+    /// @throws AvifDecodeException if the alpha bit depth differs from the master image
+    static Av1DecodedPlanes normalizeAlphaPlanes(
+            Av1DecodedPlanes planes,
+            Av1ColorConfig colorConfig,
+            AvifBitDepth expectedBitDepth,
+            String label
+    ) throws AvifDecodeException {
+        if (colorConfig.bitDepth() != expectedBitDepth) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " bit depth differs from its master image: "
+                            + colorConfig.bitDepth().bits() + " != " + expectedBitDepth.bits(),
+                    null
+            );
+        }
+        Av1DecodedPlane lumaPlane = colorConfig.colorRange()
+                ? planes.lumaPlane()
+                : limitedToFullAlphaPlane(planes.lumaPlane(), colorConfig.bitDepth());
         return new Av1DecodedPlanes(
                 planes.bitDepth(),
                 Av1ChromaFormat.MONOCHROME,
@@ -1037,10 +1072,41 @@ public final class AvifImageReader implements AutoCloseable {
                 planes.codedHeight(),
                 planes.renderWidth(),
                 planes.renderHeight(),
-                planes.lumaPlane(),
+                lumaPlane,
                 null,
                 null
         );
+    }
+
+    /// Converts one limited-range alpha luma plane to full range.
+    ///
+    /// @param plane the limited-range luma plane
+    /// @param bitDepth the decoded AV1 bit depth
+    /// @return a compact full-range alpha plane
+    private static Av1DecodedPlane limitedToFullAlphaPlane(Av1DecodedPlane plane, AvifBitDepth bitDepth) {
+        int width = plane.width();
+        int height = plane.height();
+        int rangeShift = bitDepth.bits() - 8;
+        int limitedMinimum = 16 << rangeShift;
+        int limitedMaximum = 235 << rangeShift;
+        int limitedRange = limitedMaximum - limitedMinimum;
+        int fullMaximum = bitDepth.maxSampleValue();
+        ShortBuffer source = plane.sampleBuffer();
+        short[] samples = new short[width * height];
+        for (int y = 0; y < height; y++) {
+            int sourceOffset = y * plane.stride();
+            int destinationOffset = y * width;
+            for (int x = 0; x < width; x++) {
+                int sample = source.get(sourceOffset + x) & 0xFFFF;
+                int fullRangeSample = ((sample - limitedMinimum) * fullMaximum + limitedRange / 2)
+                        / limitedRange;
+                samples[destinationOffset + x] = (short) Math.max(
+                        0,
+                        Math.min(fullMaximum, fullRangeSample)
+                );
+            }
+        }
+        return new Av1DecodedPlane(width, height, width, ShortBuffer.wrap(samples).asReadOnlyBuffer());
     }
 
     /// Returns whether image metadata contains one auxiliary image type.
@@ -1802,14 +1868,15 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         sequenceAlphaAv1FrameIndex++;
-        validateAlphaColorConfig(
+        Av1DecodedPlanes alphaPlanes = normalizeAlphaPlanes(
+                alphaOutput.planes(),
                 alphaOutput.colorConfig(),
                 container.info().bitDepth(),
                 "Sequence alpha frame " + frameIndex
         );
         return combineFrameWithDecodedAlpha(
                 colorFrame,
-                alphaPlanesFromDecodedImage(alphaOutput.planes()),
+                alphaPlanes,
                 frameIndex
         );
     }
@@ -1828,14 +1895,15 @@ public final class AvifImageReader implements AutoCloseable {
         }
         try {
             Av1DecodedOutput requiredOutput = indexedSequenceCursor(alphaPayloads, "Sequence alpha").read(frameIndex);
-            validateAlphaColorConfig(
+            Av1DecodedPlanes alphaPlanes = normalizeAlphaPlanes(
+                    requiredOutput.planes(),
                     requiredOutput.colorConfig(),
                     container.info().bitDepth(),
                     "Sequence alpha frame " + frameIndex
             );
             return combineFrameWithDecodedAlpha(
                     colorFrame,
-                    alphaPlanesFromDecodedImage(requiredOutput.planes()),
+                    alphaPlanes,
                     frameIndex
             );
         } catch (AvifDecodeException exception) {
@@ -1921,42 +1989,6 @@ public final class AvifImageReader implements AutoCloseable {
         }
         validateAlphaLumaPlane(alphaPlanes.lumaPlane(), expectedWidth, expectedHeight, "Alpha");
         return alphaPlanes;
-    }
-
-    /// Validates the AV1 sequence-header requirements for an AVIF alpha image.
-    ///
-    /// @param colorConfig the decoded alpha image's AV1 color configuration
-    /// @param expectedBitDepth the associated master-image bit depth
-    /// @param label the diagnostic alpha source label
-    /// @throws AvifDecodeException if the alpha configuration is not monochrome, full range, or
-    ///                             the same bit depth as its master image
-    static void validateAlphaColorConfig(
-            Av1ColorConfig colorConfig,
-            AvifBitDepth expectedBitDepth,
-            String label
-    ) throws AvifDecodeException {
-        if (!colorConfig.monochrome() || colorConfig.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.AV1_DECODE_FAILED,
-                    label + " must be coded as a monochrome AV1 image",
-                    null
-            );
-        }
-        if (!colorConfig.colorRange()) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.AV1_DECODE_FAILED,
-                    label + " must use full-range AV1 samples",
-                    null
-            );
-        }
-        if (colorConfig.bitDepth() != expectedBitDepth) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.AV1_DECODE_FAILED,
-                    label + " bit depth differs from its master image: "
-                            + colorConfig.bitDepth().bits() + " != " + expectedBitDepth.bits(),
-                    null
-            );
-        }
     }
 
     /// Validates one alpha luma plane against the expected decoded dimensions.

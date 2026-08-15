@@ -87,8 +87,10 @@ public final class Av1Decoder implements AutoCloseable {
     private final List<ReferenceSurfaceSnapshot> largeScaleTileAnchorFrames;
     /// The last selected spatial-layer output retained for the current temporal unit.
     private @Nullable PendingOutput pendingLayeredOutput;
-    /// The most recently completed structural frame-decode result.
+    /// The most recently completed structural frame-decode result retained for inspection.
     private @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult;
+    /// Whether completed structural frame-decode results are retained for package tests.
+    private boolean retainFrameSyntaxDecodeResultsForInspection;
     /// The AV1 pixel reconstructor used for decoded frame output.
     private final FrameReconstructor frameReconstructor;
     /// The postfilter pipeline used before storing reference surfaces.
@@ -470,6 +472,14 @@ public final class Av1Decoder implements AutoCloseable {
         return lastFrameSyntaxDecodeResult;
     }
 
+    /// Enables retaining future structural frame-decode results for package-level inspection.
+    ///
+    /// Normal decoding does not retain the full syntax tree after reconstruction. Tests that need
+    /// to inspect that tree must call this method before decoding the relevant frame.
+    void retainFrameSyntaxDecodeResultsForInspection() {
+        retainFrameSyntaxDecodeResultsForInspection = true;
+    }
+
     /// Returns one refreshed compact reference-frame syntax state, or `null`.
     ///
     /// This package-private accessor exposes reference-slot state for decoder conformance tests.
@@ -771,7 +781,9 @@ public final class Av1Decoder implements AutoCloseable {
                     exception
             );
         }
-        lastFrameSyntaxDecodeResult = syntaxDecodeResult;
+        lastFrameSyntaxDecodeResult = retainFrameSyntaxDecodeResultsForInspection
+                ? syntaxDecodeResult
+                : null;
         boolean shouldOutput = !config.largeScaleTileMode()
                 && FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
         boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
@@ -1114,7 +1126,9 @@ public final class Av1Decoder implements AutoCloseable {
                     cacheLargeScaleTileSyntax(decodedTileSyntax, syntaxKey, syntaxDecodeResult);
                 }
             }
-            lastFrameSyntaxDecodeResult = syntaxDecodeResult;
+            lastFrameSyntaxDecodeResult = retainFrameSyntaxDecodeResultsForInspection
+                    ? syntaxDecodeResult
+                    : null;
             finishLargeScaleTileSyntaxUse(
                     syntaxKey,
                     remainingSyntaxUseCount,

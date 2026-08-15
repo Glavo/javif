@@ -2640,32 +2640,98 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies all AVIF alpha sequence-header constraints independently of plane composition.
+    /// Verifies compatibility normalization for color-coded and limited-range alpha images.
+    ///
+    /// @throws AvifDecodeException if a compatible alpha configuration is unexpectedly rejected
     @Test
-    void rejectsInvalidDecodedAlphaColorConfigurations() {
-        AvifDecodeException nonMonochrome = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.validateAlphaColorConfig(
-                        testColorConfig(AvifBitDepth.EIGHT_BITS, false, true),
-                        AvifBitDepth.EIGHT_BITS,
-                        "Alpha"
-                )
+    void normalizesLegacyDecodedAlphaColorConfigurations() throws AvifDecodeException {
+        Av1DecodedPlane lumaPlane = new Av1DecodedPlane(
+                5,
+                1,
+                5,
+                new short[]{0, 16, 126, 235, 255}
         );
-        assertTrue(nonMonochrome.getMessage().contains("monochrome"));
+        Av1DecodedPlane chromaPlane = new Av1DecodedPlane(3, 1, 3, new short[]{128, 128, 128});
+        Av1DecodedPlanes colorCoded = new Av1DecodedPlanes(
+                AvifBitDepth.EIGHT_BITS,
+                Av1ChromaFormat.YUV420,
+                5,
+                1,
+                5,
+                1,
+                lumaPlane,
+                chromaPlane,
+                chromaPlane
+        );
 
-        AvifDecodeException limitedRange = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.validateAlphaColorConfig(
-                        testColorConfig(AvifBitDepth.EIGHT_BITS, true, false),
-                        AvifBitDepth.EIGHT_BITS,
-                        "Alpha"
-                )
+        Av1DecodedPlanes colorCodedAlpha = AvifImageReader.normalizeAlphaPlanes(
+                colorCoded,
+                testColorConfig(AvifBitDepth.EIGHT_BITS, false, true),
+                AvifBitDepth.EIGHT_BITS,
+                "Alpha"
         );
-        assertTrue(limitedRange.getMessage().contains("full-range"));
+        assertEquals(Av1ChromaFormat.MONOCHROME, colorCodedAlpha.chromaFormat());
+        assertFalse(colorCodedAlpha.hasChroma());
+        assertArrayEquals(new short[]{0, 16, 126, 235, 255}, colorCodedAlpha.lumaPlane().samples());
+
+        Av1DecodedPlanes limitedRangeAlpha = AvifImageReader.normalizeAlphaPlanes(
+                new Av1DecodedPlanes(
+                        AvifBitDepth.EIGHT_BITS,
+                        Av1ChromaFormat.MONOCHROME,
+                        5,
+                        1,
+                        5,
+                        1,
+                        lumaPlane,
+                        null,
+                        null
+                ),
+                testColorConfig(AvifBitDepth.EIGHT_BITS, true, false),
+                AvifBitDepth.EIGHT_BITS,
+                "Alpha"
+        );
+        assertArrayEquals(new short[]{0, 0, 128, 255, 255}, limitedRangeAlpha.lumaPlane().samples());
+
+        for (AvifBitDepth bitDepth : List.of(AvifBitDepth.TEN_BITS, AvifBitDepth.TWELVE_BITS)) {
+            int rangeShift = bitDepth.bits() - 8;
+            int limitedMinimum = 16 << rangeShift;
+            int limitedMaximum = 235 << rangeShift;
+            int limitedMidpoint = (limitedMinimum + limitedMaximum) / 2;
+            int fullMaximum = bitDepth.maxSampleValue();
+            int fullMidpoint = 1 << (bitDepth.bits() - 1);
+            Av1DecodedPlane highBitDepthLuma = new Av1DecodedPlane(
+                    5,
+                    1,
+                    5,
+                    new short[]{0, (short) limitedMinimum, (short) limitedMidpoint,
+                            (short) limitedMaximum, (short) fullMaximum}
+            );
+            Av1DecodedPlanes normalized = AvifImageReader.normalizeAlphaPlanes(
+                    new Av1DecodedPlanes(
+                            bitDepth,
+                            Av1ChromaFormat.MONOCHROME,
+                            5,
+                            1,
+                            5,
+                            1,
+                            highBitDepthLuma,
+                            null,
+                            null
+                    ),
+                    testColorConfig(bitDepth, true, false),
+                    bitDepth,
+                    "Alpha"
+            );
+            assertArrayEquals(
+                    new short[]{0, 0, (short) fullMidpoint, (short) fullMaximum, (short) fullMaximum},
+                    normalized.lumaPlane().samples()
+            );
+        }
 
         AvifDecodeException mismatchedBitDepth = assertThrows(
                 AvifDecodeException.class,
-                () -> AvifImageReader.validateAlphaColorConfig(
+                () -> AvifImageReader.normalizeAlphaPlanes(
+                        colorCoded,
                         testColorConfig(AvifBitDepth.TEN_BITS, true, true),
                         AvifBitDepth.EIGHT_BITS,
                         "Alpha"
@@ -2674,11 +2740,11 @@ final class AvifImageReaderTest {
         assertTrue(mismatchedBitDepth.getMessage().contains("bit depth differs"));
     }
 
-    /// Verifies that a color-coded auxiliary payload is not silently reduced to its luma plane.
+    /// Verifies that a color-coded auxiliary payload is exposed through its luma plane as alpha.
     ///
     /// @throws IOException if the synthetic container cannot be opened
     @Test
-    void readRawAlphaRejectsNonMonochromeAv1Payload() throws IOException {
+    void readRawAlphaAcceptsColorCodedAv1Payload() throws IOException {
         byte[] source = syntheticAlphaAvif(
                 false,
                 0,
@@ -2687,12 +2753,12 @@ final class AvifImageReaderTest {
                 av1StillPicturePayload()
         );
         try (AvifImageReader reader = AvifImageReader.open(source)) {
-            AvifDecodeException exception = assertThrows(
-                    AvifDecodeException.class,
-                    () -> reader.readRawAlphaPlanes(0)
-            );
-            assertEquals(AvifErrorCode.AV1_DECODE_FAILED, exception.code());
-            assertTrue(exception.getMessage().contains("monochrome"));
+            Av1DecodedPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(Av1ChromaFormat.MONOCHROME, alphaPlanes.chromaFormat());
+            assertFalse(alphaPlanes.hasChroma());
+            assertEquals(64, alphaPlanes.codedWidth());
+            assertEquals(64, alphaPlanes.codedHeight());
         }
     }
 
