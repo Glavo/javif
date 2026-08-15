@@ -1,163 +1,108 @@
-# javif
+# javif - Pure Java AV1 and AVIF Decoder
 
-`javif` is a Java 17 decoder for AV1 low-overhead bitstreams, AVIF still images, and AVIS image
-sequences. The core API is implemented in pure Java and has no runtime dependency outside the
-`java.base` module. An optional JavaFX adapter and desktop viewer are included in the same module.
+[![](https://img.shields.io/maven-central/v/org.glavo/avif?label=Maven%20Central)](https://search.maven.org/artifact/org.glavo/avif)
+[![javadoc](https://javadoc.io/badge2/org.glavo/avif/javadoc.svg)](https://javadoc.io/doc/org.glavo/avif)
+
+A dependency-free, pure Java AV1 and AVIF decoder library that supports AVIF still images and animated AVIF images.
+
+We have ported and adapted test cases from libaom, libavif, Firefox, and Chromium to verify its correctness.
 
 ## Features
 
-- Decodes 8-, 10-, and 12-bit AV1 content in monochrome, YUV 4:2:0, YUV 4:2:2, and YUV 4:4:4 layouts.
-- Reads AVIF items and AVIS tracks, including grids, alpha, depth, gain maps, progressive images,
-  presentation transforms, and Exif, XMP, ICC, and CICP metadata.
-- Exposes raw YUV planes or packed non-premultiplied 8-bit and 16-bit ARGB pixels.
-- Applies loop filtering, CDEF, loop restoration, super-resolution, and optional film grain.
-- Provides a JavaFX `WritableImage` adapter and a desktop viewer with animated-sequence timing.
-- Runs without native libraries or mandatory third-party runtime dependencies.
-
-The detailed implemented surface, deliberate boundaries, and verification baseline are recorded in
-[PLANS.md](PLANS.md).
+- Pure Java implementation with no native dependencies.
+- The core decoder only depends on the `java.base` module, with no dependency on other modules.
+- Supports 8-bit, 10-bit, and 12-bit AV1 decoding.
+- Supports monochrome, YUV 4:2:0, YUV 4:2:2, and YUV 4:4:4 images.
+- Supports AVIF still images and animated AVIF images.
+- Supports alpha, image grids, progressive images, gain maps, depth images, and presentation transforms.
+- Supports ICC, EXIF, XMP, and CICP metadata.
+- Provides optional JavaFX integration for displaying still and animated AVIF images.
 
 ## Requirements
 
-- JDK 17 or newer to compile, test, and run the library.
-- JDK 23 or newer to generate Javadoc and complete a publication build; CI uses JDK 25.
-- JavaFX 21 or newer only when using `org.glavo.avif.javafx` or the desktop viewer.
+- Java 17 or newer
 
-## Build
+## Download
 
-Run the release gate on JDK 23 or newer with the repository-local Gradle user home:
+Gradle:
 
-```text
-./gradlew -g .gradle-user-home cleanTest test javadoc assemble verifyNoRuntimeDependencies
-```
-
-The main, source, and Javadoc JARs are written to `build/libs`.
-
-Formal signed artifacts are published from `v*` tags after the complete external corpus gate has
-passed for the tagged commit. See [RELEASING.md](RELEASING.md) for credentials, validation, and
-failure guidance.
-
-## Decode an AVIF image
-
-```java
-import org.glavo.avif.AvifFrame;
-import org.glavo.avif.AvifImage;
-
-import java.nio.IntBuffer;
-import java.nio.file.Path;
-
-AvifImage image = AvifImage.read(Path.of("image.avif"));
-AvifFrame frame = image.firstFrame();
-IntBuffer argb = frame.intPixelBuffer();
-
-System.out.printf("%dx%d, frames=%d%n",
-        image.info().width(), image.info().height(), image.frames().size());
-System.out.printf("first ARGB pixel: %08x%n", argb.get(0));
-```
-
-Use `new AvifFXImage(image)` to adapt fully decoded content to JavaFX. Use
-`AvifImageReader` when frames should be decoded lazily or when raw YUV planes are needed.
-
-Use `AvifImageReader.readRawColorPlanes(int)` when a caller needs the decoded YUV planes instead of
-the built-in CICP-to-RGB conversion.
-
-Create a reusable immutable factory when decoding options must differ from the defaults:
-
-```java
-import org.glavo.avif.AvifFrame;
-import org.glavo.avif.AvifImageReader;
-import org.glavo.avif.AvifImageReaderFactory;
-import org.glavo.avif.AvifPixelFormat;
-
-import java.nio.file.Path;
-
-AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
-        .withOutputPixelFormat(AvifPixelFormat.ARGB_8888)
-        .withInputSizeLimit(64L * 1024 * 1024);
-
-try (AvifImageReader reader = factory.open(Path.of("image.avif"))) {
-    AvifFrame frame = reader.readFrame(0);
+```kotlin
+dependencies {
+    implementation("org.glavo:avif:0.1.0")
 }
 ```
 
-The JPMS module name is `org.glavo.avif`. Its supported public packages are:
+Maven:
 
-- `org.glavo.avif` for AVIF and AVIS decoding;
-- `org.glavo.avif.av1` for raw AV1 low-overhead bitstreams;
-- `org.glavo.avif.javafx` for the optional JavaFX adapter and viewer.
-
-## Desktop viewer
-
-Open the viewer without an initial file:
-
-```text
-./gradlew -g .gradle-user-home run
+```xml
+<dependency>
+    <groupId>org.glavo</groupId>
+    <artifactId>avif</artifactId>
+    <version>0.1.0</version>
+</dependency>
 ```
 
-Or pass an AVIF file directly:
+## Basic Usage
 
-```text
-./gradlew -g .gradle-user-home run --args="path/to/image.avif"
+Decode a whole image at once:
+
+```java
+AvifImage image = AvifImage.read(Path.of("sample.avif"));
+System.out.println(image.info().width() + "x" + image.info().height());
+System.out.println("frames = " + image.frames().size());
+System.out.printf("first pixel = %08x%n", image.firstFrame().intPixelBuffer().get(0));
 ```
 
-The viewer supports the file chooser, drag and drop, panning, still images, and timed AVIS playback.
+Stream frames from an animated AVIF image:
 
-## Extended corpus tests
-
-The ordinary `test` task excludes the large external corpora. Run them explicitly when their pinned
-archives are available or can be downloaded:
-
-```text
-./gradlew -g .gradle-user-home aomAvifTest
-./gradlew -g .gradle-user-home argonAv1Test
-./gradlew -g .gradle-user-home firefoxAvifTest
-./gradlew -g .gradle-user-home chromiumAvifTest
+```java
+try (InputStream input = Files.newInputStream(Path.of("animated.avif"));
+     AvifImageReader reader = AvifImageReader.open(input)) {
+    while (true) {
+        AvifFrame frame = reader.readFrame();
+        if (frame == null) {
+            break;
+        }
+        System.out.println("frame = " + frame.frameIndex());
+    }
+}
 ```
 
-Downloaded corpus archives and browser fixtures are cached under `external/test-corpora` so that
-`clean` does not discard them. To seed the Argon cache manually, place its pinned archive at
-`external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip`.
+### JavaFX Integration
 
-The Firefox and Chromium tasks download small, revision-pinned selections from the browser test
-suites and verify aggregate SHA-256 digests before running compatibility tests. They cover color
-conversion matrices, bit depths, chroma layouts, alpha, animation, transforms, grids, scalable
-images, gain maps, malformed inputs, and crash regressions. See
-`src/test/resources/browser-corpora/README.md` for provenance and the deliberately adapted
-browser-specific assertions.
+javif's core part only depends on the `java.base` module and does not require JavaFX.
 
-The Argon archive is several gigabytes. The `Corpus Check` GitHub Actions workflow therefore keeps
-the external corpus gates manual, caches their pinned inputs independently, and runs all 25 Argon
-categories as separate matrix jobs. The baseline Argon gate covers all 3,586 reference
-streams—including regular, special low-overhead, Annex B core, Large Scale Tile, stress, and
-profile-switching streams—plus all 335 malformed conformance streams across the three profiles.
-Extended jobs also validate film-grain presentation output and every distinct declared
-operating-point output represented by Argon's 89,239 pre-grain and 89,239 film-grain reference
-digests. The stress categories use separate long-running CI jobs. The gate uses a 4 GB test heap by
-default, can be split by category or narrowed to one stream, and keeps the heap configurable for
-constrained or unusually large workers. Shards are one-based and can be combined with
-`category/all`:
+javif also provides optional JavaFX components in the `org.glavo.avif.javafx` package,
+which can easily convert an `AvifImage` or `AvifFrame` to a JavaFX `Image`:
 
-```text
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all -PargonAv1Shard=1/8
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/test17.obu
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_core/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_core_special/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_error/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile1_error/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile2_error/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_large_scale_tile/all -PargonAv1Shard=1/20
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile2_large_scale_tile_special/all -PargonAv1Shard=1/12
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile_switching/all
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_stress/all -PargonAv1Shard=1/8
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb/all -PargonAv1OperatingPoint=distinct
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb/test12153.obu -PargonAv1OperatingPoint=all -PargonAv1Output=both
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_core/all -PargonAv1OperatingPoint=distinct -PargonAv1Output=film-grain -PargonAv1Shard=1/8
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1MaxHeap=6g
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all -PargonAv1Jfr=build/profiles/argon.jfr
-./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile1_not_annexb_special/test52.obu -PargonAv1TraceFrames
+```java
+// Create a JavaFX image from an AvifImage.
+// Animated AVIF images automatically start playing.
+// Pass false as the second argument to disable autoplay.
+javafx.scene.image.Image fxImage = new AvifFXImage(AvifImage.read(Path.of("sample.avif")));
+
+// Create a JavaFX image from an AvifFrame.
+javafx.scene.image.Image fxFrame = new AvifFXImage(AvifImage.read(Path.of("sample.avif")).firstFrame());
 ```
 
-## License
+### javif Image Viewer
 
-This project is licensed under the [Apache License 2.0](LICENSE).
+We provide a sample application: javif Image Viewer.
+
+This is a simple image viewer based on javif. You can use any Java environment containing JavaFX to run it via `java -jar avif-0.1.0.jar`.
+
+You can download the latest version of javif Image Viewer from [GitHub Releases](https://github.com/Glavo/javif/releases).
+
+## Testing
+
+Run all tests:
+
+```powershell
+./gradlew test
+```
+
+The test suite includes:
+
+- project-local AV1 and AVIF decoder regression tests
+- tests ported and adapted from `libaom`, `libavif`, Firefox, and Chromium
+- reference comparisons against `libaom`, `libavif`, and FFmpeg
