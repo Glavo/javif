@@ -3,6 +3,7 @@ import java.lang.module.ModuleFinder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.HexFormat
+import java.util.Properties
 
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.kotlin.dsl.attributes
@@ -22,7 +23,14 @@ plugins {
 group = "org.glavo"
 
 if (version == Project.DEFAULT_VERSION) {
-    version = "0.1.0" + "-SNAPSHOT"
+    val projectProperties = Properties().apply {
+        providers.fileContents(layout.projectDirectory.file("gradle/project.properties"))
+            .asText.get().reader().use(::load)
+    }
+    val baseVersion = requireNotNull(projectProperties.getProperty("version")) {
+        "gradle/project.properties must define version"
+    }
+    version = "$baseVersion-SNAPSHOT"
 }
 
 description = "Pure Java implementation of AV1 decoding and AVIF reading library"
