@@ -2093,20 +2093,24 @@ public final class BlockNeighborContext {
     ///
     /// @param plane the plane index, where `0` is Y, `1` is U, and `2` is V
     /// @param x4 the X coordinate in 4x4 units
-    /// @param index the zero-based palette entry index in `[0, 8)`
+    /// @param index the zero-based palette entry index below the active palette size for `plane`
     /// @return one above-edge palette entry for the supplied plane and coordinate
     public int abovePaletteEntry(int plane, int x4, int index) {
-        return abovePaletteEntries[Objects.checkIndex(plane, abovePaletteEntries.length)][x4][Objects.checkIndex(index, 8)];
+        int checkedPlane = Objects.checkIndex(plane, abovePaletteEntries.length);
+        int activeSize = checkedPlane == 0 ? abovePaletteSize(x4) : aboveChromaPaletteSize(x4);
+        return abovePaletteEntries[checkedPlane][x4][Objects.checkIndex(index, activeSize)];
     }
 
     /// Returns one left-edge palette entry for the supplied plane, Y coordinate, and palette index.
     ///
     /// @param plane the plane index, where `0` is Y, `1` is U, and `2` is V
     /// @param y4 the Y coordinate in 4x4 units
-    /// @param index the zero-based palette entry index in `[0, 8)`
+    /// @param index the zero-based palette entry index below the active palette size for `plane`
     /// @return one left-edge palette entry for the supplied plane and coordinate
     public int leftPaletteEntry(int plane, int y4, int index) {
-        return leftPaletteEntries[Objects.checkIndex(plane, leftPaletteEntries.length)][y4][Objects.checkIndex(index, 8)];
+        int checkedPlane = Objects.checkIndex(plane, leftPaletteEntries.length);
+        int activeSize = checkedPlane == 0 ? leftPaletteSize(y4) : leftChromaPaletteSize(y4);
+        return leftPaletteEntries[checkedPlane][y4][Objects.checkIndex(index, activeSize)];
     }
 
     /// Returns the above-edge luma mode for the supplied X coordinate in 4x4 units.
@@ -2887,9 +2891,6 @@ public final class BlockNeighborContext {
             aboveSegmentPredicted[x4] = segmentPredicted;
             abovePaletteSize[x4] = paletteSize;
             aboveChromaPaletteSize[x4] = chromaPaletteSize;
-            Arrays.fill(abovePaletteEntries[0][x4], 0);
-            Arrays.fill(abovePaletteEntries[1][x4], 0);
-            Arrays.fill(abovePaletteEntries[2][x4], 0);
             copyPaletteEntries(
                     nonNullHeader,
                     abovePaletteEntries[0][x4],
@@ -2914,9 +2915,6 @@ public final class BlockNeighborContext {
             leftSegmentPredicted[y4] = segmentPredicted;
             leftPaletteSize[y4] = paletteSize;
             leftChromaPaletteSize[y4] = chromaPaletteSize;
-            Arrays.fill(leftPaletteEntries[0][y4], 0);
-            Arrays.fill(leftPaletteEntries[1][y4], 0);
-            Arrays.fill(leftPaletteEntries[2][y4], 0);
             copyPaletteEntries(
                     nonNullHeader,
                     leftPaletteEntries[0][y4],
@@ -2935,7 +2933,7 @@ public final class BlockNeighborContext {
 
     /// Copies one block header's palette entries into fixed-size neighbor caches.
     ///
-    /// The destination arrays must already be cleared because this method writes only active entries.
+    /// Only entries below the active palette sizes are observable through the neighbor context.
     ///
     /// @param header the source block header
     /// @param yEntries the luma palette cache

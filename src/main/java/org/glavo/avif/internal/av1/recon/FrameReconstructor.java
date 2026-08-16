@@ -70,7 +70,7 @@ public final class FrameReconstructor {
     /// The largest luma block dimension permitted for inter-intra prediction.
     private static final int INTER_INTRA_MAX_BLOCK_DIMENSION = 32;
 
-    /// The identity reference geometry used by same-frame `intrabc` prediction.
+    /// The identity reference geometry used by unscaled inter and same-frame `intrabc` prediction.
     private static final ReferenceScale IDENTITY_REFERENCE_SCALE =
             new ReferenceScale(REFERENCE_SCALE_IDENTITY, REFERENCE_SCALE_IDENTITY, false);
 
@@ -1043,10 +1043,7 @@ public final class FrameReconstructor {
                 header,
                 transformLayout,
                 residualLayout,
-                chromaFormat,
-                lumaPlane.bitDepth(),
-                frameHeader,
-                referenceSurfaceSnapshots
+                chromaFormat
         );
 
         int lumaX = header.position().x4() << 2;
@@ -1324,17 +1321,11 @@ public final class FrameReconstructor {
     /// @param transformLayout the decoded block transform layout
     /// @param residualLayout the decoded block residual layout
     /// @param chromaFormat the active decoded chroma layout
-    /// @param bitDepth the decoded sample bit depth of the current frame
-    /// @param frameHeader the frame header that owns the block
-    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     private void validateLeaf(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             ResidualLayout residualLayout,
-            Av1ChromaFormat chromaFormat,
-            int bitDepth,
-            FrameHeader frameHeader,
-            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
+            Av1ChromaFormat chromaFormat
     ) {
         if (header.useIntrabc()) {
             if (header.motionVector0() == null || !header.motionVector0().resolved()) {
@@ -1381,22 +1372,6 @@ public final class FrameReconstructor {
             }
             if (header.interIntra() && !InterIntraMasks.supportsInterIntra(header.size())) {
                 throw new IllegalStateException("Inter-intra reconstruction encountered an unsupported block size");
-            }
-            requireReferenceSurfaceSnapshot(
-                    referenceSurfaceSnapshots,
-                    frameHeader,
-                    chromaFormat,
-                    bitDepth,
-                    header.referenceFrame0()
-            );
-            if (header.compoundReference()) {
-                requireReferenceSurfaceSnapshot(
-                        referenceSurfaceSnapshots,
-                        frameHeader,
-                        chromaFormat,
-                        bitDepth,
-                        header.referenceFrame1()
-                );
             }
         }
     }
@@ -5041,10 +5016,13 @@ public final class FrameReconstructor {
         FrameHeader.FrameSize referenceSize = nonNullSnapshot.frameHeader().frameSize();
         int referenceWidth = referenceSize.upscaledWidth();
         int referenceHeight = referenceSize.height();
+        if (referenceWidth == currentWidth && referenceHeight == currentHeight) {
+            return IDENTITY_REFERENCE_SCALE;
+        }
         return new ReferenceScale(
                 referenceScaleFactor(referenceWidth, currentWidth),
                 referenceScaleFactor(referenceHeight, currentHeight),
-                referenceWidth != currentWidth || referenceHeight != currentHeight
+                true
         );
     }
 

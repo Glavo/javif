@@ -117,7 +117,7 @@ public final class TileTransformLayoutReader {
             variableLumaTransformTree = interTransformResult.variableTransformTree();
         }
 
-        return new TransformLayout(
+        return TransformLayout.fromOwnedUnits(
                 framePosition(position),
                 size,
                 visibleWidth4,
@@ -310,9 +310,7 @@ public final class TileTransformLayoutReader {
 
         TransformSize finalTransformSize = split ? TransformSize.TX_4X4 : transformSize;
         neighborContext.updateInterTransformContext(position, visibleWidth4, visibleHeight4, finalTransformSize);
-        for (TransformUnit unit : tileUniformUnits(position, visibleWidth4, visibleHeight4, finalTransformSize)) {
-            destination.add(unit);
-        }
+        appendUniformUnits(destination, position, visibleWidth4, visibleHeight4, finalTransformSize);
     }
 
     /// Tiles one visible block span with repeated luma transform units in AV1 processing order.
@@ -333,14 +331,59 @@ public final class TileTransformLayoutReader {
     ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        List<TransformUnit> units = new ArrayList<>();
+        TransformUnit[] units = new TransformUnit[tiledUnitCount(
+                visibleWidth4,
+                visibleHeight4,
+                TRANSFORM_REGION_SIZE4,
+                TRANSFORM_REGION_SIZE4,
+                nonNullTransformSize.width4(),
+                nonNullTransformSize.height4()
+        )];
+        int unitIndex = 0;
         for (int regionY4 = 0; regionY4 < visibleHeight4; regionY4 += TRANSFORM_REGION_SIZE4) {
             int regionEndY4 = Math.min(regionY4 + TRANSFORM_REGION_SIZE4, visibleHeight4);
             for (int regionX4 = 0; regionX4 < visibleWidth4; regionX4 += TRANSFORM_REGION_SIZE4) {
                 int regionEndX4 = Math.min(regionX4 + TRANSFORM_REGION_SIZE4, visibleWidth4);
                 for (int y4 = regionY4; y4 < regionEndY4; y4 += nonNullTransformSize.height4()) {
                     for (int x4 = regionX4; x4 < regionEndX4; x4 += nonNullTransformSize.width4()) {
-                        units.add(new TransformUnit(
+                        units[unitIndex++] = new TransformUnit(
+                                new BlockPosition(
+                                        nonNullPosition.x4() + x4 + frameOffsetX4,
+                                        nonNullPosition.y4() + y4 + frameOffsetY4
+                                ),
+                                nonNullTransformSize
+                        );
+                    }
+                }
+            }
+        }
+        return units;
+    }
+
+    /// Appends repeated luma transform units in AV1 processing order.
+    ///
+    /// @param destination the destination list
+    /// @param position the local tile-relative origin of the owning block
+    /// @param visibleWidth4 the visible block width in 4x4 units
+    /// @param visibleHeight4 the visible block height in 4x4 units
+    /// @param transformSize the repeated luma transform size
+    private void appendUniformUnits(
+            List<TransformUnit> destination,
+            BlockPosition position,
+            int visibleWidth4,
+            int visibleHeight4,
+            TransformSize transformSize
+    ) {
+        List<TransformUnit> nonNullDestination = Objects.requireNonNull(destination, "destination");
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        for (int regionY4 = 0; regionY4 < visibleHeight4; regionY4 += TRANSFORM_REGION_SIZE4) {
+            int regionEndY4 = Math.min(regionY4 + TRANSFORM_REGION_SIZE4, visibleHeight4);
+            for (int regionX4 = 0; regionX4 < visibleWidth4; regionX4 += TRANSFORM_REGION_SIZE4) {
+                int regionEndX4 = Math.min(regionX4 + TRANSFORM_REGION_SIZE4, visibleWidth4);
+                for (int y4 = regionY4; y4 < regionEndY4; y4 += nonNullTransformSize.height4()) {
+                    for (int x4 = regionX4; x4 < regionEndX4; x4 += nonNullTransformSize.width4()) {
+                        nonNullDestination.add(new TransformUnit(
                                 new BlockPosition(
                                         nonNullPosition.x4() + x4 + frameOffsetX4,
                                         nonNullPosition.y4() + y4 + frameOffsetY4
@@ -351,7 +394,6 @@ public final class TileTransformLayoutReader {
                 }
             }
         }
-        return units.toArray(new TransformUnit[0]);
     }
 
     /// Tiles one visible block span with chroma transform units in AV1 processing order.
@@ -391,25 +433,63 @@ public final class TileTransformLayoutReader {
         );
         int regionWidthPixels = (TRANSFORM_REGION_SIZE4 << 2) >> subsamplingX;
         int regionHeightPixels = (TRANSFORM_REGION_SIZE4 << 2) >> subsamplingY;
-        List<TransformUnit> units = new ArrayList<>();
+        TransformUnit[] units = new TransformUnit[tiledUnitCount(
+                visibleChromaWidthPixels,
+                visibleChromaHeightPixels,
+                regionWidthPixels,
+                regionHeightPixels,
+                nonNullTransformSize.widthPixels(),
+                nonNullTransformSize.heightPixels()
+        )];
+        int unitIndex = 0;
         for (int regionY = 0; regionY < visibleChromaHeightPixels; regionY += regionHeightPixels) {
             int regionEndY = Math.min(regionY + regionHeightPixels, visibleChromaHeightPixels);
             for (int regionX = 0; regionX < visibleChromaWidthPixels; regionX += regionWidthPixels) {
                 int regionEndX = Math.min(regionX + regionWidthPixels, visibleChromaWidthPixels);
                 for (int y = regionY; y < regionEndY; y += nonNullTransformSize.heightPixels()) {
                     for (int x = regionX; x < regionEndX; x += nonNullTransformSize.widthPixels()) {
-                        units.add(new TransformUnit(
+                        units[unitIndex++] = new TransformUnit(
                                 new BlockPosition(
                                         originX4 + ((x >> 2) << subsamplingX) + frameOffsetX4,
                                         originY4 + ((y >> 2) << subsamplingY) + frameOffsetY4
                                 ),
                                 nonNullTransformSize
-                        ));
+                        );
                     }
                 }
             }
         }
-        return units.toArray(new TransformUnit[0]);
+        return units;
+    }
+
+    /// Returns the number of repeated units produced by region-local transform tiling.
+    ///
+    /// @param visibleWidth the visible width in the caller's coordinate units
+    /// @param visibleHeight the visible height in the caller's coordinate units
+    /// @param regionWidth the processing-region width in the same units
+    /// @param regionHeight the processing-region height in the same units
+    /// @param unitWidth the transform-unit width in the same units
+    /// @param unitHeight the transform-unit height in the same units
+    /// @return the exact number of transform units required to cover the visible span
+    private static int tiledUnitCount(
+            int visibleWidth,
+            int visibleHeight,
+            int regionWidth,
+            int regionHeight,
+            int unitWidth,
+            int unitHeight
+    ) {
+        int count = 0;
+        for (int regionY = 0; regionY < visibleHeight; regionY += regionHeight) {
+            int currentRegionHeight = Math.min(regionHeight, visibleHeight - regionY);
+            int verticalUnits = (currentRegionHeight + unitHeight - 1) / unitHeight;
+            for (int regionX = 0; regionX < visibleWidth; regionX += regionWidth) {
+                int currentRegionWidth = Math.min(regionWidth, visibleWidth - regionX);
+                int horizontalUnits = (currentRegionWidth + unitWidth - 1) / unitWidth;
+                count += horizontalUnits * verticalUnits;
+            }
+        }
+        return count;
     }
 
     /// Returns one tile-local position translated into the retained frame coordinate space.

@@ -298,17 +298,29 @@ public final class TilePartitionTreeReader {
             PartitionType partitionType,
             @Nullable Node... children
     ) {
-        List<Node> visibleChildren = new ArrayList<>(children.length);
+        int visibleChildCount = 0;
         for (Node child : children) {
             if (child != null) {
-                visibleChildren.add(child);
+                visibleChildCount++;
+            }
+        }
+        Node[] visibleChildren;
+        if (visibleChildCount == children.length) {
+            visibleChildren = children;
+        } else {
+            visibleChildren = new Node[visibleChildCount];
+            int destinationIndex = 0;
+            for (Node child : children) {
+                if (child != null) {
+                    visibleChildren[destinationIndex++] = child;
+                }
             }
         }
         return new PartitionNode(
                 position.offset(frameOffsetX4, frameOffsetY4),
                 level.squareSize(),
                 partitionType,
-                visibleChildren.toArray(new Node[0]),
+                visibleChildren,
                 false
         );
     }

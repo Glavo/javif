@@ -52,6 +52,33 @@ public final class ResidualLayout {
         this(position, blockSize, lumaUnits, chromaUUnits, chromaVUnits, true);
     }
 
+    /// Creates one residual layout by taking exclusive ownership of all unit arrays.
+    ///
+    /// The caller must not access or modify any unit array after this method returns.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns this residual layout
+    /// @param lumaUnits the exclusively owned luma transform residual units in bitstream order
+    /// @param chromaUUnits the exclusively owned chroma U transform residual units in bitstream order
+    /// @param chromaVUnits the exclusively owned chroma V transform residual units in bitstream order
+    /// @return one residual layout backed by the supplied unit arrays
+    public static ResidualLayout fromOwnedUnits(
+            BlockPosition position,
+            BlockSize blockSize,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits
+    ) {
+        return new ResidualLayout(
+                position,
+                blockSize,
+                lumaUnits,
+                chromaUUnits,
+                chromaVUnits,
+                false
+        );
+    }
+
     /// Creates one residual layout with copied or exclusively transferred unit arrays.
     ///
     /// @param position the local tile-relative luma-grid origin

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `BlockNeighborContext`.
@@ -94,6 +95,8 @@ final class BlockNeighborContextTest {
         assertEquals(0, context.aboveChromaPaletteSize(0));
         assertEquals(20, context.abovePaletteEntry(0, 0, 1));
         assertEquals(30, context.leftPaletteEntry(0, 0, 2));
+        assertThrows(IndexOutOfBoundsException.class, () -> context.abovePaletteEntry(0, 0, 4));
+        assertThrows(IndexOutOfBoundsException.class, () -> context.leftPaletteEntry(1, 0, 0));
 
         context.updatePartition(position, 8, 0x10, 0x18);
         assertEquals(2, context.partitionContext(3, new BlockPosition(0, 8)));

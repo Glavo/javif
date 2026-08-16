@@ -228,7 +228,7 @@ public final class TileResidualSyntaxReader {
                 }
             }
         }
-        return new ResidualLayout(
+        return ResidualLayout.fromOwnedUnits(
                 nonNullTransformLayout.position(),
                 nonNullTransformLayout.blockSize(),
                 residualUnits,

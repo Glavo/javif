@@ -80,6 +80,9 @@ public final class RestorationApplier {
             {2, 22, 0, -1}
     };
 
+    /// The dav1d `sgr_x_by_x` reciprocal values indexed by normalized variance.
+    private static final int @Unmodifiable [] SELF_GUIDED_X_BY_X = createSelfGuidedXByXTable();
+
     /// Applies restoration to one decoded frame.
     ///
     /// @param decodedPlanes the decoded planes after CDEF
@@ -488,11 +491,12 @@ public final class RestorationApplier {
                     : null;
             int weight0 = radius2Filter != null ? projection[0] : 0;
             int weight1 = radius1Filter != null ? 128 - projection[0] - projection[1] : 0;
+            int[] baseSamples = workspace.sourceRow(chunkWidth);
             for (int y = startY; y < endY; y++) {
                 int localY = y - startY;
-                for (int x = chunkStartX; x < chunkEndX; x++) {
-                    int localX = x - chunkStartX;
-                    int base = source.sample(x, y);
+                source.copyExtendedRow(chunkStartX, y, chunkWidth, baseSamples, 0);
+                for (int localX = 0; localX < chunkWidth; localX++) {
+                    int base = baseSamples[localX];
                     int adjustment = 0;
                     if (radius2Filter != null && weight0 != 0) {
                         adjustment += weight0 * radius2Filter.residual5(localX, localY, base);
@@ -500,10 +504,25 @@ public final class RestorationApplier {
                     if (radius1Filter != null && weight1 != 0) {
                         adjustment += weight1 * radius1Filter.residual3(localX, localY, base);
                     }
-                    destination.setSample(x, y, base + round2(adjustment, SELF_GUIDED_WEIGHT_BITS));
+                    destination.setSample(
+                            chunkStartX + localX,
+                            y,
+                            base + round2(adjustment, SELF_GUIDED_WEIGHT_BITS)
+                    );
                 }
             }
         }
+    }
+
+    /// Creates the immutable dav1d `sgr_x_by_x` reciprocal table.
+    ///
+    /// @return all reciprocal values for normalized variance indices `[0, 255]`
+    private static int[] createSelfGuidedXByXTable() {
+        int[] values = new int[SELF_GUIDED_MAX_Z + 1];
+        for (int z = 0; z < SELF_GUIDED_MAX_Z; z++) {
+            values[z] = Math.min(255, (256 + (z >> 1)) / (z + 1));
+        }
+        return values;
     }
 
     /// Fills one symmetric seven-tap Wiener filter kernel.
@@ -804,16 +823,14 @@ public final class RestorationApplier {
             return round2(weightedA - weightedB * sourceSample, SELF_GUIDED_FILTER_5_SINGLE_BITS);
         }
 
-        /// Returns one clamped field value.
+        /// Returns one field value from the stored one-sample halo.
         ///
         /// @param values the field storage
-        /// @param x the sample X coordinate
-        /// @param y the sample Y coordinate
-        /// @return one clamped field value
-        private int value(int[] values, int x, int y) {
-            int clampedX = clamp(x, -1, width);
-            int clampedY = clamp(y, -1, height);
-            return values[(clampedY + 1) * (width + 2) + clampedX + 1];
+        /// @param x the sample X coordinate in `[-1, width]`
+        /// @param y the sample Y coordinate in `[-1, height]`
+        /// @return one field value
+        private int fieldValue(int[] values, int x, int y) {
+            return values[(y + 1) * (width + 2) + x + 1];
         }
 
         /// Returns the dav1d eight-neighbor weighted sum for one field.
@@ -823,15 +840,15 @@ public final class RestorationApplier {
         /// @param y the sample Y coordinate
         /// @return the weighted field sum
         private int eightNeighborWeight(int[] values, int x, int y) {
-            return (value(values, x, y)
-                    + value(values, x - 1, y)
-                    + value(values, x + 1, y)
-                    + value(values, x, y - 1)
-                    + value(values, x, y + 1)) * 4
-                    + (value(values, x - 1, y - 1)
-                    + value(values, x + 1, y - 1)
-                    + value(values, x - 1, y + 1)
-                    + value(values, x + 1, y + 1)) * 3;
+            return (fieldValue(values, x, y)
+                    + fieldValue(values, x - 1, y)
+                    + fieldValue(values, x + 1, y)
+                    + fieldValue(values, x, y - 1)
+                    + fieldValue(values, x, y + 1)) * 4
+                    + (fieldValue(values, x - 1, y - 1)
+                    + fieldValue(values, x + 1, y - 1)
+                    + fieldValue(values, x - 1, y + 1)
+                    + fieldValue(values, x + 1, y + 1)) * 3;
         }
 
         /// Returns the dav1d paired-row weighted sum for one 5x5 field.
@@ -843,11 +860,11 @@ public final class RestorationApplier {
         private int sixNeighborPairWeight(int[] values, int x, int y) {
             int topY = y - 1;
             int bottomY = y + 1;
-            return (value(values, x, topY) + value(values, x, bottomY)) * 6
-                    + (value(values, x - 1, topY)
-                    + value(values, x + 1, topY)
-                    + value(values, x - 1, bottomY)
-                    + value(values, x + 1, bottomY)) * 5;
+            return (fieldValue(values, x, topY) + fieldValue(values, x, bottomY)) * 6
+                    + (fieldValue(values, x - 1, topY)
+                    + fieldValue(values, x + 1, topY)
+                    + fieldValue(values, x - 1, bottomY)
+                    + fieldValue(values, x + 1, bottomY)) * 5;
         }
 
         /// Returns the dav1d single-row weighted sum for one 5x5 field.
@@ -857,8 +874,8 @@ public final class RestorationApplier {
         /// @param y the sample Y coordinate
         /// @return the weighted field sum
         private int sixNeighborSingleWeight(int[] values, int x, int y) {
-            return value(values, x, y) * 6
-                    + (value(values, x - 1, y) + value(values, x + 1, y)) * 5;
+            return fieldValue(values, x, y) * 6
+                    + (fieldValue(values, x - 1, y) + fieldValue(values, x + 1, y)) * 5;
         }
 
         /// Computes the inverted dav1d A/B projection values for one box.
@@ -882,7 +899,7 @@ public final class RestorationApplier {
             int scaledSum = roundForBitDepth(sum, bitDepthShift);
             long variance = Math.max((long) scaledSumSquares * count - (long) scaledSum * scaledSum, 0L);
             int z = (int) Math.min(SELF_GUIDED_MAX_Z, (variance * strength + (1 << 19)) >> 20);
-            int xByX = selfGuidedXByX(z);
+            int xByX = SELF_GUIDED_X_BY_X[z];
             int a = (int) (((long) xByX * sum * oneByX + (1 << 11)) >> 12);
             return new Projection(a, xByX);
         }
@@ -899,16 +916,6 @@ public final class RestorationApplier {
             return (value + ((1 << bits) >> 1)) >> bits;
         }
 
-        /// Returns one entry from dav1d's `sgr_x_by_x` table.
-        ///
-        /// @param z the clamped variance index
-        /// @return the self-guided reciprocal table value
-        private static int selfGuidedXByX(int z) {
-            if (z == SELF_GUIDED_MAX_Z) {
-                return 0;
-            }
-            return Math.min(255, (256 + (z >> 1)) / (z + 1));
-        }
     }
 
     /// Inverted self-guided projection values.

@@ -2357,7 +2357,8 @@ final class InverseTransformer {
     private int clip(long value) {
         // Every supported stage range contains the signed 16-bit domain. Most transform
         // intermediates stay inside it, so avoid consulting the active stage state there.
-        if (value >= Short.MIN_VALUE && value <= Short.MAX_VALUE) {
+        // A narrowing round trip checks both signed bounds with one comparison.
+        if ((short) value == value) {
             return (int) value;
         }
         return clipToRange(value, activeClipRange);
