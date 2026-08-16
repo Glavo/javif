@@ -10,7 +10,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Stores the compact syntax state required when a decoded frame remains in a reference slot.
@@ -44,7 +43,7 @@ public final class ReferenceFrameSyntaxState {
     /// @return a compact reference state using the result's saved frame CDF
     public static ReferenceFrameSyntaxState from(FrameSyntaxDecodeResult syntaxDecodeResult) {
         FrameSyntaxDecodeResult checkedResult = Objects.requireNonNull(syntaxDecodeResult, "syntaxDecodeResult");
-        return from(checkedResult, checkedResult.savedFrameCdfContext());
+        return fromOwnedSavedFrameCdfContext(checkedResult, checkedResult.savedFrameCdfContext());
     }
 
     /// Creates a compact reference state with an explicitly selected saved frame CDF.
@@ -55,6 +54,35 @@ public final class ReferenceFrameSyntaxState {
     public static ReferenceFrameSyntaxState from(
             FrameSyntaxDecodeResult syntaxDecodeResult,
             CdfContext savedFrameCdfContext
+    ) {
+        return fromResult(syntaxDecodeResult, savedFrameCdfContext, true);
+    }
+
+    /// Creates compact reference state by taking ownership of a fresh saved frame CDF.
+    ///
+    /// The caller must not access or modify `ownedSavedFrameCdfContext` after this method returns.
+    /// Other retained state is obtained as independent snapshots from `syntaxDecodeResult`.
+    ///
+    /// @param syntaxDecodeResult the complete structural decode result
+    /// @param ownedSavedFrameCdfContext the fresh CDF context transferred to the reference state
+    /// @return compact reference state backed by the transferred saved CDF
+    public static ReferenceFrameSyntaxState fromOwnedSavedFrameCdfContext(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            CdfContext ownedSavedFrameCdfContext
+    ) {
+        return fromResult(syntaxDecodeResult, ownedSavedFrameCdfContext, false);
+    }
+
+    /// Creates compact reference state from one structural result.
+    ///
+    /// @param syntaxDecodeResult the complete structural decode result
+    /// @param savedFrameCdfContext the copied or transferred saved frame CDF
+    /// @param copySavedFrameCdfContext whether to copy the supplied saved frame CDF
+    /// @return compact reference state independent of the structural result
+    private static ReferenceFrameSyntaxState fromResult(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            CdfContext savedFrameCdfContext,
+            boolean copySavedFrameCdfContext
     ) {
         FrameSyntaxDecodeResult checkedResult = Objects.requireNonNull(syntaxDecodeResult, "syntaxDecodeResult");
         FrameAssembly assembly = checkedResult.assembly();
@@ -72,11 +100,13 @@ public final class ReferenceFrameSyntaxState {
                 referenceFrameHeaders,
                 checkedResult.decodedTemporalMotionFields(),
                 checkedResult.segmentIdMap(),
-                savedFrameCdfContext
+                copySavedFrameCdfContext
+                        ? Objects.requireNonNull(savedFrameCdfContext, "savedFrameCdfContext").copy()
+                        : Objects.requireNonNull(savedFrameCdfContext, "savedFrameCdfContext")
         );
     }
 
-    /// Creates one validated compact reference state.
+    /// Creates one validated compact reference state from freshly owned snapshots.
     ///
     /// @param sequenceHeader the sequence header active for the stored frame
     /// @param frameHeader the stored frame header
@@ -101,7 +131,7 @@ public final class ReferenceFrameSyntaxState {
         if (checkedHeaders.length != 8) {
             throw new IllegalArgumentException("referenceFrameHeaders.length != 8: " + checkedHeaders.length);
         }
-        this.referenceFrameHeaders = Arrays.copyOf(checkedHeaders, checkedHeaders.length);
+        this.referenceFrameHeaders = checkedHeaders;
 
         TileDecodeContext.TemporalMotionField[] checkedFields = Objects.requireNonNull(
                 decodedTemporalMotionFields,
@@ -113,15 +143,15 @@ public final class ReferenceFrameSyntaxState {
                     "decodedTemporalMotionFields.length != tile count: " + checkedFields.length
             );
         }
-        this.decodedTemporalMotionFields = new TileDecodeContext.TemporalMotionField[checkedFields.length];
         for (int index = 0; index < checkedFields.length; index++) {
-            this.decodedTemporalMotionFields[index] = Objects.requireNonNull(
+            Objects.requireNonNull(
                     checkedFields[index],
                     "decodedTemporalMotionFields[" + index + "]"
-            ).copy();
+            );
         }
-        this.segmentIdMap = Objects.requireNonNull(segmentIdMap, "segmentIdMap").copy();
-        this.savedFrameCdfContext = Objects.requireNonNull(savedFrameCdfContext, "savedFrameCdfContext").copy();
+        this.decodedTemporalMotionFields = checkedFields;
+        this.segmentIdMap = Objects.requireNonNull(segmentIdMap, "segmentIdMap");
+        this.savedFrameCdfContext = Objects.requireNonNull(savedFrameCdfContext, "savedFrameCdfContext");
     }
 
     /// Returns the sequence header active for the stored frame.
@@ -159,6 +189,16 @@ public final class ReferenceFrameSyntaxState {
     /// @return the saved frame CDF
     public CdfContext savedFrameCdfContext() {
         return savedFrameCdfContext.copy();
+    }
+
+    /// Returns the internal saved CDF template for immediate package-local copying.
+    ///
+    /// The caller must not modify or retain the returned context. This view exists so tile setup
+    /// can copy the immutable template once instead of first creating an intermediate snapshot.
+    ///
+    /// @return the internal saved frame CDF template
+    CdfContext savedFrameCdfContextTemplate() {
+        return savedFrameCdfContext;
     }
 
     /// Returns the temporal motion block at one frame-relative 8x8 coordinate.

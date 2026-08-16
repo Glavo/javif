@@ -675,6 +675,9 @@ final class FramePostprocessorTest {
 
         DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
+        assertSame(decodedPlanes.lumaPlane(), postprocessed.lumaPlane());
+        assertNotSame(decodedPlanes.chromaUPlane(), postprocessed.chromaUPlane());
+        assertSame(decodedPlanes.chromaVPlane(), postprocessed.chromaVPlane());
         int[] expectedChromaRow = new int[]{60, 60, 60, 60, 60, 60, 61, 63, 65, 67, 68, 68, 68, 68, 68, 68};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
             for (int x = 0; x < decodedPlanes.codedWidth(); x++) {

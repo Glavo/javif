@@ -109,8 +109,12 @@ final class FrameSyntaxDecoderTest {
         assertEquals(0, restorationUnitMap.rows(1));
         assertNotNull(unit);
         assertEquals(FrameHeader.RestorationType.WIENER, unit.type());
-        assertArrayEquals(new int[]{4, -7, 7}, unit.wienerCoefficients()[0]);
-        assertArrayEquals(new int[]{1, -10, 13}, unit.wienerCoefficients()[1]);
+        assertEquals(4, unit.wienerCoefficient(0, 0));
+        assertEquals(-7, unit.wienerCoefficient(0, 1));
+        assertEquals(7, unit.wienerCoefficient(0, 2));
+        assertEquals(1, unit.wienerCoefficient(1, 0));
+        assertEquals(-10, unit.wienerCoefficient(1, 1));
+        assertEquals(13, unit.wienerCoefficient(1, 2));
         assertEquals(BlockSize.SIZE_64X64, result.tileRoots(0)[0].size());
     }
 
@@ -224,6 +228,20 @@ final class FrameSyntaxDecoderTest {
         CdfContext savedCdf = state.savedFrameCdfContext();
         int savedSkipThreshold = savedCdf.mutableSkipCdf(0)[0];
         savedCdf.mutableSkipCdf(0)[0] = 32000;
+        assertEquals(savedSkipThreshold, state.savedFrameCdfContext().mutableSkipCdf(0)[0]);
+    }
+
+    /// Verifies that the public explicit-CDF factory does not retain caller-owned mutable state.
+    @Test
+    void compactReferenceStateCopiesExplicitSavedCdf() {
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+        CdfContext savedCdf = CdfContext.createDefault();
+        int savedSkipThreshold = savedCdf.mutableSkipCdf(0)[0];
+
+        ReferenceFrameSyntaxState state = ReferenceFrameSyntaxState.from(result, savedCdf);
+        savedCdf.mutableSkipCdf(0)[0] = 32000;
+
         assertEquals(savedSkipThreshold, state.savedFrameCdfContext().mutableSkipCdf(0)[0]);
     }
 

@@ -344,11 +344,10 @@ final class RestorationApplier {
             int endY,
             RestorationWorkspace workspace
     ) {
-        int[][] coefficients = unit.wienerCoefficients();
         int[] horizontalKernel = workspace.horizontalWienerKernel;
         int[] verticalKernel = workspace.verticalWienerKernel;
-        fillWienerKernel(coefficients[0], horizontalKernel);
-        fillWienerKernel(coefficients[1], verticalKernel);
+        fillWienerKernel(unit, 0, horizontalKernel);
+        fillWienerKernel(unit, 1, verticalKernel);
 
         int width = endX - startX;
         int height = endY - startY;
@@ -427,7 +426,8 @@ final class RestorationApplier {
             RestorationWorkspace workspace
     ) {
         int @Unmodifiable [] params = SELF_GUIDED_PARAMS[unit.selfGuidedSet()];
-        int @Unmodifiable [] projection = unit.selfGuidedProjectionCoefficients();
+        int projection0 = unit.selfGuidedProjectionCoefficient(0);
+        int projection1 = unit.selfGuidedProjectionCoefficient(1);
         for (int chunkStartX = startX; chunkStartX < endX; chunkStartX += processingUnitWidth) {
             int chunkEndX = Math.min(endX, chunkStartX + processingUnitWidth);
             int chunkWidth = chunkEndX - chunkStartX;
@@ -440,8 +440,8 @@ final class RestorationApplier {
                     ? workspace.radius1Intermediate.compute(
                             source, chunkStartX, startY, chunkWidth, stripeHeight, 1, params[3])
                     : null;
-            int weight0 = radius2Filter != null ? projection[0] : 0;
-            int weight1 = radius1Filter != null ? 128 - projection[0] - projection[1] : 0;
+            int weight0 = radius2Filter != null ? projection0 : 0;
+            int weight1 = radius1Filter != null ? 128 - projection0 - projection1 : 0;
             int[] baseSamples = workspace.sourceRow(chunkWidth);
             for (int y = startY; y < endY; y++) {
                 int localY = y - startY;
@@ -478,12 +478,13 @@ final class RestorationApplier {
 
     /// Fills one symmetric seven-tap Wiener filter kernel.
     ///
-    /// @param coefficients the three coded Wiener coefficients
+    /// @param unit the decoded Wiener restoration unit
+    /// @param pass the pass index, where zero is horizontal and one is vertical
     /// @param kernel the seven-element destination kernel
-    private static void fillWienerKernel(int @Unmodifiable [] coefficients, int[] kernel) {
-        int c0 = coefficients[0];
-        int c1 = coefficients[1];
-        int c2 = coefficients[2];
+    private static void fillWienerKernel(RestorationUnit unit, int pass, int[] kernel) {
+        int c0 = unit.wienerCoefficient(pass, 0);
+        int c1 = unit.wienerCoefficient(pass, 1);
+        int c2 = unit.wienerCoefficient(pass, 2);
         kernel[0] = c0;
         kernel[1] = c1;
         kernel[2] = c2;

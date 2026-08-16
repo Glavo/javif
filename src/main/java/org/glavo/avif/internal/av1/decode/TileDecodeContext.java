@@ -237,8 +237,70 @@ public final class TileDecodeContext {
             SegmentIdMap currentSegmentIdMap,
             @Nullable SegmentIdMap referenceSegmentIdMap
     ) {
+        return create(
+                assembly,
+                tileIndex,
+                baseCdfContext,
+                referenceMotionVectorProjection,
+                currentSegmentIdMap,
+                referenceSegmentIdMap,
+                true
+        );
+    }
+
+    /// Creates tile-local decode state by taking ownership of a fresh CDF context.
+    ///
+    /// The caller must not access or modify `ownedCdfContext` after this method returns. The
+    /// immutable projection is shared, and the segment-id maps retain their existing ownership.
+    ///
+    /// @param assembly the frame assembly that owns the tile
+    /// @param tileIndex the zero-based tile index within the frame
+    /// @param ownedCdfContext the fresh CDF context transferred to this tile
+    /// @param referenceMotionVectorProjection the immutable current-frame temporal projection
+    /// @param currentSegmentIdMap the mutable current-frame segment-id map shared by all tiles
+    /// @param referenceSegmentIdMap the immutable primary-reference segment-id map, or `null`
+    /// @return tile-local decode state for the selected tile
+    static TileDecodeContext createWithOwnedCdfContext(
+            FrameAssembly assembly,
+            int tileIndex,
+            CdfContext ownedCdfContext,
+            ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            SegmentIdMap currentSegmentIdMap,
+            @Nullable SegmentIdMap referenceSegmentIdMap
+    ) {
+        return create(
+                assembly,
+                tileIndex,
+                ownedCdfContext,
+                referenceMotionVectorProjection,
+                currentSegmentIdMap,
+                referenceSegmentIdMap,
+                false
+        );
+    }
+
+    /// Creates tile-local decode state with either copied or transferred CDF storage.
+    ///
+    /// @param assembly the frame assembly that owns the tile
+    /// @param tileIndex the zero-based tile index within the frame
+    /// @param baseCdfContext the base or transferred CDF context
+    /// @param referenceMotionVectorProjection the immutable current-frame temporal projection
+    /// @param currentSegmentIdMap the mutable current-frame segment-id map shared by all tiles
+    /// @param referenceSegmentIdMap the immutable primary-reference segment-id map, or `null`
+    /// @param copyCdfContext whether to copy the supplied CDF context
+    /// @return tile-local decode state for the selected tile
+    private static TileDecodeContext create(
+            FrameAssembly assembly,
+            int tileIndex,
+            CdfContext baseCdfContext,
+            ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            SegmentIdMap currentSegmentIdMap,
+            @Nullable SegmentIdMap referenceSegmentIdMap,
+            boolean copyCdfContext
+    ) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
-        CdfContext copiedCdfContext = Objects.requireNonNull(baseCdfContext, "baseCdfContext").copy();
+        CdfContext checkedCdfContext = Objects.requireNonNull(baseCdfContext, "baseCdfContext");
+        CdfContext tileCdfContext = copyCdfContext ? checkedCdfContext.copy() : checkedCdfContext;
         ReferenceMotionVectorProjection nonNullReferenceMotionVectorProjection = Objects.requireNonNull(
                 referenceMotionVectorProjection,
                 "referenceMotionVectorProjection"
@@ -279,7 +341,7 @@ public final class TileDecodeContext {
                 frameHeader,
                 tileBitstream,
                 tileBitstream.openMsacDecoder(frameHeader.disableCdfUpdate()),
-                copiedCdfContext,
+                tileCdfContext,
                 new TemporalMotionField(width8, height8),
                 nonNullReferenceMotionVectorProjection,
                 nonNullCurrentSegmentIdMap,

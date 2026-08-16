@@ -32,6 +32,39 @@ public final class FrameSyntaxDecodeResult {
     /// The final tile-local CDF contexts produced while decoding the current frame.
     private final CdfContext @Unmodifiable [] finalTileCdfContexts;
 
+    /// Creates a frame result by taking ownership of freshly decoded frame-relative state.
+    ///
+    /// The caller must not access or modify any supplied array, map, field, or CDF context after
+    /// this method returns. This entry point is reserved for the structural decoder's completed
+    /// tile state; public constructors continue to make independent snapshots.
+    ///
+    /// @param assembly the fully assembled frame that was structurally decoded
+    /// @param tileRoots the owned frame-relative partition roots for each tile
+    /// @param decodedTemporalMotionFields the owned tile-local temporal motion fields
+    /// @param restorationUnitMap the owned frame-level loop-restoration unit syntax
+    /// @param finalTileCdfContexts the owned final tile-local CDF contexts
+    /// @param segmentIdMap the owned exact current-frame segment identifiers
+    /// @return a structural frame result backed by the supplied state
+    static FrameSyntaxDecodeResult fromOwnedFrameRelativeState(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.Node[][] tileRoots,
+            TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields,
+            RestorationUnitMap restorationUnitMap,
+            CdfContext[] finalTileCdfContexts,
+            SegmentIdMap segmentIdMap
+    ) {
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                tileRoots,
+                decodedTemporalMotionFields,
+                restorationUnitMap,
+                finalTileCdfContexts,
+                segmentIdMap,
+                true,
+                true
+        );
+    }
+
     /// Creates one structural frame-decode result.
     ///
     /// Final tile CDF contexts default to fresh `CdfContext.createDefault()` copies.
@@ -143,6 +176,38 @@ public final class FrameSyntaxDecodeResult {
             SegmentIdMap segmentIdMap,
             boolean frameRelativeTileRoots
     ) {
+        this(
+                assembly,
+                tileRoots,
+                decodedTemporalMotionFields,
+                restorationUnitMap,
+                finalTileCdfContexts,
+                segmentIdMap,
+                frameRelativeTileRoots,
+                false
+        );
+    }
+
+    /// Creates one structural frame-decode result with configurable internal ownership.
+    ///
+    /// @param assembly the fully assembled frame that was structurally decoded
+    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced by the frame
+    /// @param restorationUnitMap the decoded frame-level loop-restoration unit syntax
+    /// @param finalTileCdfContexts the final tile-local CDF contexts produced by the frame
+    /// @param segmentIdMap the exact current-frame segment identifiers
+    /// @param frameRelativeTileRoots whether `tileRoots` already use frame-relative coordinates
+    /// @param takeOwnership whether all supplied decoded state is freshly owned and may be retained
+    private FrameSyntaxDecodeResult(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.Node[][] tileRoots,
+            TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields,
+            RestorationUnitMap restorationUnitMap,
+            CdfContext[] finalTileCdfContexts,
+            SegmentIdMap segmentIdMap,
+            boolean frameRelativeTileRoots,
+            boolean takeOwnership
+    ) {
         this.assembly = Objects.requireNonNull(assembly, "assembly");
         Objects.requireNonNull(tileRoots, "tileRoots");
         Objects.requireNonNull(decodedTemporalMotionFields, "decodedTemporalMotionFields");
@@ -162,26 +227,44 @@ public final class FrameSyntaxDecodeResult {
         TilePartitionTreeReader.Node[][] normalizedTileRoots = frameRelativeTileRoots
                 ? tileRoots
                 : FrameLocalPartitionTrees.create(assembly, tileRoots);
-        this.tileRoots = new TilePartitionTreeReader.Node[normalizedTileRoots.length][];
         for (int i = 0; i < normalizedTileRoots.length; i++) {
-            TilePartitionTreeReader.Node[] roots = Objects.requireNonNull(
+            Objects.requireNonNull(
                     normalizedTileRoots[i],
                     "tileRoots[" + i + "]"
             );
-            this.tileRoots[i] = Arrays.copyOf(roots, roots.length);
+        }
+        for (int i = 0; i < decodedTemporalMotionFields.length; i++) {
+            Objects.requireNonNull(
+                    decodedTemporalMotionFields[i],
+                    "decodedTemporalMotionFields[" + i + "]"
+            );
+        }
+        for (int i = 0; i < finalTileCdfContexts.length; i++) {
+            Objects.requireNonNull(finalTileCdfContexts[i], "finalTileCdfContexts[" + i + "]");
+        }
+
+        if (takeOwnership) {
+            this.tileRoots = normalizedTileRoots;
+            this.decodedTemporalMotionFields = decodedTemporalMotionFields;
+            this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap");
+            this.segmentIdMap = Objects.requireNonNull(segmentIdMap, "segmentIdMap");
+            this.finalTileCdfContexts = finalTileCdfContexts;
+            return;
+        }
+
+        this.tileRoots = new TilePartitionTreeReader.Node[normalizedTileRoots.length][];
+        for (int i = 0; i < normalizedTileRoots.length; i++) {
+            this.tileRoots[i] = Arrays.copyOf(normalizedTileRoots[i], normalizedTileRoots[i].length);
         }
         this.decodedTemporalMotionFields = new TileDecodeContext.TemporalMotionField[decodedTemporalMotionFields.length];
         for (int i = 0; i < decodedTemporalMotionFields.length; i++) {
-            this.decodedTemporalMotionFields[i] = Objects.requireNonNull(
-                    decodedTemporalMotionFields[i],
-                    "decodedTemporalMotionFields[" + i + "]"
-            ).copy();
+            this.decodedTemporalMotionFields[i] = decodedTemporalMotionFields[i].copy();
         }
         this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap").copy();
         this.segmentIdMap = Objects.requireNonNull(segmentIdMap, "segmentIdMap").copy();
         this.finalTileCdfContexts = new CdfContext[finalTileCdfContexts.length];
         for (int i = 0; i < finalTileCdfContexts.length; i++) {
-            this.finalTileCdfContexts[i] = Objects.requireNonNull(finalTileCdfContexts[i], "finalTileCdfContexts[" + i + "]").copy();
+            this.finalTileCdfContexts[i] = finalTileCdfContexts[i].copy();
         }
     }
 

@@ -138,43 +138,41 @@ final class LoopFilterApplier {
         }
 
         LoopFilterBlockMap blockMap = Objects.requireNonNull(prepared.blockMap, "blockMap");
-        PlaneBuffer luma = PlaneBuffer.create(checkedDecodedPlanes.lumaPlane(), checkedDecodedPlanes.bitDepth());
-        applyPlane(
-                luma,
-                checkedDecodedPlanes.chromaFormat(),
-                blockMap,
-                prepared.sharpness,
-                prepared.activePlaneMask,
-                0
-        );
+        PaddedPlane lumaPlane = checkedDecodedPlanes.lumaPlane();
+        if (prepared.isPlaneActive(0)) {
+            lumaPlane = applyPlane(
+                    lumaPlane,
+                    checkedDecodedPlanes.bitDepth(),
+                    checkedDecodedPlanes.chromaFormat(),
+                    blockMap,
+                    prepared.sharpness,
+                    0
+            );
+        }
 
-        @Nullable PlaneBuffer chromaU = null;
-        @Nullable PlaneBuffer chromaV = null;
+        @Nullable PaddedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
+        @Nullable PaddedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
         if (checkedDecodedPlanes.hasChroma()) {
-            chromaU = PlaneBuffer.create(
-                    Objects.requireNonNull(checkedDecodedPlanes.chromaUPlane(), "decodedPlanes.chromaUPlane()"),
-                    checkedDecodedPlanes.bitDepth()
-            );
-            chromaV = PlaneBuffer.create(
-                    Objects.requireNonNull(checkedDecodedPlanes.chromaVPlane(), "decodedPlanes.chromaVPlane()"),
-                    checkedDecodedPlanes.bitDepth()
-            );
-            applyPlane(
-                    chromaU,
-                    checkedDecodedPlanes.chromaFormat(),
-                    blockMap,
-                    prepared.sharpness,
-                    prepared.activePlaneMask,
-                    1
-            );
-            applyPlane(
-                    chromaV,
-                    checkedDecodedPlanes.chromaFormat(),
-                    blockMap,
-                    prepared.sharpness,
-                    prepared.activePlaneMask,
-                    2
-            );
+            if (prepared.isPlaneActive(1)) {
+                chromaUPlane = applyPlane(
+                        Objects.requireNonNull(chromaUPlane, "decodedPlanes.chromaUPlane()"),
+                        checkedDecodedPlanes.bitDepth(),
+                        checkedDecodedPlanes.chromaFormat(),
+                        blockMap,
+                        prepared.sharpness,
+                        1
+                );
+            }
+            if (prepared.isPlaneActive(2)) {
+                chromaVPlane = applyPlane(
+                        Objects.requireNonNull(chromaVPlane, "decodedPlanes.chromaVPlane()"),
+                        checkedDecodedPlanes.bitDepth(),
+                        checkedDecodedPlanes.chromaFormat(),
+                        blockMap,
+                        prepared.sharpness,
+                        2
+                );
+            }
         }
 
         return new DecodedSurface(
@@ -184,40 +182,40 @@ final class LoopFilterApplier {
                 checkedDecodedPlanes.codedHeight(),
                 checkedDecodedPlanes.renderWidth(),
                 checkedDecodedPlanes.renderHeight(),
-                luma.toDecodedPlane(),
-                chromaU != null ? chromaU.toDecodedPlane() : null,
-                chromaV != null ? chromaV.toDecodedPlane() : null
+                lumaPlane,
+                chromaUPlane,
+                chromaVPlane
         );
     }
 
-    /// Applies both loop-filter passes to one plane.
+    /// Copies one active plane and applies both loop-filter passes.
     ///
-    /// @param plane the mutable plane buffer
+    /// @param plane the immutable source plane
+    /// @param bitDepth the decoded sample bit depth
     /// @param chromaFormat the decoded chroma format
     /// @param blockMap the decoded block and transform map
     /// @param sharpness the frame loop-filter sharpness
-    /// @param activePlaneMask the bit mask of planes with active frame-level filtering
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-    private static void applyPlane(
-            PlaneBuffer plane,
+    /// @return the filtered immutable plane
+    private static PaddedPlane applyPlane(
+            PaddedPlane plane,
+            int bitDepth,
             Av1ChromaFormat chromaFormat,
             LoopFilterBlockMap blockMap,
             int sharpness,
-            int activePlaneMask,
             int planeIndex
     ) {
+        PlaneBuffer destination = PlaneBuffer.create(plane, bitDepth);
         int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(chromaFormat);
         int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(chromaFormat);
-        plane.setProcessingExtent(
-                alignedPlaneBoundaryDimension(plane.width(), subX),
-                alignedPlaneBoundaryDimension(plane.height(), subY)
+        destination.setProcessingExtent(
+                alignedPlaneBoundaryDimension(destination.width(), subX),
+                alignedPlaneBoundaryDimension(destination.height(), subY)
         );
-        if ((activePlaneMask & (1 << planeIndex)) == 0) {
-            return;
-        }
         int[] edgeSamples = new int[14];
-        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 0, edgeSamples);
-        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 1, edgeSamples);
+        applyPass(destination, chromaFormat, blockMap, sharpness, planeIndex, 0, edgeSamples);
+        applyPass(destination, chromaFormat, blockMap, sharpness, planeIndex, 1, edgeSamples);
+        return destination.toDecodedPlane();
     }
 
     /// Applies one vertical or horizontal loop-filter pass to one plane.
@@ -1136,6 +1134,14 @@ final class LoopFilterApplier {
         /// @return whether loop filtering is active
         private boolean active() {
             return blockMap != null;
+        }
+
+        /// Returns whether one image plane has a nonzero frame-level filter.
+        ///
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return whether the selected plane requires loop filtering
+        private boolean isPlaneActive(int planeIndex) {
+            return (activePlaneMask & (1 << Objects.checkIndex(planeIndex, 3))) != 0;
         }
 
         /// Verifies that an operation is applied to the surface for which it was prepared.

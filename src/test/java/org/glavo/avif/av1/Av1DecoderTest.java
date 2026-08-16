@@ -2524,8 +2524,12 @@ final class Av1DecoderTest {
         RestorationUnit unit = restorationUnitMap.unit(0, 0, 0);
         assertNotNull(unit);
         assertEquals(FrameHeader.RestorationType.WIENER, unit.type());
-        assertArrayEquals(new int[]{4, -7, 7}, unit.wienerCoefficients()[0]);
-        assertArrayEquals(new int[]{1, -10, 13}, unit.wienerCoefficients()[1]);
+        assertEquals(4, unit.wienerCoefficient(0, 0));
+        assertEquals(-7, unit.wienerCoefficient(0, 1));
+        assertEquals(7, unit.wienerCoefficient(0, 2));
+        assertEquals(1, unit.wienerCoefficient(1, 0));
+        assertEquals(-10, unit.wienerCoefficient(1, 1));
+        assertEquals(13, unit.wienerCoefficient(1, 2));
     }
 
     /// Asserts that one real parsed high-bit-depth still-picture decode in the requested additional

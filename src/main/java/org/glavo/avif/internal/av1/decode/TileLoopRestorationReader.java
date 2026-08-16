@@ -150,21 +150,21 @@ final class TileLoopRestorationReader {
             return RestorationUnit.none();
         }
         if (unitType == FrameHeader.RestorationType.WIENER) {
-            return RestorationUnit.wiener(readWienerCoefficients(plane));
+            return readWienerUnit(plane);
         }
         if (unitType == FrameHeader.RestorationType.SELF_GUIDED) {
             int set = syntaxReader.readUnsignedBits(4);
-            return RestorationUnit.selfGuided(set, readSelfGuidedProjectionCoefficients(plane, set));
+            return readSelfGuidedUnit(plane, set);
         }
         throw new IllegalStateException("Unsupported concrete restoration unit type: " + unitType);
     }
 
-    /// Reads the Wiener coefficient table and returns it in horizontal/vertical order.
+    /// Reads one Wiener coefficient table into the plane reference state.
     ///
     /// @param plane the plane index
-    /// @return the horizontal and vertical Wiener coefficient table
-    private int[][] readWienerCoefficients(int plane) {
-        int[][] bitstreamCoefficients = new int[2][3];
+    /// @return one decoded Wiener restoration unit
+    private RestorationUnit readWienerUnit(int plane) {
+        int[][] bitstreamCoefficients = referenceWienerCoefficients[plane];
         for (int pass = 0; pass < 2; pass++) {
             int firstCoefficient = plane == 0 ? 0 : 1;
             if (firstCoefficient == 1) {
@@ -173,42 +173,47 @@ final class TileLoopRestorationReader {
             for (int coefficient = firstCoefficient; coefficient < 3; coefficient++) {
                 int value = syntaxReader.readWienerCoefficient(
                         coefficient,
-                        referenceWienerCoefficients[plane][pass][coefficient]
+                        bitstreamCoefficients[pass][coefficient]
                 );
                 bitstreamCoefficients[pass][coefficient] = value;
-                referenceWienerCoefficients[plane][pass][coefficient] = value;
             }
         }
-        return new int[][]{bitstreamCoefficients[1], bitstreamCoefficients[0]};
+        return RestorationUnit.wiener(
+                bitstreamCoefficients[1][0],
+                bitstreamCoefficients[1][1],
+                bitstreamCoefficients[1][2],
+                bitstreamCoefficients[0][0],
+                bitstreamCoefficients[0][1],
+                bitstreamCoefficients[0][2]
+        );
     }
 
-    /// Reads the self-guided projection coefficients.
+    /// Reads one self-guided projection coefficient pair into the plane reference state.
     ///
     /// @param plane the plane index
     /// @param set the self-guided parameter set
-    /// @return the self-guided projection coefficients
-    private int[] readSelfGuidedProjectionCoefficients(int plane, int set) {
+    /// @return one decoded self-guided restoration unit
+    private RestorationUnit readSelfGuidedUnit(int plane, int set) {
         int checkedSet = Objects.checkIndex(set, SELF_GUIDED_PARAMS.length);
-        int[] coefficients = new int[2];
+        int[] coefficients = referenceSelfGuidedProjectionCoefficients[plane];
         for (int coefficient = 0; coefficient < 2; coefficient++) {
             int radius = SELF_GUIDED_PARAMS[checkedSet][coefficient * 2];
             int value;
             if (radius != 0) {
                 value = syntaxReader.readSelfGuidedProjectionCoefficient(
                         coefficient,
-                        referenceSelfGuidedProjectionCoefficients[plane][coefficient]
+                        coefficients[coefficient]
                 );
             } else if (coefficient == 1) {
                 value = syntaxReader.derivedSelfGuidedProjectionCoefficient1(
-                        referenceSelfGuidedProjectionCoefficients[plane][0]
+                        coefficients[0]
                 );
             } else {
                 value = 0;
             }
             coefficients[coefficient] = value;
-            referenceSelfGuidedProjectionCoefficients[plane][coefficient] = value;
         }
-        return coefficients;
+        return RestorationUnit.selfGuided(checkedSet, coefficients[0], coefficients[1]);
     }
 
     /// Returns the chroma horizontal subsampling shift for the active chroma format.

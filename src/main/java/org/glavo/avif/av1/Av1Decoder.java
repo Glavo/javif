@@ -1630,7 +1630,10 @@ public final class Av1Decoder implements AutoCloseable {
                 : cdfReferenceState != null
                 ? cdfReferenceState.savedFrameCdfContext()
                 : CdfContext.createDefault(frameHeader.quantization().baseQIndex());
-        return ReferenceFrameSyntaxState.from(syntaxDecodeResult, storedFrameCdfContext);
+        return ReferenceFrameSyntaxState.fromOwnedSavedFrameCdfContext(
+                syntaxDecodeResult,
+                storedFrameCdfContext
+        );
     }
 
     /// Refreshes any reference slots targeted by the parsed frame header.

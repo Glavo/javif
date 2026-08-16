@@ -125,10 +125,10 @@ public final class FrameSyntaxDecoder {
         for (int tileIndex = 0; tileIndex < tileCount; tileIndex++) {
             tileRoots[tileIndex] = new TilePartitionTreeReader.Node[0];
             decodedTemporalMotionFields[tileIndex] = new TileDecodeContext.TemporalMotionField(0, 0);
-            finalTileCdfContexts[tileIndex] = CdfContext.createDefault(
-                    nonNullAssembly.frameHeader().quantization().baseQIndex()
-            );
             if (selectedTileIndex >= 0 && tileIndex != selectedTileIndex) {
+                finalTileCdfContexts[tileIndex] = CdfContext.createDefault(
+                        nonNullAssembly.frameHeader().quantization().baseQIndex()
+                );
                 continue;
             }
             TileDecodeContext tileContext = createTileContext(
@@ -146,17 +146,16 @@ public final class FrameSyntaxDecoder {
                 throw new InvalidFrameSyntaxException(exception.getMessage(), exception);
             }
             restorationUnitMap.mergeFrom(tileContext.restorationUnitMap());
-            decodedTemporalMotionFields[tileIndex] = tileContext.decodedTemporalMotionField().copy();
-            finalTileCdfContexts[tileIndex] = tileContext.cdfContext().copy();
+            decodedTemporalMotionFields[tileIndex] = tileContext.decodedTemporalMotionField();
+            finalTileCdfContexts[tileIndex] = tileContext.cdfContext();
         }
-        return new FrameSyntaxDecodeResult(
+        return FrameSyntaxDecodeResult.fromOwnedFrameRelativeState(
                 nonNullAssembly,
                 tileRoots,
                 decodedTemporalMotionFields,
                 restorationUnitMap,
                 finalTileCdfContexts,
-                currentSegmentIdMap,
-                true
+                currentSegmentIdMap
         );
     }
 
@@ -177,14 +176,20 @@ public final class FrameSyntaxDecoder {
             @Nullable SegmentIdMap referenceSegmentIdMap,
             @Nullable CdfContext inheritedCdfContext
     ) {
-        @Nullable CdfContext baseCdfContext = inheritedCdfContext;
-        if (baseCdfContext == null) {
-            baseCdfContext = CdfContext.createDefault(assembly.frameHeader().quantization().baseQIndex());
+        if (inheritedCdfContext == null) {
+            return TileDecodeContext.createWithOwnedCdfContext(
+                    assembly,
+                    tileIndex,
+                    CdfContext.createDefault(assembly.frameHeader().quantization().baseQIndex()),
+                    referenceMotionVectorProjection,
+                    currentSegmentIdMap,
+                    referenceSegmentIdMap
+            );
         }
         return TileDecodeContext.create(
                 assembly,
                 tileIndex,
-                baseCdfContext,
+                inheritedCdfContext,
                 referenceMotionVectorProjection,
                 currentSegmentIdMap,
                 referenceSegmentIdMap
@@ -234,6 +239,6 @@ public final class FrameSyntaxDecoder {
         if (referenceCdfFrameSyntaxState == null) {
             return null;
         }
-        return referenceCdfFrameSyntaxState.savedFrameCdfContext();
+        return referenceCdfFrameSyntaxState.savedFrameCdfContextTemplate();
     }
 }
