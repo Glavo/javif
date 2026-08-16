@@ -30,6 +30,9 @@ import java.util.Objects;
 /// probabilities once AC residuals are present.
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
+    /// Shared empty residual-unit sequence for blocks without modeled chroma residuals.
+    private static final TransformResidualUnit @Unmodifiable [] EMPTY_RESIDUAL_UNITS = new TransformResidualUnit[0];
+
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
 
@@ -175,8 +178,12 @@ public final class TileResidualSyntaxReader {
         TransformResidualUnit[] residualUnits = new TransformResidualUnit[nonNullTransformLayout.lumaUnitCount()];
         boolean hasChromaResiduals = nonNullHeader.hasChroma() && nonNullTransformLayout.chromaUnitCount() != 0;
         int chromaUnitCount = hasChromaResiduals ? nonNullTransformLayout.chromaUnitCount() : 0;
-        TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[chromaUnitCount];
-        TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[chromaUnitCount];
+        TransformResidualUnit[] chromaUUnits = chromaUnitCount == 0
+                ? EMPTY_RESIDUAL_UNITS
+                : new TransformResidualUnit[chromaUnitCount];
+        TransformResidualUnit[] chromaVUnits = chromaUnitCount == 0
+                ? EMPTY_RESIDUAL_UNITS
+                : new TransformResidualUnit[chromaUnitCount];
 
         BlockPosition blockPosition = nonNullTransformLayout.position();
         int visibleWidth4 = nonNullTransformLayout.visibleWidth4();
@@ -555,13 +562,14 @@ public final class TileResidualSyntaxReader {
     ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
-        int[] coefficients = new int[16];
+        @Nullable int[] coefficients = endOfBlockIndex > 0 ? new int[16] : null;
         CoefficientLevelGrid levelBytes = coefficientLevelGrid.reset(
                 FOUR_BY_FOUR_LEVEL_GRID_SIZE,
                 FOUR_BY_FOUR_LEVEL_GRID_SIZE
         );
 
         if (endOfBlockIndex > 0) {
+            int[] decodedCoefficients = Objects.requireNonNull(coefficients, "coefficients");
             int lastX = fourByFourLevelX(nonNullTransformType, endOfBlockIndex);
             int lastY = fourByFourLevelY(nonNullTransformType, endOfBlockIndex);
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
@@ -576,7 +584,7 @@ public final class TileResidualSyntaxReader {
                         fourByFourEndOfBlockHighTokenContext(nonNullTransformType, lastX, lastY)
                 );
             }
-            coefficients[fourByFourCoefficientIndex(nonNullTransformType, endOfBlockIndex)] = lastToken;
+            decodedCoefficients[fourByFourCoefficientIndex(nonNullTransformType, endOfBlockIndex)] = lastToken;
             levelBytes.set(lastX, lastY, coefficientLevelByte(lastToken));
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
@@ -594,7 +602,7 @@ public final class TileResidualSyntaxReader {
                             fourByFourHighTokenContext(nonNullTransformType, levelBytes, x, y)
                     );
                 }
-                coefficients[fourByFourCoefficientIndex(nonNullTransformType, scanIndex)] = token;
+                decodedCoefficients[fourByFourCoefficientIndex(nonNullTransformType, scanIndex)] = token;
                 levelBytes.set(x, y, coefficientLevelByte(token));
             }
         }
@@ -612,9 +620,21 @@ public final class TileResidualSyntaxReader {
                     fourByFourDcHighTokenContext(nonNullTransformType, levelBytes)
             );
         }
+        if (endOfBlockIndex == 0) {
+            return createDcOnlyResidualUnit(
+                    nonNullPosition,
+                    TransformSize.TX_4X4,
+                    nonNullTransformType,
+                    visibleWidthPixels,
+                    visibleHeightPixels,
+                    chroma,
+                    dcSignContext,
+                    dcToken
+            );
+        }
 
+        int[] decodedCoefficients = Objects.requireNonNull(coefficients, "coefficients");
         int cumulativeLevel = 0;
-        int signedDcLevel = 0;
         int dcSign = 0;
         if (dcToken != 0) {
             boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
@@ -622,14 +642,13 @@ public final class TileResidualSyntaxReader {
             if (dcToken == 15) {
                 dcToken = maskCoefficientMagnitude(dcToken + syntaxReader.readCoefficientGolomb());
             }
-            signedDcLevel = negative ? -dcToken : dcToken;
-            coefficients[0] = signedDcLevel;
+            decodedCoefficients[0] = negative ? -dcToken : dcToken;
             cumulativeLevel += dcToken;
         }
 
         for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
             int coefficientIndex = fourByFourCoefficientIndex(nonNullTransformType, scanIndex);
-            int token = coefficients[coefficientIndex];
+            int token = decodedCoefficients[coefficientIndex];
             if (token == 0) {
                 continue;
             }
@@ -637,7 +656,7 @@ public final class TileResidualSyntaxReader {
             if (token == 15) {
                 token = maskCoefficientMagnitude(token + syntaxReader.readCoefficientGolomb());
             }
-            coefficients[coefficientIndex] = negative ? -token : token;
+            decodedCoefficients[coefficientIndex] = negative ? -token : token;
             cumulativeLevel += token;
         }
 
@@ -646,7 +665,7 @@ public final class TileResidualSyntaxReader {
                 TransformSize.TX_4X4,
                 nonNullTransformType,
                 endOfBlockIndex,
-                coefficients,
+                decodedCoefficients,
                 visibleWidthPixels,
                 visibleHeightPixels,
                 createNonZeroCoefficientContextByte(cumulativeLevel, dcSign)
@@ -677,9 +696,12 @@ public final class TileResidualSyntaxReader {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
-        int[] coefficients = new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()];
+        @Nullable int[] coefficients = endOfBlockIndex > 0
+                ? new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()]
+                : null;
         CoefficientLevelGrid levelBytes = resetGenericLevelGrid(nonNullTransformSize, nonNullTransformType);
         if (endOfBlockIndex > 0) {
+            int[] decodedCoefficients = Objects.requireNonNull(coefficients, "coefficients");
             int lastX = genericLevelX(nonNullTransformSize, nonNullTransformType, endOfBlockIndex);
             int lastY = genericLevelY(nonNullTransformSize, nonNullTransformType, endOfBlockIndex);
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
@@ -694,7 +716,7 @@ public final class TileResidualSyntaxReader {
                         genericEndOfBlockHighTokenContext(nonNullTransformType, lastX, lastY)
                 );
             }
-            coefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, endOfBlockIndex)] = lastToken;
+            decodedCoefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, endOfBlockIndex)] = lastToken;
             levelBytes.set(lastX, lastY, coefficientLevelByte(lastToken));
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
@@ -712,7 +734,7 @@ public final class TileResidualSyntaxReader {
                             genericHighTokenContext(nonNullTransformType, levelBytes, x, y)
                     );
                 }
-                coefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)] = token;
+                decodedCoefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)] = token;
                 levelBytes.set(x, y, coefficientLevelByte(token));
             }
         }
@@ -730,9 +752,21 @@ public final class TileResidualSyntaxReader {
                     genericDcHighTokenContext(nonNullTransformType, levelBytes)
             );
         }
+        if (endOfBlockIndex == 0) {
+            return createDcOnlyResidualUnit(
+                    nonNullPosition,
+                    nonNullTransformSize,
+                    nonNullTransformType,
+                    visibleWidthPixels,
+                    visibleHeightPixels,
+                    chroma,
+                    dcSignContext,
+                    dcToken
+            );
+        }
 
+        int[] decodedCoefficients = Objects.requireNonNull(coefficients, "coefficients");
         int cumulativeLevel = 0;
-        int signedDcLevel = 0;
         int dcSign = 0;
         if (dcToken != 0) {
             boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
@@ -740,14 +774,13 @@ public final class TileResidualSyntaxReader {
             if (dcToken == 15) {
                 dcToken = maskCoefficientMagnitude(dcToken + syntaxReader.readCoefficientGolomb());
             }
-            signedDcLevel = negative ? -dcToken : dcToken;
-            coefficients[0] = signedDcLevel;
+            decodedCoefficients[0] = negative ? -dcToken : dcToken;
             cumulativeLevel += dcToken;
         }
 
         for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
             int coefficientIndex = coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex);
-            int token = coefficients[coefficientIndex];
+            int token = decodedCoefficients[coefficientIndex];
             if (token == 0) {
                 continue;
             }
@@ -755,7 +788,7 @@ public final class TileResidualSyntaxReader {
             if (token == 15) {
                 token = maskCoefficientMagnitude(token + syntaxReader.readCoefficientGolomb());
             }
-            coefficients[coefficientIndex] = negative ? -token : token;
+            decodedCoefficients[coefficientIndex] = negative ? -token : token;
             cumulativeLevel += token;
         }
 
@@ -764,10 +797,53 @@ public final class TileResidualSyntaxReader {
                 nonNullTransformSize,
                 nonNullTransformType,
                 endOfBlockIndex,
-                coefficients,
+                decodedCoefficients,
                 visibleWidthPixels,
                 visibleHeightPixels,
                 createNonZeroCoefficientContextByte(cumulativeLevel, dcSign)
+        );
+    }
+
+    /// Finishes one residual unit whose end-of-block index identifies only the DC coefficient.
+    ///
+    /// @param position the transform origin in the current block-position grid
+    /// @param transformSize the active transform size
+    /// @param transformType the active transform type
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param dcSignContext the plane-specific DC-sign context
+    /// @param dcToken the decoded unsigned DC token before sign and Golomb extension
+    /// @return one compact DC-only residual unit
+    private TransformResidualUnit createDcOnlyResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            TransformType transformType,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            boolean chroma,
+            int dcSignContext,
+            int dcToken
+    ) {
+        int magnitude = dcToken;
+        int signedDcCoefficient = 0;
+        int dcSign = 0;
+        if (magnitude != 0) {
+            boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
+            dcSign = negative ? -1 : 1;
+            if (magnitude == 15) {
+                magnitude = maskCoefficientMagnitude(magnitude + syntaxReader.readCoefficientGolomb());
+            }
+            signedDcCoefficient = negative ? -magnitude : magnitude;
+        }
+        return TransformResidualUnit.dcOnly(
+                position,
+                transformSize,
+                transformType,
+                signedDcCoefficient,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                createNonZeroCoefficientContextByte(magnitude, dcSign)
         );
     }
 

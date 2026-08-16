@@ -29,6 +29,30 @@ final class TransformResidualUnitTest {
         assertEquals(6, residualUnit.visibleHeightPixels());
     }
 
+    /// Verifies that compact DC-only units expose the complete logical coefficient block.
+    @Test
+    void createsDcOnlyUnitWithoutCallerCoefficientArray() {
+        TransformResidualUnit residualUnit = TransformResidualUnit.dcOnly(
+                new BlockPosition(1, 2),
+                TransformSize.TX_8X8,
+                TransformType.ADST_DCT,
+                -17,
+                7,
+                6,
+                0x21
+        );
+
+        int[] expectedCoefficients = new int[64];
+        expectedCoefficients[0] = -17;
+        assertEquals(0, residualUnit.endOfBlockIndex());
+        assertEquals(-17, residualUnit.dcCoefficient());
+        assertEquals(-17, residualUnit.coefficient(0));
+        assertEquals(0, residualUnit.coefficient(63));
+        assertArrayEquals(expectedCoefficients, residualUnit.coefficients());
+        assertEquals(TransformType.ADST_DCT, residualUnit.transformType());
+        assertEquals(0x21, residualUnit.coefficientContextByte());
+    }
+
     /// Verifies that one residual unit retains its explicitly supplied transform type.
     @Test
     void retainsDctDctTransformType() {

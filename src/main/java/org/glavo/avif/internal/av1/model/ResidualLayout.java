@@ -11,6 +11,9 @@ import java.util.Objects;
 /// Decoded block-level luma and chroma transform residual units in bitstream order.
 @NotNullByDefault
 public final class ResidualLayout {
+    /// Shared empty residual-unit sequence for layouts without chroma units.
+    private static final TransformResidualUnit @Unmodifiable [] EMPTY_UNITS = new TransformResidualUnit[0];
+
     /// The local tile-relative luma-grid origin of the owning block.
     private final BlockPosition position;
 
@@ -32,7 +35,7 @@ public final class ResidualLayout {
     /// @param blockSize the coded block size that owns this residual layout
     /// @param lumaUnits the luma transform residual units in bitstream order
     public ResidualLayout(BlockPosition position, BlockSize blockSize, TransformResidualUnit[] lumaUnits) {
-        this(position, blockSize, lumaUnits, new TransformResidualUnit[0], new TransformResidualUnit[0]);
+        this(position, blockSize, lumaUnits, EMPTY_UNITS, EMPTY_UNITS);
     }
 
     /// Creates one block-level residual layout.
@@ -104,12 +107,12 @@ public final class ResidualLayout {
         }
         TransformResidualUnit[] checkedChromaUUnits = Objects.requireNonNull(chromaUUnits, "chromaUUnits");
         TransformResidualUnit[] checkedChromaVUnits = Objects.requireNonNull(chromaVUnits, "chromaVUnits");
-        this.chromaUUnits = copyUnits
-                ? Arrays.copyOf(checkedChromaUUnits, checkedChromaUUnits.length)
-                : checkedChromaUUnits;
-        this.chromaVUnits = copyUnits
-                ? Arrays.copyOf(checkedChromaVUnits, checkedChromaVUnits.length)
-                : checkedChromaVUnits;
+        this.chromaUUnits = checkedChromaUUnits.length == 0
+                ? EMPTY_UNITS
+                : copyUnits ? Arrays.copyOf(checkedChromaUUnits, checkedChromaUUnits.length) : checkedChromaUUnits;
+        this.chromaVUnits = checkedChromaVUnits.length == 0
+                ? EMPTY_UNITS
+                : copyUnits ? Arrays.copyOf(checkedChromaVUnits, checkedChromaVUnits.length) : checkedChromaVUnits;
         if (this.chromaUUnits.length != this.chromaVUnits.length) {
             throw new IllegalArgumentException("chromaUUnits and chromaVUnits must have the same length");
         }
@@ -225,6 +228,9 @@ public final class ResidualLayout {
             int deltaX4,
             int deltaY4
     ) {
+        if (units.length == 0) {
+            return EMPTY_UNITS;
+        }
         TransformResidualUnit[] offsetUnits = new TransformResidualUnit[units.length];
         for (int i = 0; i < units.length; i++) {
             TransformResidualUnit unit = units[i];

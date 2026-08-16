@@ -25,6 +25,9 @@ import java.util.Objects;
 /// positions so callers can retain them without a second relocation pass.
 @NotNullByDefault
 public final class TileTransformLayoutReader {
+    /// Shared empty transform-unit sequence for blocks without modeled chroma transforms.
+    private static final TransformUnit @Unmodifiable [] EMPTY_TRANSFORM_UNITS = new TransformUnit[0];
+
     /// The width and height of one AV1 transform-processing region in 4x4 luma units.
     private static final int TRANSFORM_REGION_SIZE4 = 16;
 
@@ -91,7 +94,7 @@ public final class TileTransformLayoutReader {
                         chromaTransformSize,
                         tileContext.sequenceHeader().colorConfig().chromaFormat()
                 )
-                : new TransformUnit[0];
+                : EMPTY_TRANSFORM_UNITS;
 
         TransformUnit[] lumaUnits;
         boolean variableLumaTransformTree;
@@ -225,7 +228,7 @@ public final class TileTransformLayoutReader {
                 );
             }
         }
-        return new InterTransformResult(units.toArray(new TransformUnit[0]), true);
+        return new InterTransformResult(units.toArray(new TransformUnit[units.size()]), true);
     }
 
     /// Recursively reads one inter var-tx region and appends its visible luma transform units.

@@ -25,6 +25,10 @@ import java.util.Objects;
 /// Tile-local neighbor context state used to derive block-level syntax contexts while scanning a tile.
 @NotNullByDefault
 public final class BlockNeighborContext {
+    /// Shared provisional zero vector used when a decoded block has no stored motion vector.
+    private static final InterMotionVector PREDICTED_ZERO_MOTION_VECTOR =
+            InterMotionVector.predicted(MotionVector.zero());
+
     /// The maximum number of provisional motion-vector candidate entries retained locally.
     private static final int PROVISIONAL_CANDIDATE_CAPACITY = 8;
 
@@ -493,7 +497,7 @@ public final class BlockNeighborContext {
         byte[] leftInterpolationFilterVertical = new byte[tileHeight4];
         LumaIntraPredictionMode[] aboveMode = new LumaIntraPredictionMode[tileWidth4];
         LumaIntraPredictionMode[] leftMode = new LumaIntraPredictionMode[tileHeight4];
-        InterMotionVector defaultMotionVector = InterMotionVector.predicted(MotionVector.zero());
+        InterMotionVector defaultMotionVector = PREDICTED_ZERO_MOTION_VECTOR;
         Arrays.fill(aboveTransformWidthLog2, (byte) -1);
         Arrays.fill(leftTransformHeightLog2, (byte) -1);
         Arrays.fill(aboveInterTransformWidthLog2, UNAVAILABLE_INTER_TRANSFORM_LOG2);
@@ -2935,16 +2939,15 @@ public final class BlockNeighborContext {
             int spanEnd4,
             int referenceFrame0
     ) {
-        StoredBlock[] visitedBlocks = new StoredBlock[Math.max(1, spanEnd4 - spanStart4)];
-        int visitedCount = 0;
+        @Nullable StoredBlock previousBlock = null;
         for (int varyingCoordinate4 = spanStart4; varyingCoordinate4 < spanEnd4; varyingCoordinate4++) {
             @Nullable StoredBlock storedBlock = rowScan
                     ? storedBlockAt(varyingCoordinate4, fixedCoordinate4)
                     : storedBlockAt(fixedCoordinate4, varyingCoordinate4);
-            if (storedBlock == null || containsStoredBlock(visitedBlocks, visitedCount, storedBlock)) {
+            if (storedBlock == null || storedBlock == previousBlock) {
                 continue;
             }
-            visitedBlocks[visitedCount++] = storedBlock;
+            previousBlock = storedBlock;
             if (isLocalWarpSampleBlock(storedBlock, referenceFrame0)) {
                 return true;
             }
@@ -2971,7 +2974,7 @@ public final class BlockNeighborContext {
     /// @param motionVector the stored motion vector, or `null`
     /// @return one stored edge motion vector, falling back to a provisional zero vector
     private static InterMotionVector fallbackMotionVector(@Nullable InterMotionVector motionVector) {
-        return motionVector != null ? motionVector : InterMotionVector.predicted(MotionVector.zero());
+        return motionVector != null ? motionVector : PREDICTED_ZERO_MOTION_VECTOR;
     }
 
     /// Returns whether one decoded block used any `NEWMV`-carrying inter mode.
@@ -3615,22 +3618,6 @@ public final class BlockNeighborContext {
     private static boolean differsFromGlobalMotion(MotionVector projected, MotionVector global) {
         return (Math.abs(projected.columnEighthPel() - global.columnEighthPel())
                 | Math.abs(projected.rowEighthPel() - global.rowEighthPel())) >= 16;
-    }
-
-    /// Returns whether one stored-block list prefix already contains the supplied block instance.
-    ///
-    /// @param values the scanned stored-block list prefix
-    /// @param count the number of active stored blocks at the front of `values`
-    /// @param expected the stored block to search for
-    /// @return whether one stored-block list prefix already contains the supplied block instance
-    private static boolean containsStoredBlock(StoredBlock[] values, int count, StoredBlock expected) {
-        StoredBlock nonNullExpected = Objects.requireNonNull(expected, "expected");
-        for (int i = 0; i < count; i++) {
-            if (values[i] == nonNullExpected) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /// Builds one provisional motion-vector candidate from one stored neighbor.

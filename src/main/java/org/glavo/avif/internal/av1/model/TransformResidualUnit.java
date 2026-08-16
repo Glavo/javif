@@ -30,9 +30,12 @@ public final class TransformResidualUnit {
     /// The scan index of the last non-zero coefficient, or `-1` for all-zero units.
     private final int endOfBlockIndex;
 
-    /// The signed transform-domain coefficients in natural raster order, or an empty internal
-    /// representation when the unit is signaled as all-zero.
+    /// The signed transform-domain coefficients in natural raster order, or empty internal
+    /// storage for all-zero and compact DC-only units.
     private final int @Unmodifiable [] coefficients;
+
+    /// The signed DC coefficient, or zero for an all-zero unit.
+    private final int dcCoefficient;
 
     /// The exact portion of the residual width that lies inside the coded frame or tile boundary.
     private final int visibleWidthPixels;
@@ -161,6 +164,78 @@ public final class TransformResidualUnit {
         this.coefficients = endOfBlockIndex < 0
                 ? EMPTY_COEFFICIENTS
                 : copyCoefficients ? Arrays.copyOf(checkedCoefficients, checkedCoefficients.length) : checkedCoefficients;
+        this.dcCoefficient = endOfBlockIndex < 0 ? 0 : checkedCoefficients[0];
+        this.visibleWidthPixels = visibleWidthPixels;
+        this.visibleHeightPixels = visibleHeightPixels;
+        if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
+            throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
+        }
+        this.coefficientContextByte = coefficientContextByte;
+    }
+
+    /// Creates one DC-only residual unit without allocating a full coefficient block.
+    ///
+    /// [#coefficient(int)] and [#coefficients()] continue to expose the complete natural-order
+    /// coefficient block, with every AC coefficient equal to zero.
+    ///
+    /// @param position the residual-unit origin in luma 4x4 units
+    /// @param size the transform size
+    /// @param transformType the transform type
+    /// @param dcCoefficient the signed DC coefficient
+    /// @param visibleWidthPixels the visible residual width
+    /// @param visibleHeightPixels the visible residual height
+    /// @param coefficientContextByte the coefficient-context byte
+    /// @return one compact DC-only residual unit
+    public static TransformResidualUnit dcOnly(
+            BlockPosition position,
+            TransformSize size,
+            TransformType transformType,
+            int dcCoefficient,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int coefficientContextByte
+    ) {
+        return new TransformResidualUnit(
+                position,
+                size,
+                transformType,
+                dcCoefficient,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                coefficientContextByte
+        );
+    }
+
+    /// Creates one compact DC-only transform residual unit.
+    ///
+    /// @param position the residual-unit origin in luma 4x4 units
+    /// @param size the transform size
+    /// @param transformType the transform type
+    /// @param dcCoefficient the signed DC coefficient
+    /// @param visibleWidthPixels the visible residual width
+    /// @param visibleHeightPixels the visible residual height
+    /// @param coefficientContextByte the coefficient-context byte
+    private TransformResidualUnit(
+            BlockPosition position,
+            TransformSize size,
+            TransformType transformType,
+            int dcCoefficient,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int coefficientContextByte
+    ) {
+        this.position = Objects.requireNonNull(position, "position");
+        this.size = Objects.requireNonNull(size, "size");
+        this.transformType = Objects.requireNonNull(transformType, "transformType");
+        this.endOfBlockIndex = 0;
+        this.coefficients = EMPTY_COEFFICIENTS;
+        this.dcCoefficient = dcCoefficient;
+        if (visibleWidthPixels <= 0 || visibleWidthPixels > size.widthPixels()) {
+            throw new IllegalArgumentException("visibleWidthPixels out of range: " + visibleWidthPixels);
+        }
+        if (visibleHeightPixels <= 0 || visibleHeightPixels > size.heightPixels()) {
+            throw new IllegalArgumentException("visibleHeightPixels out of range: " + visibleHeightPixels);
+        }
         this.visibleWidthPixels = visibleWidthPixels;
         this.visibleHeightPixels = visibleHeightPixels;
         if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
@@ -212,6 +287,7 @@ public final class TransformResidualUnit {
         this.transformType = TransformType.DCT_DCT;
         this.endOfBlockIndex = -1;
         this.coefficients = EMPTY_COEFFICIENTS;
+        this.dcCoefficient = 0;
         if (visibleWidthPixels <= 0 || visibleWidthPixels > size.widthPixels()) {
             throw new IllegalArgumentException("visibleWidthPixels out of range: " + visibleWidthPixels);
         }
@@ -237,6 +313,7 @@ public final class TransformResidualUnit {
         this.transformType = nonNullSource.transformType;
         this.endOfBlockIndex = nonNullSource.endOfBlockIndex;
         this.coefficients = nonNullSource.coefficients;
+        this.dcCoefficient = nonNullSource.dcCoefficient;
         this.visibleWidthPixels = nonNullSource.visibleWidthPixels;
         this.visibleHeightPixels = nonNullSource.visibleHeightPixels;
         this.coefficientContextByte = nonNullSource.coefficientContextByte;
@@ -322,9 +399,14 @@ public final class TransformResidualUnit {
     ///
     /// @return the signed transform-domain coefficients in natural raster order
     public int[] coefficients() {
-        return allZero()
-                ? new int[size.widthPixels() * size.heightPixels()]
-                : Arrays.copyOf(coefficients, coefficients.length);
+        if (coefficients.length != 0) {
+            return Arrays.copyOf(coefficients, coefficients.length);
+        }
+        int[] result = new int[coefficientCount()];
+        if (!allZero()) {
+            result[0] = dcCoefficient;
+        }
+        return result;
     }
 
     /// Returns the number of coefficients in this transform unit.
@@ -342,7 +424,10 @@ public final class TransformResidualUnit {
     /// @return the signed transform-domain coefficient at `coefficientIndex`
     public int coefficient(int coefficientIndex) {
         Objects.checkIndex(coefficientIndex, coefficientCount());
-        return allZero() ? 0 : coefficients[coefficientIndex];
+        if (coefficients.length == 0) {
+            return coefficientIndex == 0 ? dcCoefficient : 0;
+        }
+        return coefficients[coefficientIndex];
     }
 
     /// Returns the exact portion of the residual width inside the coded frame or tile boundary.
@@ -363,7 +448,7 @@ public final class TransformResidualUnit {
     ///
     /// @return the decoded DC coefficient in natural raster order
     public int dcCoefficient() {
-        return allZero() ? 0 : coefficients[0];
+        return dcCoefficient;
     }
 
     /// Returns the coefficient-context byte written back to neighbor state.

@@ -12,6 +12,9 @@ import java.util.Objects;
 /// One decoded block-level luma and chroma transform layout produced before coefficient syntax is read.
 @NotNullByDefault
 public final class TransformLayout {
+    /// Shared empty transform-unit sequence for layouts without chroma units.
+    private static final TransformUnit @Unmodifiable [] EMPTY_UNITS = new TransformUnit[0];
+
     /// The local tile-relative luma-grid origin of the owning block.
     private final BlockPosition position;
 
@@ -193,7 +196,9 @@ public final class TransformLayout {
             throw new IllegalArgumentException("lumaUnits must not be empty");
         }
         TransformUnit[] checkedChromaUnits = Objects.requireNonNull(chromaUnits, "chromaUnits");
-        this.chromaUnits = copyUnits ? Arrays.copyOf(checkedChromaUnits, checkedChromaUnits.length) : checkedChromaUnits;
+        this.chromaUnits = checkedChromaUnits.length == 0
+                ? EMPTY_UNITS
+                : copyUnits ? Arrays.copyOf(checkedChromaUnits, checkedChromaUnits.length) : checkedChromaUnits;
         if (chromaTransformSize == null && this.chromaUnits.length != 0) {
             throw new IllegalArgumentException("chromaUnits must be empty when chromaTransformSize is null");
         }
@@ -437,7 +442,7 @@ public final class TransformLayout {
             @Nullable TransformSize chromaTransformSize
     ) {
         if (chromaTransformSize == null) {
-            return new TransformUnit[0];
+            return EMPTY_UNITS;
         }
         return new TransformUnit[]{new TransformUnit(position, chromaTransformSize)};
     }
@@ -449,6 +454,9 @@ public final class TransformLayout {
     /// @param deltaY4 the Y-axis offset in 4x4 units
     /// @return transform units offset by the supplied 4x4-unit delta
     private static TransformUnit[] offsetUnits(TransformUnit[] units, int deltaX4, int deltaY4) {
+        if (units.length == 0) {
+            return EMPTY_UNITS;
+        }
         TransformUnit[] offsetUnits = new TransformUnit[units.length];
         for (int i = 0; i < units.length; i++) {
             TransformUnit unit = units[i];

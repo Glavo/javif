@@ -57,6 +57,21 @@ final class LoopFilterApplier {
     /// Compact block-state bit indicating a skipped inter block.
     private static final int FILTER_STATE_SKIPPED_INTER = 1 << 12;
 
+    /// Boundary-map bit indicating that one plane covers the indexed luma-grid cell.
+    private static final int BOUNDARY_STATE_COVERED = 1;
+
+    /// Boundary-map bit indicating the left edge of one decoded block.
+    private static final int BOUNDARY_STATE_BLOCK_LEFT = 1 << 1;
+
+    /// Boundary-map bit indicating the top edge of one decoded block.
+    private static final int BOUNDARY_STATE_BLOCK_TOP = 1 << 2;
+
+    /// Boundary-map bit indicating the left edge of one transform unit.
+    private static final int BOUNDARY_STATE_TRANSFORM_LEFT = 1 << 3;
+
+    /// Boundary-map bit indicating the top edge of one transform unit.
+    private static final int BOUNDARY_STATE_TRANSFORM_TOP = 1 << 4;
+
     /// Transform-size constants indexed by their declaration ordinal.
     private static final TransformSize @Unmodifiable [] TRANSFORM_SIZES = TransformSize.values();
 
@@ -309,16 +324,13 @@ final class LoopFilterApplier {
             return;
         }
 
-        int currentBlockId = blockMap.blockIdAt(currentIndex, planeIndex);
-        int previousBlockId = blockMap.blockIdAt(previousIndex, planeIndex);
-        int currentTransformId = blockMap.transformIdAt(currentIndex, planeIndex);
-        int previousTransformId = blockMap.transformIdAt(previousIndex, planeIndex);
-        if (currentBlockId == 0 || previousBlockId == 0 || currentTransformId == 0 || previousTransformId == 0) {
+        if (!blockMap.isCoveredAt(currentIndex, planeIndex)
+                || !blockMap.isCoveredAt(previousIndex, planeIndex)) {
             return;
         }
 
-        boolean blockEdge = currentBlockId != previousBlockId;
-        boolean transformEdge = currentTransformId != previousTransformId;
+        boolean blockEdge = blockMap.isBlockBoundaryAt(currentIndex, planeIndex, pass);
+        boolean transformEdge = blockMap.isTransformBoundaryAt(currentIndex, planeIndex, pass);
         if (!blockEdge && !transformEdge) {
             return;
         }
@@ -1158,7 +1170,7 @@ final class LoopFilterApplier {
         }
     }
 
-    /// Compact block and transform lookup state indexed in luma 4x4 units.
+    /// Compact block and transform boundary state indexed in luma 4x4 units.
     ///
     /// The map stores only primitive values so it does not retain decoded partition, block, or
     /// transform objects after preparation completes.
@@ -1170,11 +1182,8 @@ final class LoopFilterApplier {
         /// The frame height rounded up to 4x4 units.
         private final int height4;
 
-        /// The luma block identity covering each 4x4 cell, or zero for no block.
-        private final int @Unmodifiable [] lumaBlockIds;
-
-        /// The luma transform identity covering each 4x4 cell, or zero for no transform.
-        private final int @Unmodifiable [] lumaTransformIds;
+        /// The packed luma coverage and block/transform boundaries for each 4x4 cell.
+        private final byte @Unmodifiable [] lumaBoundaryStates;
 
         /// The luma transform-size ordinal covering each 4x4 cell.
         private final byte @Unmodifiable [] lumaTransformSizeOrdinals;
@@ -1182,11 +1191,8 @@ final class LoopFilterApplier {
         /// The packed luma filter levels and skipped-inter flag covering each 4x4 cell.
         private final short @Unmodifiable [] lumaFilterStates;
 
-        /// The chroma block identity covering each luma-grid 4x4 cell, or zero for no block.
-        private final int @Unmodifiable [] chromaBlockIds;
-
-        /// The chroma transform identity covering each luma-grid 4x4 cell, or zero for no transform.
-        private final int @Unmodifiable [] chromaTransformIds;
+        /// The packed chroma coverage and block/transform boundaries for each luma-grid 4x4 cell.
+        private final byte @Unmodifiable [] chromaBoundaryStates;
 
         /// The chroma transform-size ordinal covering each luma-grid 4x4 cell.
         private final byte @Unmodifiable [] chromaTransformSizeOrdinals;
@@ -1200,12 +1206,6 @@ final class LoopFilterApplier {
         /// The chroma vertical subsampling shift.
         private final int chromaSubsamplingY;
 
-        /// The next nonzero block identity assigned during construction.
-        private int nextBlockId;
-
-        /// The next nonzero transform identity assigned during construction.
-        private int nextTransformId;
-
         /// Creates one compact block and transform lookup map.
         ///
         /// @param width4 the frame width rounded up to 4x4 units
@@ -1216,18 +1216,14 @@ final class LoopFilterApplier {
             this.width4 = width4;
             this.height4 = height4;
             int cellCount = width4 * height4;
-            this.lumaBlockIds = new int[cellCount];
-            this.lumaTransformIds = new int[cellCount];
+            this.lumaBoundaryStates = new byte[cellCount];
             this.lumaTransformSizeOrdinals = new byte[cellCount];
             this.lumaFilterStates = new short[cellCount];
-            this.chromaBlockIds = new int[cellCount];
-            this.chromaTransformIds = new int[cellCount];
+            this.chromaBoundaryStates = new byte[cellCount];
             this.chromaTransformSizeOrdinals = new byte[cellCount];
             this.chromaFilterStates = new short[cellCount];
             this.chromaSubsamplingX = chromaSubsamplingX;
             this.chromaSubsamplingY = chromaSubsamplingY;
-            this.nextBlockId = 1;
-            this.nextTransformId = 1;
         }
 
         /// Creates one compact block and transform lookup map.
@@ -1282,22 +1278,44 @@ final class LoopFilterApplier {
             return y4 * width4 + x4;
         }
 
-        /// Returns the plane-specific block identity at one cell.
+        /// Returns whether one plane covers the indexed luma-grid cell.
         ///
         /// @param index the flat cell index
         /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-        /// @return the nonzero block identity, or zero when no block covers the cell
-        private int blockIdAt(int index, int planeIndex) {
-            return (planeIndex == 0 ? lumaBlockIds : chromaBlockIds)[index];
+        /// @return whether the selected plane covers the cell
+        private boolean isCoveredAt(int index, int planeIndex) {
+            return (boundaryStateAt(index, planeIndex) & BOUNDARY_STATE_COVERED) != 0;
         }
 
-        /// Returns the plane-specific transform identity at one cell.
+        /// Returns whether the indexed cell begins a plane-specific block along one filter pass.
         ///
         /// @param index the flat cell index
         /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-        /// @return the nonzero transform identity, or zero when no transform covers the cell
-        private int transformIdAt(int index, int planeIndex) {
-            return (planeIndex == 0 ? lumaTransformIds : chromaTransformIds)[index];
+        /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
+        /// @return whether the cell begins a decoded block along the selected pass
+        private boolean isBlockBoundaryAt(int index, int planeIndex, int pass) {
+            int mask = pass == 0 ? BOUNDARY_STATE_BLOCK_LEFT : BOUNDARY_STATE_BLOCK_TOP;
+            return (boundaryStateAt(index, planeIndex) & mask) != 0;
+        }
+
+        /// Returns whether the indexed cell begins a plane-specific transform along one filter pass.
+        ///
+        /// @param index the flat cell index
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
+        /// @return whether the cell begins a transform unit along the selected pass
+        private boolean isTransformBoundaryAt(int index, int planeIndex, int pass) {
+            int mask = pass == 0 ? BOUNDARY_STATE_TRANSFORM_LEFT : BOUNDARY_STATE_TRANSFORM_TOP;
+            return (boundaryStateAt(index, planeIndex) & mask) != 0;
+        }
+
+        /// Returns the packed plane-specific boundary state at one cell.
+        ///
+        /// @param index the flat cell index
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return the packed coverage and boundary state
+        private int boundaryStateAt(int index, int planeIndex) {
+            return Byte.toUnsignedInt((planeIndex == 0 ? lumaBoundaryStates : chromaBoundaryStates)[index]);
         }
 
         /// Returns the plane-specific transform size at one covered cell.
@@ -1360,7 +1378,6 @@ final class LoopFilterApplier {
             TransformLayout transformLayout = leafNode.transformLayout();
             int endX4 = Math.min(width4, startX4 + transformLayout.visibleWidth4());
             int endY4 = Math.min(height4, startY4 + transformLayout.visibleHeight4());
-            int blockId = nextBlockId++;
             boolean skippedInter = isSkippedInter(header);
             short lumaFilterState = packFilterState(
                     filterLevel(frameHeader, header, 0, 0),
@@ -1370,7 +1387,14 @@ final class LoopFilterApplier {
             for (int y4 = startY4; y4 < endY4; y4++) {
                 for (int x4 = startX4; x4 < endX4; x4++) {
                     int index = y4 * width4 + x4;
-                    lumaBlockIds[index] = blockId;
+                    int boundaryState = BOUNDARY_STATE_COVERED;
+                    if (x4 == startX4) {
+                        boundaryState |= BOUNDARY_STATE_BLOCK_LEFT;
+                    }
+                    if (y4 == startY4) {
+                        boundaryState |= BOUNDARY_STATE_BLOCK_TOP;
+                    }
+                    lumaBoundaryStates[index] |= (byte) boundaryState;
                     lumaFilterStates[index] = lumaFilterState;
                 }
             }
@@ -1381,61 +1405,69 @@ final class LoopFilterApplier {
                         startY4,
                         endX4,
                         endY4,
-                        nextTransformId++,
                         transformLayout.maxLumaTransformSize()
                 );
             } else {
                 TransformUnit firstUnit = transformLayout.lumaUnit(0);
-                int firstTransformId = nextTransformId++;
                 fillDefaultLumaTransform(
                         startX4,
                         startY4,
                         endX4,
                         endY4,
-                        firstTransformId,
                         firstUnit.size()
                 );
                 for (int unitIndex = 0; unitIndex < transformLayout.lumaUnitCount(); unitIndex++) {
                     TransformUnit transformUnit = transformLayout.lumaUnit(unitIndex);
-                    int transformId = unitIndex == 0 ? firstTransformId : nextTransformId++;
                     fillLumaTransform(
                             startX4,
                             startY4,
                             endX4,
                             endY4,
-                            transformUnit,
-                            transformId
+                            transformUnit
                     );
                 }
             }
-            if (header.hasChroma()) {
+            if (header.hasChroma() && transformLayout.chromaUnitCount() != 0) {
                 short chromaFilterState = packFilterState(
                         filterLevel(frameHeader, header, 1, 0),
                         filterLevel(frameHeader, header, 2, 0),
                         skippedInter
                 );
+                TransformUnit firstChromaUnit = transformLayout.chromaUnit(0);
+                int chromaStartX4 = firstChromaUnit.position().x4();
+                int chromaStartY4 = firstChromaUnit.position().y4();
+                int chromaEndX4 = chromaStartX4
+                        + (firstChromaUnit.size().width4() << chromaSubsamplingX);
+                int chromaEndY4 = chromaStartY4
+                        + (firstChromaUnit.size().height4() << chromaSubsamplingY);
                 for (int unitIndex = 0; unitIndex < transformLayout.chromaUnitCount(); unitIndex++) {
+                    TransformUnit transformUnit = transformLayout.chromaUnit(unitIndex);
+                    chromaStartX4 = Math.min(chromaStartX4, transformUnit.position().x4());
+                    chromaStartY4 = Math.min(chromaStartY4, transformUnit.position().y4());
+                    chromaEndX4 = Math.max(
+                            chromaEndX4,
+                            transformUnit.position().x4() + (transformUnit.size().width4() << chromaSubsamplingX)
+                    );
+                    chromaEndY4 = Math.max(
+                            chromaEndY4,
+                            transformUnit.position().y4() + (transformUnit.size().height4() << chromaSubsamplingY)
+                    );
                     fillChromaTransform(
-                            blockId,
                             chromaFilterState,
-                            transformLayout.chromaUnit(unitIndex),
-                            nextTransformId++
+                            transformUnit
                     );
                 }
+                markChromaBlockBoundaries(chromaStartX4, chromaStartY4, chromaEndX4, chromaEndY4);
             }
         }
 
         /// Fills the luma-grid coverage of one decoded chroma transform unit.
         ///
-        /// @param blockId the owning block identity
         /// @param filterState the packed U/V filter levels and skipped-inter flag
         /// @param transformUnit the decoded chroma transform unit
-        /// @param transformId the transform identity
         private void fillChromaTransform(
-                int blockId,
                 short filterState,
-                TransformUnit transformUnit,
-                int transformId
+                TransformUnit transformUnit
         ) {
             int unitStartX4 = Math.max(0, transformUnit.position().x4());
             int unitStartY4 = Math.max(0, transformUnit.position().y4());
@@ -1451,10 +1483,45 @@ final class LoopFilterApplier {
             for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
                 for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
                     int index = y4 * width4 + x4;
-                    chromaBlockIds[index] = blockId;
+                    int boundaryState = BOUNDARY_STATE_COVERED;
+                    if (x4 == unitStartX4) {
+                        boundaryState |= BOUNDARY_STATE_TRANSFORM_LEFT;
+                    }
+                    if (y4 == unitStartY4) {
+                        boundaryState |= BOUNDARY_STATE_TRANSFORM_TOP;
+                    }
+                    chromaBoundaryStates[index] |= (byte) boundaryState;
                     chromaFilterStates[index] = filterState;
-                    chromaTransformIds[index] = transformId;
                     chromaTransformSizeOrdinals[index] = transformSizeOrdinal;
+                }
+            }
+        }
+
+        /// Marks the outer left and top boundaries of one rectangular chroma block footprint.
+        ///
+        /// @param startX4 the inclusive chroma footprint start X in luma 4x4 units
+        /// @param startY4 the inclusive chroma footprint start Y in luma 4x4 units
+        /// @param endX4 the exclusive chroma footprint end X in luma 4x4 units
+        /// @param endY4 the exclusive chroma footprint end Y in luma 4x4 units
+        private void markChromaBlockBoundaries(int startX4, int startY4, int endX4, int endY4) {
+            int boundedStartX4 = Math.max(0, startX4);
+            int boundedStartY4 = Math.max(0, startY4);
+            int boundedEndX4 = Math.min(width4, endX4);
+            int boundedEndY4 = Math.min(height4, endY4);
+            if (boundedStartX4 >= boundedEndX4 || boundedStartY4 >= boundedEndY4) {
+                return;
+            }
+            for (int y4 = boundedStartY4; y4 < boundedEndY4; y4++) {
+                int index = y4 * width4 + boundedStartX4;
+                if ((chromaBoundaryStates[index] & BOUNDARY_STATE_COVERED) != 0) {
+                    chromaBoundaryStates[index] |= (byte) BOUNDARY_STATE_BLOCK_LEFT;
+                }
+            }
+            int rowStart = boundedStartY4 * width4;
+            for (int x4 = boundedStartX4; x4 < boundedEndX4; x4++) {
+                int index = rowStart + x4;
+                if ((chromaBoundaryStates[index] & BOUNDARY_STATE_COVERED) != 0) {
+                    chromaBoundaryStates[index] |= (byte) BOUNDARY_STATE_BLOCK_TOP;
                 }
             }
         }
@@ -1465,21 +1532,26 @@ final class LoopFilterApplier {
         /// @param startY4 the leaf start Y in luma 4x4 units
         /// @param endX4 the exclusive leaf end X in luma 4x4 units
         /// @param endY4 the exclusive leaf end Y in luma 4x4 units
-        /// @param transformId the default transform identity
         /// @param transformSize the default transform size
         private void fillDefaultLumaTransform(
                 int startX4,
                 int startY4,
                 int endX4,
                 int endY4,
-                int transformId,
                 TransformSize transformSize
         ) {
             byte transformSizeOrdinal = (byte) transformSize.ordinal();
             for (int y4 = startY4; y4 < endY4; y4++) {
                 for (int x4 = startX4; x4 < endX4; x4++) {
                     int index = y4 * width4 + x4;
-                    lumaTransformIds[index] = transformId;
+                    int boundaryState = BOUNDARY_STATE_COVERED;
+                    if (x4 == startX4) {
+                        boundaryState |= BOUNDARY_STATE_TRANSFORM_LEFT;
+                    }
+                    if (y4 == startY4) {
+                        boundaryState |= BOUNDARY_STATE_TRANSFORM_TOP;
+                    }
+                    lumaBoundaryStates[index] |= (byte) boundaryState;
                     lumaTransformSizeOrdinals[index] = transformSizeOrdinal;
                 }
             }
@@ -1492,14 +1564,12 @@ final class LoopFilterApplier {
         /// @param endX4 the exclusive coverage bound in luma 4x4 units
         /// @param endY4 the exclusive coverage bound in luma 4x4 units
         /// @param transformUnit the transform unit to fill
-        /// @param transformId the transform identity
         private void fillLumaTransform(
                 int startX4,
                 int startY4,
                 int endX4,
                 int endY4,
-                TransformUnit transformUnit,
-                int transformId
+                TransformUnit transformUnit
         ) {
             int unitStartX4 = Math.max(startX4, transformUnit.position().x4());
             int unitStartY4 = Math.max(startY4, transformUnit.position().y4());
@@ -1509,7 +1579,14 @@ final class LoopFilterApplier {
             for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
                 for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
                     int index = y4 * width4 + x4;
-                    lumaTransformIds[index] = transformId;
+                    int boundaryState = BOUNDARY_STATE_COVERED;
+                    if (x4 == unitStartX4) {
+                        boundaryState |= BOUNDARY_STATE_TRANSFORM_LEFT;
+                    }
+                    if (y4 == unitStartY4) {
+                        boundaryState |= BOUNDARY_STATE_TRANSFORM_TOP;
+                    }
+                    lumaBoundaryStates[index] |= (byte) boundaryState;
                     lumaTransformSizeOrdinals[index] = transformSizeOrdinal;
                 }
             }
