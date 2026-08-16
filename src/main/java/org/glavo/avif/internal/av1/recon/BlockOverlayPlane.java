@@ -34,8 +34,8 @@ final class BlockOverlayPlane implements MutableSamplePlane {
     /// The compact overlay sample storage.
     private final short[] samples;
 
-    /// Whether each compact overlay position has been written.
-    private final boolean[] writtenSamples;
+    /// Packed written-state bits for compact overlay positions.
+    private final long[] writtenSampleBits;
 
     /// Creates one writable block overlay over the supplied base plane.
     ///
@@ -74,7 +74,7 @@ final class BlockOverlayPlane implements MutableSamplePlane {
         this.maximumSampleValue = (1 << basePlane.bitDepth()) - 1;
         int sampleCount = Math.multiplyExact(this.overlayWidth, this.overlayHeight);
         this.samples = new short[sampleCount];
-        this.writtenSamples = new boolean[sampleCount];
+        this.writtenSampleBits = new long[writtenWordCount(sampleCount)];
     }
 
     /// Returns the width of the containing base plane.
@@ -109,7 +109,7 @@ final class BlockOverlayPlane implements MutableSamplePlane {
     @Override
     public int sample(int x, int y) {
         int index = overlayIndex(x, y);
-        if (index >= 0 && writtenSamples[index]) {
+        if (index >= 0 && isWritten(index)) {
             return samples[index] & 0xFFFF;
         }
         return basePlane.sample(x, y);
@@ -127,7 +127,23 @@ final class BlockOverlayPlane implements MutableSamplePlane {
             throw new IndexOutOfBoundsException("coordinate outside block overlay: " + x + ", " + y);
         }
         samples[index] = (short) Math.max(0, Math.min(value, maximumSampleValue));
-        writtenSamples[index] = true;
+        writtenSampleBits[index / Long.SIZE] |= 1L << (index % Long.SIZE);
+    }
+
+    /// Returns the number of words needed to store one written-state bit per sample.
+    ///
+    /// @param sampleCount the positive overlay sample count
+    /// @return the required packed-word count
+    private static int writtenWordCount(int sampleCount) {
+        return (int) (((long) sampleCount + Long.SIZE - 1L) / Long.SIZE);
+    }
+
+    /// Returns whether one compact overlay position has been written.
+    ///
+    /// @param index the compact overlay index
+    /// @return whether the overlay sample has been written
+    private boolean isWritten(int index) {
+        return (writtenSampleBits[index / Long.SIZE] & (1L << (index % Long.SIZE))) != 0L;
     }
 
     /// Returns the compact storage index for one coordinate, or `-1` when it lies outside the overlay.

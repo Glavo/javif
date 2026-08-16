@@ -8,7 +8,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for mutable reconstruction-plane storage.
 @NotNullByDefault
@@ -61,6 +63,28 @@ final class MutablePlaneBufferTest {
         assertEquals(22, retained.sample(2, 3));
     }
 
+    /// Verifies written-state tracking and copying across packed-word boundaries.
+    @Test
+    void tracksWrittenSamplesAcrossPackedWordBoundaries() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(65, 2, 8);
+
+        plane.setSample(63, 0, 11);
+        plane.setSample(64, 0, 22);
+        plane.setSample(64, 1, 33);
+
+        assertFalse(plane.hasWrittenSample(62, 0));
+        assertTrue(plane.hasWrittenSample(63, 0));
+        assertTrue(plane.hasWrittenSample(64, 0));
+        assertFalse(plane.hasWrittenSample(0, 1));
+        assertTrue(plane.hasWrittenSample(64, 1));
+
+        MutablePlaneBuffer copy = plane.copy();
+        assertTrue(copy.hasWrittenSample(63, 0));
+        assertTrue(copy.hasWrittenSample(64, 0));
+        assertTrue(copy.hasWrittenSample(64, 1));
+        assertEquals(33, copy.sample(64, 1));
+    }
+
     /// Verifies that a block overlay reads through unwritten samples and isolates compact writes.
     @Test
     void blockOverlayReadsThroughBasePlaneAndStoresOnlyItsBlock() {
@@ -87,6 +111,26 @@ final class MutablePlaneBufferTest {
         clippedEdgeOverlay.setSample(3, 3, 77);
         assertEquals(77, clippedEdgeOverlay.sample(3, 3));
         assertThrows(IndexOutOfBoundsException.class, () -> clippedEdgeOverlay.setSample(4, 3, 1));
+    }
+
+    /// Verifies overlay read-through and writes across packed-word boundaries.
+    @Test
+    void blockOverlayTracksWritesAcrossPackedWordBoundaries() {
+        MutablePlaneBuffer basePlane = new MutablePlaneBuffer(9, 8, 8);
+        for (int y = 0; y < basePlane.height(); y++) {
+            for (int x = 0; x < basePlane.width(); x++) {
+                basePlane.setSample(x, y, 10);
+            }
+        }
+        BlockOverlayPlane overlay = new BlockOverlayPlane(basePlane, 0, 0, 9, 8);
+
+        overlay.setSample(0, 7, 63);
+        overlay.setSample(1, 7, 64);
+
+        assertEquals(10, overlay.sample(8, 6));
+        assertEquals(63, overlay.sample(0, 7));
+        assertEquals(64, overlay.sample(1, 7));
+        assertEquals(10, overlay.sample(2, 7));
     }
 
     /// Verifies that recursive filter-intra reads samples already written into a block overlay.

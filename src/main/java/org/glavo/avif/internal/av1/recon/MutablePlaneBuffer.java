@@ -38,8 +38,8 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// The tightly packed mutable sample buffer.
     private final short[] samples;
 
-    /// Whether each sample position has been written by reconstruction.
-    private final boolean[] writtenSamples;
+    /// Packed written-state bits for retained sample positions.
+    private final long[] writtenSampleBits;
 
     /// Creates one mutable decoded-plane buffer.
     ///
@@ -93,7 +93,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         this.maxSampleValue = (1 << bitDepth) - 1;
         int sampleCount = Math.multiplyExact(storageWidth, storageHeight);
         this.samples = new short[sampleCount];
-        this.writtenSamples = new boolean[sampleCount];
+        this.writtenSampleBits = new long[writtenWordCount(sampleCount)];
     }
 
     /// Returns the plane width in samples.
@@ -146,7 +146,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     public void setSample(int x, int y, int value) {
         int index = storageIndex(x, y);
         samples[index] = (short) clipped(value);
-        writtenSamples[index] = true;
+        markWritten(index);
     }
 
     /// Returns whether one retained-region sample has been written by reconstruction.
@@ -161,7 +161,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
                 && localX < storageWidth
                 && localY >= 0
                 && localY < storageHeight
-                && writtenSamples[localY * storageWidth + localX];
+                && isWritten(localY * storageWidth + localX);
     }
 
     /// Returns one sample when it lies inside retained storage, or the fallback value otherwise.
@@ -220,8 +220,31 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
                 storageHeight
         );
         System.arraycopy(samples, 0, copy.samples, 0, samples.length);
-        System.arraycopy(writtenSamples, 0, copy.writtenSamples, 0, writtenSamples.length);
+        System.arraycopy(writtenSampleBits, 0, copy.writtenSampleBits, 0, writtenSampleBits.length);
         return copy;
+    }
+
+    /// Returns the number of words needed to store one written-state bit per sample.
+    ///
+    /// @param sampleCount the positive retained sample count
+    /// @return the required packed-word count
+    private static int writtenWordCount(int sampleCount) {
+        return (int) (((long) sampleCount + Long.SIZE - 1L) / Long.SIZE);
+    }
+
+    /// Marks one compact sample position as written.
+    ///
+    /// @param index the compact sample index
+    private void markWritten(int index) {
+        writtenSampleBits[index / Long.SIZE] |= 1L << (index % Long.SIZE);
+    }
+
+    /// Returns whether one compact sample position has been written.
+    ///
+    /// @param index the compact sample index
+    /// @return whether the sample has been written
+    private boolean isWritten(int index) {
+        return (writtenSampleBits[index / Long.SIZE] & (1L << (index % Long.SIZE))) != 0L;
     }
 
     /// Returns the compact storage index for one containing-plane coordinate.
