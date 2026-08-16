@@ -24,6 +24,7 @@ import org.junit.jupiter.api.TestFactory;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.ShortBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -820,14 +821,20 @@ final class ArgonAv1CorpusTest {
             int height
     ) {
         boolean highBitDepth = bitDepth > 8;
+        int bytesPerSample = highBitDepth ? 2 : 1;
+        byte[] rowBytes = new byte[Math.multiplyExact(width, bytesPerSample)];
+        ShortBuffer samples = plane.sampleBuffer();
         for (int sampleY = y; sampleY < y + height; sampleY++) {
+            samples.position(sampleY * plane.stride() + x);
+            int byteIndex = 0;
             for (int sampleX = x; sampleX < x + width; sampleX++) {
-                int sample = plane.sample(sampleX, sampleY);
-                digest.update((byte) sample);
+                int sample = samples.get() & 0xFFFF;
+                rowBytes[byteIndex++] = (byte) sample;
                 if (highBitDepth) {
-                    digest.update((byte) (sample >>> 8));
+                    rowBytes[byteIndex++] = (byte) (sample >>> 8);
                 }
             }
+            digest.update(rowBytes, 0, byteIndex);
         }
     }
 

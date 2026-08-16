@@ -819,22 +819,19 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_4` input vector
     /// @param output the reconstructed output vector
     private void inverseDct4(int[] input, int[] output) {
-        int[] step = reconstructionWorkspace.kernelStep();
+        int input0 = input[0];
+        int input1 = input[2];
+        int input2 = input[1];
+        int input3 = input[3];
+        int step0 = halfBtf(COSPI[32], input0, COSPI[32], input1);
+        int step1 = halfBtf(COSPI[32], input0, -COSPI[32], input1);
+        int step2 = halfBtf(COSPI[48], input2, -COSPI[16], input3);
+        int step3 = halfBtf(COSPI[16], input2, COSPI[48], input3);
 
-        output[0] = input[0];
-        output[1] = input[2];
-        output[2] = input[1];
-        output[3] = input[3];
-
-        step[0] = halfBtf(COSPI[32], output[0], COSPI[32], output[1]);
-        step[1] = halfBtf(COSPI[32], output[0], -COSPI[32], output[1]);
-        step[2] = halfBtf(COSPI[48], output[2], -COSPI[16], output[3]);
-        step[3] = halfBtf(COSPI[16], output[2], COSPI[48], output[3]);
-
-        output[0] = clip((long) step[0] + step[3]);
-        output[1] = clip((long) step[1] + step[2]);
-        output[2] = clip((long) step[1] - step[2]);
-        output[3] = clip((long) step[0] - step[3]);
+        output[0] = clip((long) step0 + step3);
+        output[1] = clip((long) step1 + step2);
+        output[2] = clip((long) step1 - step2);
+        output[3] = clip((long) step0 - step3);
     }
 
     /// Reconstructs one one-dimensional `DCT_8` vector.

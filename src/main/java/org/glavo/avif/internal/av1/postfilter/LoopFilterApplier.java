@@ -229,8 +229,9 @@ public final class LoopFilterApplier {
         if ((activePlaneMask & (1 << planeIndex)) == 0) {
             return;
         }
-        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 0);
-        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 1);
+        int[] edgeSamples = new int[14];
+        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 0, edgeSamples);
+        applyPass(plane, chromaFormat, blockMap, sharpness, planeIndex, 1, edgeSamples);
     }
 
     /// Applies one vertical or horizontal loop-filter pass to one plane.
@@ -241,13 +242,15 @@ public final class LoopFilterApplier {
     /// @param sharpness the frame loop-filter sharpness
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
     /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
+    /// @param edgeSamples reusable boundary-relative sample storage
     private static void applyPass(
             PlaneBuffer plane,
             Av1ChromaFormat chromaFormat,
             LoopFilterBlockMap blockMap,
             int sharpness,
             int planeIndex,
-            int pass
+            int pass,
+            int[] edgeSamples
     ) {
         int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(chromaFormat);
         int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(chromaFormat);
@@ -256,13 +259,35 @@ public final class LoopFilterApplier {
         if (pass == 0) {
             for (int row4 = 0; row4 < blockMap.height4(); row4 += rowStep) {
                 for (int col4 = colStep; col4 < blockMap.width4(); col4 += colStep) {
-                    filterEdge(plane, blockMap, sharpness, planeIndex, pass, row4, col4, subX, subY);
+                    filterEdge(
+                            plane,
+                            blockMap,
+                            sharpness,
+                            planeIndex,
+                            pass,
+                            row4,
+                            col4,
+                            subX,
+                            subY,
+                            edgeSamples
+                    );
                 }
             }
         } else {
             for (int row4 = rowStep; row4 < blockMap.height4(); row4 += rowStep) {
                 for (int col4 = 0; col4 < blockMap.width4(); col4 += colStep) {
-                    filterEdge(plane, blockMap, sharpness, planeIndex, pass, row4, col4, subX, subY);
+                    filterEdge(
+                            plane,
+                            blockMap,
+                            sharpness,
+                            planeIndex,
+                            pass,
+                            row4,
+                            col4,
+                            subX,
+                            subY,
+                            edgeSamples
+                    );
                 }
             }
         }
@@ -279,6 +304,7 @@ public final class LoopFilterApplier {
     /// @param col4 the luma 4x4 column coordinate of the edge
     /// @param subX the plane horizontal subsampling shift
     /// @param subY the plane vertical subsampling shift
+    /// @param edgeSamples reusable boundary-relative sample storage
     private static void filterEdge(
             PlaneBuffer plane,
             LoopFilterBlockMap blockMap,
@@ -288,7 +314,8 @@ public final class LoopFilterApplier {
             int row4,
             int col4,
             int subX,
-            int subY
+            int subY,
+            int[] edgeSamples
     ) {
         int prevCol4 = col4 - (pass == 0 ? Math.max(1, 1 << subX) : 0);
         int prevRow4 = row4 - (pass == 1 ? Math.max(1, 1 << subY) : 0);
@@ -356,7 +383,7 @@ public final class LoopFilterApplier {
         for (int i = 0; i < samples; i++) {
             int sampleX = x + (pass == 0 ? 0 : i);
             int sampleY = y + (pass == 0 ? i : 0);
-            applySampleFilter(plane, sampleX, sampleY, dx, dy, filterSize, strength);
+            applySampleFilter(plane, sampleX, sampleY, dx, dy, filterSize, strength, edgeSamples);
         }
     }
 
@@ -391,6 +418,7 @@ public final class LoopFilterApplier {
     /// @param dy the vertical offset across the boundary
     /// @param filterSize the selected maximum filter size in samples
     /// @param strength the derived filter strength parameters
+    /// @param edgeSamples reusable boundary-relative sample storage
     private static void applySampleFilter(
             PlaneBuffer plane,
             int x,
@@ -398,20 +426,21 @@ public final class LoopFilterApplier {
             int dx,
             int dy,
             int filterSize,
-            int strength
+            int strength,
+            int[] edgeSamples
     ) {
-        int mask = filterMask(plane, x, y, dx, dy, filterSize, strength);
+        int mask = filterMask(plane, x, y, dx, dy, filterSize, strength, edgeSamples);
         if ((mask & FILTER_MASK_FILTER) == 0) {
             return;
         }
         if (filterSize == 4 || (mask & FILTER_MASK_FLAT) == 0) {
-            narrowFilter(plane, x, y, dx, dy, (mask & FILTER_MASK_HIGH_EDGE_VARIANCE) != 0);
+            narrowFilter(plane, x, y, dx, dy, (mask & FILTER_MASK_HIGH_EDGE_VARIANCE) != 0, edgeSamples);
         } else if (filterSize == 6) {
-            wideFilterSix(plane, x, y, dx, dy);
+            wideFilterSix(plane, x, y, dx, dy, edgeSamples);
         } else if (filterSize == 8 || (mask & FILTER_MASK_FLAT2) == 0) {
-            wideFilterEight(plane, x, y, dx, dy);
+            wideFilterEight(plane, x, y, dx, dy, edgeSamples);
         } else {
-            wideFilterSixteen(plane, x, y, dx, dy);
+            wideFilterSixteen(plane, x, y, dx, dy, edgeSamples);
         }
     }
 
@@ -424,6 +453,7 @@ public final class LoopFilterApplier {
     /// @param dy the vertical offset across the boundary
     /// @param filterSize the selected maximum filter size
     /// @param strength the derived filter strength parameters
+    /// @param edgeSamples reusable boundary-relative sample storage
     /// @return the filter masks for one boundary sample
     private static int filterMask(
             PlaneBuffer plane,
@@ -432,17 +462,21 @@ public final class LoopFilterApplier {
             int dx,
             int dy,
             int filterSize,
-            int strength
+            int strength,
+            int[] edgeSamples
     ) {
+        int firstOffset = filterSize == 4 ? -2 : filterSize == 6 ? -3 : -4;
+        int lastOffset = filterSize == 4 ? 1 : filterSize == 6 ? 2 : 3;
+        loadEdgeSamples(plane, x, y, dx, dy, firstOffset, lastOffset, edgeSamples);
         int bitDepthShift = plane.bitDepth() - 8;
         int thresholdBd = 1 << bitDepthShift;
         int limitBd = strengthLimit(strength) << bitDepthShift;
         int blimitBd = strengthBoundaryLimit(strength) << bitDepthShift;
         int threshBd = strengthThreshold(strength) << bitDepthShift;
-        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
-        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
-        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
-        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
+        int p0 = edgeSamples[6];
+        int p1 = edgeSamples[5];
+        int q0 = edgeSamples[7];
+        int q1 = edgeSamples[8];
 
         boolean highEdgeVariance = Math.abs(p1 - p0) > threshBd || Math.abs(q1 - q0) > threshBd;
         boolean filtered = Math.abs(p1 - p0) <= limitBd
@@ -451,8 +485,8 @@ public final class LoopFilterApplier {
         boolean flat = false;
         boolean flat2 = false;
         if (filterSize > 4) {
-            int p2 = sampleRelative(plane, x, y, dx, dy, -3);
-            int q2 = sampleRelative(plane, x, y, dx, dy, 2);
+            int p2 = edgeSamples[4];
+            int q2 = edgeSamples[9];
             filtered = filtered
                     && Math.abs(p2 - p1) <= limitBd
                     && Math.abs(q2 - q1) <= limitBd;
@@ -461,8 +495,8 @@ public final class LoopFilterApplier {
                     && Math.abs(q1 - q0) <= thresholdBd
                     && Math.abs(q2 - q0) <= thresholdBd;
             if (filterSize > 6) {
-                int p3 = sampleRelative(plane, x, y, dx, dy, -4);
-                int q3 = sampleRelative(plane, x, y, dx, dy, 3);
+                int p3 = edgeSamples[3];
+                int q3 = edgeSamples[10];
                 filtered = filtered
                         && Math.abs(p3 - p2) <= limitBd
                         && Math.abs(q3 - q2) <= limitBd;
@@ -472,12 +506,14 @@ public final class LoopFilterApplier {
             }
         }
         if (filterSize >= 16 && flat) {
-            flat2 = Math.abs(sampleRelative(plane, x, y, dx, dy, -7) - p0) <= thresholdBd
-                    && Math.abs(sampleRelative(plane, x, y, dx, dy, 6) - q0) <= thresholdBd
-                    && Math.abs(sampleRelative(plane, x, y, dx, dy, -6) - p0) <= thresholdBd
-                    && Math.abs(sampleRelative(plane, x, y, dx, dy, 5) - q0) <= thresholdBd
-                    && Math.abs(sampleRelative(plane, x, y, dx, dy, -5) - p0) <= thresholdBd
-                    && Math.abs(sampleRelative(plane, x, y, dx, dy, 4) - q0) <= thresholdBd;
+            loadEdgeSamples(plane, x, y, dx, dy, -7, -5, edgeSamples);
+            loadEdgeSamples(plane, x, y, dx, dy, 4, 6, edgeSamples);
+            flat2 = Math.abs(edgeSamples[0] - p0) <= thresholdBd
+                    && Math.abs(edgeSamples[13] - q0) <= thresholdBd
+                    && Math.abs(edgeSamples[1] - p0) <= thresholdBd
+                    && Math.abs(edgeSamples[12] - q0) <= thresholdBd
+                    && Math.abs(edgeSamples[2] - p0) <= thresholdBd
+                    && Math.abs(edgeSamples[11] - q0) <= thresholdBd;
         }
         return (highEdgeVariance ? FILTER_MASK_HIGH_EDGE_VARIANCE : 0)
                 | (filtered ? FILTER_MASK_FILTER : 0)
@@ -493,19 +529,21 @@ public final class LoopFilterApplier {
     /// @param dx the horizontal offset across the boundary
     /// @param dy the vertical offset across the boundary
     /// @param highEdgeVariance whether high edge variance was detected
+    /// @param edgeSamples boundary-relative samples loaded while computing the filter mask
     private static void narrowFilter(
             PlaneBuffer plane,
             int x,
             int y,
             int dx,
             int dy,
-            boolean highEdgeVariance
+            boolean highEdgeVariance,
+            int[] edgeSamples
     ) {
         int offset = 0x80 << (plane.bitDepth() - 8);
-        int qs0 = sampleRelative(plane, x, y, dx, dy, 0) - offset;
-        int qs1 = sampleRelative(plane, x, y, dx, dy, 1) - offset;
-        int ps0 = sampleRelative(plane, x, y, dx, dy, -1) - offset;
-        int ps1 = sampleRelative(plane, x, y, dx, dy, -2) - offset;
+        int qs0 = edgeSamples[7] - offset;
+        int qs1 = edgeSamples[8] - offset;
+        int ps0 = edgeSamples[6] - offset;
+        int ps1 = edgeSamples[5] - offset;
         int filter = highEdgeVariance ? filter4Clamp(ps1 - qs1, plane.bitDepth()) : 0;
         filter = filter4Clamp(filter + 3 * (qs0 - ps0), plane.bitDepth());
         int filter1 = filter4Clamp(filter + 4, plane.bitDepth()) >> 3;
@@ -526,13 +564,14 @@ public final class LoopFilterApplier {
     /// @param y the first sample on the right or lower side of the boundary
     /// @param dx the horizontal offset across the boundary
     /// @param dy the vertical offset across the boundary
-    private static void wideFilterSix(PlaneBuffer plane, int x, int y, int dx, int dy) {
-        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
-        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
-        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
-        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
-        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
-        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
+    /// @param edgeSamples boundary-relative samples loaded while computing the filter mask
+    private static void wideFilterSix(PlaneBuffer plane, int x, int y, int dx, int dy, int[] edgeSamples) {
+        int p2 = edgeSamples[4];
+        int p1 = edgeSamples[5];
+        int p0 = edgeSamples[6];
+        int q0 = edgeSamples[7];
+        int q1 = edgeSamples[8];
+        int q2 = edgeSamples[9];
         setSampleRelative(plane, x, y, dx, dy, -2, (p2 + 2 * p2 + 2 * p1 + 2 * p0 + q0 + 4) >> 3);
         setSampleRelative(plane, x, y, dx, dy, -1, (p2 + 2 * p1 + 2 * p0 + 2 * q0 + q1 + 4) >> 3);
         setSampleRelative(plane, x, y, dx, dy, 0, (p1 + 2 * p0 + 2 * q0 + 2 * q1 + q2 + 4) >> 3);
@@ -546,15 +585,16 @@ public final class LoopFilterApplier {
     /// @param y the first sample on the right or lower side of the boundary
     /// @param dx the horizontal offset across the boundary
     /// @param dy the vertical offset across the boundary
-    private static void wideFilterEight(PlaneBuffer plane, int x, int y, int dx, int dy) {
-        int p3 = sampleRelative(plane, x, y, dx, dy, -4);
-        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
-        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
-        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
-        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
-        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
-        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
-        int q3 = sampleRelative(plane, x, y, dx, dy, 3);
+    /// @param edgeSamples boundary-relative samples loaded while computing the filter mask
+    private static void wideFilterEight(PlaneBuffer plane, int x, int y, int dx, int dy, int[] edgeSamples) {
+        int p3 = edgeSamples[3];
+        int p2 = edgeSamples[4];
+        int p1 = edgeSamples[5];
+        int p0 = edgeSamples[6];
+        int q0 = edgeSamples[7];
+        int q1 = edgeSamples[8];
+        int q2 = edgeSamples[9];
+        int q3 = edgeSamples[10];
         setSampleRelative(plane, x, y, dx, dy, -3, (p3 + p3 + p3 + 2 * p2 + p1 + p0 + q0 + 4) >> 3);
         setSampleRelative(plane, x, y, dx, dy, -2, (p3 + p3 + p2 + 2 * p1 + p0 + q0 + q1 + 4) >> 3);
         setSampleRelative(plane, x, y, dx, dy, -1, (p3 + p2 + p1 + 2 * p0 + q0 + q1 + q2 + 4) >> 3);
@@ -570,21 +610,22 @@ public final class LoopFilterApplier {
     /// @param y the first sample on the right or lower side of the boundary
     /// @param dx the horizontal offset across the boundary
     /// @param dy the vertical offset across the boundary
-    private static void wideFilterSixteen(PlaneBuffer plane, int x, int y, int dx, int dy) {
-        int p6 = sampleRelative(plane, x, y, dx, dy, -7);
-        int p5 = sampleRelative(plane, x, y, dx, dy, -6);
-        int p4 = sampleRelative(plane, x, y, dx, dy, -5);
-        int p3 = sampleRelative(plane, x, y, dx, dy, -4);
-        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
-        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
-        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
-        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
-        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
-        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
-        int q3 = sampleRelative(plane, x, y, dx, dy, 3);
-        int q4 = sampleRelative(plane, x, y, dx, dy, 4);
-        int q5 = sampleRelative(plane, x, y, dx, dy, 5);
-        int q6 = sampleRelative(plane, x, y, dx, dy, 6);
+    /// @param edgeSamples boundary-relative samples loaded while computing the filter mask
+    private static void wideFilterSixteen(PlaneBuffer plane, int x, int y, int dx, int dy, int[] edgeSamples) {
+        int p6 = edgeSamples[0];
+        int p5 = edgeSamples[1];
+        int p4 = edgeSamples[2];
+        int p3 = edgeSamples[3];
+        int p2 = edgeSamples[4];
+        int p1 = edgeSamples[5];
+        int p0 = edgeSamples[6];
+        int q0 = edgeSamples[7];
+        int q1 = edgeSamples[8];
+        int q2 = edgeSamples[9];
+        int q3 = edgeSamples[10];
+        int q4 = edgeSamples[11];
+        int q5 = edgeSamples[12];
+        int q6 = edgeSamples[13];
         setSampleRelative(plane, x, y, dx, dy, -6,
                 (p6 + p6 + p6 + p6 + p6 + p6 * 2 + p5 * 2 + p4 * 2 + p3 + p2 + p1 + p0 + q0 + 8) >> 4);
         setSampleRelative(plane, x, y, dx, dy, -5,
@@ -785,17 +826,29 @@ public final class LoopFilterApplier {
                 || (hasChroma && (loopFilter.levelU() != 0 || loopFilter.levelV() != 0));
     }
 
-    /// Returns one sample at a boundary-relative offset.
+    /// Loads a contiguous range of boundary-relative samples.
     ///
     /// @param plane the mutable plane buffer
     /// @param x the first sample on the right or lower side of the boundary
     /// @param y the first sample on the right or lower side of the boundary
     /// @param dx the horizontal offset across the boundary
     /// @param dy the vertical offset across the boundary
-    /// @param offset the signed boundary-relative sample offset
-    /// @return one sample at a boundary-relative offset
-    private static int sampleRelative(PlaneBuffer plane, int x, int y, int dx, int dy, int offset) {
-        return plane.sampleClamped(x + dx * offset, y + dy * offset);
+    /// @param firstOffset the first signed boundary-relative sample offset
+    /// @param lastOffset the last signed boundary-relative sample offset
+    /// @param edgeSamples destination storage indexed by `offset + 7`
+    private static void loadEdgeSamples(
+            PlaneBuffer plane,
+            int x,
+            int y,
+            int dx,
+            int dy,
+            int firstOffset,
+            int lastOffset,
+            int[] edgeSamples
+    ) {
+        for (int offset = firstOffset; offset <= lastOffset; offset++) {
+            edgeSamples[offset + 7] = plane.sampleClamped(x + dx * offset, y + dy * offset);
+        }
     }
 
     /// Stores one sample at a boundary-relative offset.

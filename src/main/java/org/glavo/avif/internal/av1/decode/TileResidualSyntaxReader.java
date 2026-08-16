@@ -16,6 +16,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Reads AV1 luma and chroma transform-coefficient syntax from one tile bitstream.
@@ -129,6 +130,9 @@ public final class TileResidualSyntaxReader {
 
     /// The tile origin on the frame luma-grid Y axis.
     private final int frameOffsetY4;
+
+    /// Reusable zero-filled coefficient-level context grid for the current residual unit.
+    private final CoefficientLevelGrid coefficientLevelGrid = new CoefficientLevelGrid();
 
     /// Creates one tile-local residual syntax reader.
     ///
@@ -552,8 +556,7 @@ public final class TileResidualSyntaxReader {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int[] coefficients = new int[16];
-        int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
-        CoefficientLevelGrid levelBytes = new CoefficientLevelGrid(
+        CoefficientLevelGrid levelBytes = coefficientLevelGrid.reset(
                 FOUR_BY_FOUR_LEVEL_GRID_SIZE,
                 FOUR_BY_FOUR_LEVEL_GRID_SIZE
         );
@@ -573,7 +576,7 @@ public final class TileResidualSyntaxReader {
                         fourByFourEndOfBlockHighTokenContext(nonNullTransformType, lastX, lastY)
                 );
             }
-            coefficientTokens[endOfBlockIndex] = lastToken;
+            coefficients[fourByFourCoefficientIndex(nonNullTransformType, endOfBlockIndex)] = lastToken;
             levelBytes.set(lastX, lastY, coefficientLevelByte(lastToken));
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
@@ -591,7 +594,7 @@ public final class TileResidualSyntaxReader {
                             fourByFourHighTokenContext(nonNullTransformType, levelBytes, x, y)
                     );
                 }
-                coefficientTokens[scanIndex] = token;
+                coefficients[fourByFourCoefficientIndex(nonNullTransformType, scanIndex)] = token;
                 levelBytes.set(x, y, coefficientLevelByte(token));
             }
         }
@@ -625,7 +628,8 @@ public final class TileResidualSyntaxReader {
         }
 
         for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
-            int token = coefficientTokens[scanIndex];
+            int coefficientIndex = fourByFourCoefficientIndex(nonNullTransformType, scanIndex);
+            int token = coefficients[coefficientIndex];
             if (token == 0) {
                 continue;
             }
@@ -633,7 +637,7 @@ public final class TileResidualSyntaxReader {
             if (token == 15) {
                 token = maskCoefficientMagnitude(token + syntaxReader.readCoefficientGolomb());
             }
-            coefficients[fourByFourCoefficientIndex(nonNullTransformType, scanIndex)] = negative ? -token : token;
+            coefficients[coefficientIndex] = negative ? -token : token;
             cumulativeLevel += token;
         }
 
@@ -674,8 +678,7 @@ public final class TileResidualSyntaxReader {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int[] coefficients = new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()];
-        int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
-        CoefficientLevelGrid levelBytes = createGenericLevelGrid(nonNullTransformSize, nonNullTransformType);
+        CoefficientLevelGrid levelBytes = resetGenericLevelGrid(nonNullTransformSize, nonNullTransformType);
         if (endOfBlockIndex > 0) {
             int lastX = genericLevelX(nonNullTransformSize, nonNullTransformType, endOfBlockIndex);
             int lastY = genericLevelY(nonNullTransformSize, nonNullTransformType, endOfBlockIndex);
@@ -691,7 +694,7 @@ public final class TileResidualSyntaxReader {
                         genericEndOfBlockHighTokenContext(nonNullTransformType, lastX, lastY)
                 );
             }
-            coefficientTokens[endOfBlockIndex] = lastToken;
+            coefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, endOfBlockIndex)] = lastToken;
             levelBytes.set(lastX, lastY, coefficientLevelByte(lastToken));
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
@@ -709,7 +712,7 @@ public final class TileResidualSyntaxReader {
                             genericHighTokenContext(nonNullTransformType, levelBytes, x, y)
                     );
                 }
-                coefficientTokens[scanIndex] = token;
+                coefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)] = token;
                 levelBytes.set(x, y, coefficientLevelByte(token));
             }
         }
@@ -743,7 +746,8 @@ public final class TileResidualSyntaxReader {
         }
 
         for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
-            int token = coefficientTokens[scanIndex];
+            int coefficientIndex = coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex);
+            int token = coefficients[coefficientIndex];
             if (token == 0) {
                 continue;
             }
@@ -751,7 +755,7 @@ public final class TileResidualSyntaxReader {
             if (token == 15) {
                 token = maskCoefficientMagnitude(token + syntaxReader.readCoefficientGolomb());
             }
-            coefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)] = negative ? -token : token;
+            coefficients[coefficientIndex] = negative ? -token : token;
             cumulativeLevel += token;
         }
 
@@ -1076,12 +1080,12 @@ public final class TileResidualSyntaxReader {
         return (row << (nonNullTransformSize.log2Width4() + 2)) | column;
     }
 
-    /// Creates the padded larger-transform `levels` grid used by coefficient token contexts.
+    /// Resets the padded larger-transform `levels` grid used by coefficient token contexts.
     ///
     /// @param transformSize the active transform size
     /// @param transformType the active transform type
-    /// @return a padded zero-filled level grid
-    private static CoefficientLevelGrid createGenericLevelGrid(
+    /// @return the reusable padded zero-filled level grid
+    private CoefficientLevelGrid resetGenericLevelGrid(
             TransformSize transformSize,
             TransformType transformType
     ) {
@@ -1099,7 +1103,7 @@ public final class TileResidualSyntaxReader {
             width = 4 << Math.min(nonNullTransformSize.log2Height4(), 3);
             height = coefficientCount(nonNullTransformSize) / width;
         }
-        return new CoefficientLevelGrid(width + 5, height + 5);
+        return coefficientLevelGrid.reset(width + 5, height + 5);
     }
 
     /// Returns the coefficient-context grid X coordinate for one larger-transform scan index.
@@ -1568,25 +1572,36 @@ public final class TileResidualSyntaxReader {
         return row * outputWidth + column;
     }
 
-    /// Flat zero-filled coefficient-level grid addressed in AV1's X-major scratch layout.
+    /// Reusable flat coefficient-level grid addressed in AV1's X-major scratch layout.
     @NotNullByDefault
     private static final class CoefficientLevelGrid {
         /// The number of stored Y coordinates per X coordinate.
-        private final int height;
+        private int height;
 
         /// The flattened X-major level values.
-        private final int[] values;
+        private int[] values = new int[0];
 
-        /// Creates one zero-filled coefficient-level grid.
+        /// Creates an empty reusable coefficient-level grid.
+        private CoefficientLevelGrid() {
+        }
+
+        /// Resizes this grid if necessary and clears the active extent.
         ///
         /// @param width the stored X extent
         /// @param height the stored Y extent
-        private CoefficientLevelGrid(int width, int height) {
+        /// @return this zero-filled grid
+        private CoefficientLevelGrid reset(int width, int height) {
             if (width <= 0 || height <= 0) {
                 throw new IllegalArgumentException("Coefficient level-grid dimensions must be positive");
             }
+            int requiredLength = Math.multiplyExact(width, height);
+            if (values.length < requiredLength) {
+                values = new int[requiredLength];
+            } else {
+                Arrays.fill(values, 0, requiredLength, 0);
+            }
             this.height = height;
-            this.values = new int[Math.multiplyExact(width, height)];
+            return this;
         }
 
         /// Returns one stored level value.

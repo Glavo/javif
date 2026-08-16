@@ -83,6 +83,9 @@ public final class FrameReconstructor {
     /// Inverse transformer with scratch storage and clip state owned by this reconstructor.
     private final InverseTransformer inverseTransformer = new InverseTransformer();
 
+    /// Reusable per-block flags that track applied chroma residual units.
+    private boolean[] appliedChromaResiduals = new boolean[0];
+
     /// The AV1 OBMC blend masks indexed by overlap length `1, 2, 4, 8, 16, 32, 64`.
     private static final int @Unmodifiable [] @Unmodifiable [] OBMC_MASKS = {
             {64},
@@ -6142,7 +6145,7 @@ public final class FrameReconstructor {
         int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int blockX = chromaBlockX(header, chromaSubsamplingX);
         int blockY = chromaBlockY(header, chromaSubsamplingY);
-        boolean[] appliedResiduals = new boolean[residualLayout.chromaUnitCount()];
+        boolean[] appliedResiduals = resetAppliedChromaResiduals(residualLayout.chromaUnitCount());
         for (int transformIndex = 0; transformIndex < transformLayout.chromaUnitCount(); transformIndex++) {
             TransformUnit transformUnit = transformLayout.chromaUnit(transformIndex);
             int predictionX = transformUnit.position().x4() << (2 - chromaSubsamplingX);
@@ -6222,6 +6225,19 @@ public final class FrameReconstructor {
                 );
             }
         }
+    }
+
+    /// Returns reusable zero-filled flags for one block's chroma residual units.
+    ///
+    /// @param requiredLength the number of residual-unit flags required by the current block
+    /// @return reusable zero-filled flag storage
+    private boolean[] resetAppliedChromaResiduals(int requiredLength) {
+        if (appliedChromaResiduals.length < requiredLength) {
+            appliedChromaResiduals = new boolean[requiredLength];
+        } else {
+            Arrays.fill(appliedChromaResiduals, 0, requiredLength, false);
+        }
+        return appliedChromaResiduals;
     }
 
     /// Returns whether one residual unit maps exactly to one transform unit.
