@@ -175,7 +175,12 @@ final class FrameSyntaxDecoderTest {
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(referenceResult).decode(currentAssembly);
 
-        assertArrayEquals(new int[]{32000, 32}, referenceResult.contextUpdateTileCdfContext().mutableSkipCdf(0));
+        assertArrayEquals(
+                new int[]{32000, 32},
+                referenceResult.finalTileCdfContext(
+                        referenceResult.assembly().frameHeader().tiling().updateTileIndex()
+                ).mutableSkipCdf(0)
+        );
         assertArrayEquals(new int[]{32000, 0}, referenceResult.savedFrameCdfContext().mutableSkipCdf(0));
         assertTrue(firstLeaf(result.tileRoots(0)).header().skip());
     }
@@ -190,20 +195,6 @@ final class FrameSyntaxDecoderTest {
 
         assertEquals(1, result.tileCount());
         assertEquals(BlockSize.SIZE_8X8, firstLeaf(result.tileRoots(0)).header().size());
-    }
-
-    /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.
-    @Test
-    void frameSyntaxDecodeResultCanReplaceStoredTileCdfContexts() {
-        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
-        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
-        CdfContext replacementCdf = CdfContext.createDefault();
-        replacementCdf.mutableSkipCdf(0)[0] = 32000;
-
-        FrameSyntaxDecodeResult replaced = result.withFinalTileCdfContexts(new CdfContext[]{replacementCdf});
-
-        assertEquals(32000, replaced.finalTileCdfContext(0).mutableSkipCdf(0)[0]);
-        assertEquals(result.decodedTemporalMotionField(0).block(0, 0), replaced.decodedTemporalMotionField(0).block(0, 0));
     }
 
     /// Verifies that compact reference state retains every later-decoder input while returning
@@ -437,7 +428,7 @@ final class FrameSyntaxDecoderTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         TileBitstream[] tileBitstreams = new TileBitstream[tilePayloads.length];

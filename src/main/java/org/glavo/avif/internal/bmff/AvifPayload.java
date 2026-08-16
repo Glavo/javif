@@ -6,12 +6,10 @@ import org.glavo.avif.internal.io.BufferedInput;
 import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jetbrains.annotations.UnmodifiableView;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -83,16 +81,6 @@ public final class AvifPayload {
         return new AvifPayload(source, offsets, lengths);
     }
 
-    /// Creates an independently owned payload by copying an array.
-    ///
-    /// @param bytes the payload bytes to copy
-    /// @return the independently owned payload
-    public static AvifPayload copyOf(byte[] bytes) {
-        byte[] copy = Objects.requireNonNull(bytes, "bytes").clone();
-        AvifDataSource source = AvifDataSource.ofBytes(copy);
-        return new AvifPayload(source, new long[]{0L}, new int[]{copy.length});
-    }
-
     /// Returns the logical payload length.
     ///
     /// @return the sum of all extent lengths in bytes
@@ -119,17 +107,6 @@ public final class AvifPayload {
     /// @return a new input positioned at the first byte of the first payload
     public static BufferedInput openInput(@Unmodifiable AvifPayload @Unmodifiable [] payloads) {
         return new PayloadInput(payloads);
-    }
-
-    /// Copies this payload into a read-only little-endian byte buffer.
-    ///
-    /// This method is intended for diagnostics and tests. Decoding should use [#openInput()] to
-    /// avoid materializing the complete payload.
-    ///
-    /// @return a newly allocated read-only payload buffer
-    /// @throws IOException if the backing source cannot be read
-    public @UnmodifiableView ByteBuffer readBuffer() throws IOException {
-        return ByteBuffer.wrap(readBytes()).asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
     }
 
     /// Copies this payload into a newly allocated byte array.

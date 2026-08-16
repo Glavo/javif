@@ -91,7 +91,7 @@ public final class PaddedPlane {
                 width,
                 height,
                 stride,
-                ShortBuffer.wrap(Objects.requireNonNull(samples, "samples")).asReadOnlyBuffer()
+                ShortBuffer.wrap(Objects.requireNonNull(samples, "samples"))
         );
     }
 
@@ -140,7 +140,7 @@ public final class PaddedPlane {
     ///
     /// @return a read-only view of the stored unsigned sample values
     public @UnmodifiableView ShortBuffer sampleBuffer() {
-        return samples.slice(0, stride * height).asReadOnlyBuffer();
+        return samples.slice(0, stride * height);
     }
 
     /// Returns one unsigned sample value.

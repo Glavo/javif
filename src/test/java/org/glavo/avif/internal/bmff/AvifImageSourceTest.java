@@ -2,40 +2,37 @@
 // SPDX-License-Identifier: MPL-2.0
 package org.glavo.avif.internal.bmff;
 
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.ReadOnlyBufferException;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests normalized AVIF image-source storage and geometry validation.
 @NotNullByDefault
 final class AvifImageSourceTest {
-    /// Verifies that a standalone source owns its payload and returns independent read-only views.
+    /// Verifies that a standalone source retains its immutable payload descriptor and geometry.
     @Test
-    void itemDefensivelyCopiesPayload() throws IOException {
-        byte[] payload = {1, 2, 3};
-        AvifImageSource source = AvifImageSource.item(payload, 7, 16, 9);
-        payload[0] = 99;
+    void itemRetainsPayloadDescriptor() throws IOException {
+        AvifPayload payload = payload(1, 2, 3);
+        AvifImageSource source = AvifImageSource.item(
+                payload,
+                7,
+                AvifImageSource.HIGHEST_SPATIAL_LAYER,
+                16,
+                9
+        );
 
-        ByteBuffer firstView = source.payload(0).readBuffer();
-        assertTrue(firstView.isReadOnly());
-        assertEquals(ByteOrder.LITTLE_ENDIAN, firstView.order());
-        assertEquals(1, firstView.get(0));
-        assertThrows(ReadOnlyBufferException.class, () -> firstView.put(0, (byte) 4));
-
-        firstView.position(2);
-        assertEquals(0, source.payload(0).readBuffer().position());
+        assertSame(payload, source.payload(0));
+        assertArrayEquals(new byte[]{1, 2, 3}, source.payload(0).readBytes());
         assertFalse(source.isGrid());
-        assertEquals(1, source.payloadCount());
         assertEquals(7, source.operatingPoint(0));
         assertEquals(AvifImageSource.HIGHEST_SPATIAL_LAYER, source.selectedSpatialLayer(0));
         assertEquals(1, source.rows());
@@ -47,7 +44,8 @@ final class AvifImageSourceTest {
     /// Verifies that a grid source retains per-cell selections without aliasing input arrays.
     @Test
     void gridDefensivelyCopiesPayloadsAndOperatingPoints() throws IOException {
-        byte[][] payloads = {{1}, {2}, {3}, {4}};
+        AvifPayload[] payloads = {payload(1), payload(2), payload(3), payload(4)};
+        AvifPayload secondPayload = payloads[1];
         int[] operatingPoints = {0, 1, 2, 3};
         int[] selectedSpatialLayers = {
                 AvifImageSource.HIGHEST_SPATIAL_LAYER,
@@ -68,30 +66,33 @@ final class AvifImageSourceTest {
                 31,
                 17
         );
-        payloads[1][0] = 99;
+        payloads[1] = payload(99);
         operatingPoints[1] = 17;
         selectedSpatialLayers[1] = 3;
         cellWidths[1] = 99;
         cellHeights[1] = 99;
 
         assertTrue(source.isGrid());
-        assertEquals(4, source.payloadCount());
-        assertEquals(2, source.payload(1).readBuffer().get(0));
+        assertSame(secondPayload, source.payload(1));
+        assertArrayEquals(new byte[]{2}, source.payload(1).readBytes());
         assertEquals(1, source.operatingPoint(1));
-        assertArrayEquals(new int[]{0, 1, 2, 3}, source.operatingPoints());
         assertEquals(0, source.selectedSpatialLayer(1));
-        assertArrayEquals(new int[]{-1, 0, 1, 3}, source.selectedSpatialLayers());
         assertEquals(16, source.itemWidth(1));
         assertEquals(9, source.itemHeight(1));
-        assertArrayEquals(new int[]{16, 16, 16, 16}, source.itemWidths());
-        assertArrayEquals(new int[]{9, 9, 9, 9}, source.itemHeights());
+        int[] expectedSpatialLayers = {-1, 0, 1, 3};
+        for (int index = 0; index < 4; index++) {
+            assertEquals(index, source.operatingPoint(index));
+            assertEquals(expectedSpatialLayers[index], source.selectedSpatialLayer(index));
+            assertEquals(16, source.itemWidth(index));
+            assertEquals(9, source.itemHeight(index));
+        }
         assertEquals(2, source.rows());
         assertEquals(2, source.columns());
         assertEquals(31, source.outputWidth());
         assertEquals(17, source.outputHeight());
 
         AvifPayload[] views = source.payloads();
-        views[0] = AvifPayload.copyOf(new byte[0]);
+        views[0] = payload();
         assertEquals(1, source.payload(0).length());
     }
 
@@ -99,18 +100,18 @@ final class AvifImageSourceTest {
     @Test
     void rejectsInvalidSourceDescriptions() {
         assertThrows(IllegalArgumentException.class,
-                () -> AvifImageSource.item(new byte[]{1}, -1, 1, 1));
+                () -> AvifImageSource.item(payload(1), -1, AvifImageSource.HIGHEST_SPATIAL_LAYER, 1, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> AvifImageSource.item(new byte[]{1}, 32, 1, 1));
+                () -> AvifImageSource.item(payload(1), 32, AvifImageSource.HIGHEST_SPATIAL_LAYER, 1, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> AvifImageSource.item(new byte[]{1}, 0, -2, 1, 1));
+                () -> AvifImageSource.item(payload(1), 0, -2, 1, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> AvifImageSource.item(new byte[]{1}, 0, 4, 1, 1));
+                () -> AvifImageSource.item(payload(1), 0, 4, 1, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> AvifImageSource.item(new byte[]{1}, 0, 0, 1));
+                () -> AvifImageSource.item(payload(1), 0, AvifImageSource.HIGHEST_SPATIAL_LAYER, 0, 1));
         assertThrows(IllegalArgumentException.class,
                 () -> AvifImageSource.grid(
-                        new byte[][]{{1}},
+                        new AvifPayload[]{payload(1)},
                         new int[]{0},
                         new int[]{0},
                         new int[]{1},
@@ -122,7 +123,7 @@ final class AvifImageSourceTest {
                 ));
         assertThrows(IllegalArgumentException.class,
                 () -> AvifImageSource.grid(
-                        new byte[][]{{1}, {2}},
+                        new AvifPayload[]{payload(1), payload(2)},
                         new int[]{0},
                         new int[]{0, 0},
                         new int[]{1, 1},
@@ -134,7 +135,7 @@ final class AvifImageSourceTest {
                 ));
         assertThrows(IllegalArgumentException.class,
                 () -> AvifImageSource.grid(
-                        new byte[][]{{1}, {2}},
+                        new AvifPayload[]{payload(1), payload(2)},
                         new int[]{0, 0},
                         new int[]{0},
                         new int[]{1, 1},
@@ -146,7 +147,7 @@ final class AvifImageSourceTest {
                 ));
         assertThrows(IllegalArgumentException.class,
                 () -> AvifImageSource.grid(
-                        new byte[][]{{1}},
+                        new AvifPayload[]{payload(1)},
                         new int[]{0},
                         new int[]{0},
                         new int[]{0},
@@ -156,5 +157,17 @@ final class AvifImageSourceTest {
                         1,
                         1
                 ));
+    }
+
+    /// Creates one immutable payload descriptor backed by test-owned memory.
+    ///
+    /// @param values the unsigned byte values
+    /// @return the payload descriptor
+    private static AvifPayload payload(int... values) {
+        byte[] bytes = new byte[values.length];
+        for (int index = 0; index < values.length; index++) {
+            bytes[index] = (byte) values[index];
+        }
+        return AvifPayload.ofRanges(AvifDataSource.ofBytes(bytes), new long[]{0L}, new int[]{bytes.length});
     }
 }

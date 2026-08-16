@@ -212,7 +212,7 @@ final class ReferenceSurfaceSnapshotTest {
                 ),
                 FrameHeader.TransformMode.LARGEST,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 

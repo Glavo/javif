@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
@@ -3291,6 +3292,7 @@ final class FrameReconstructorIntegrationTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 -1,
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
                 visibleWidthPixels,
@@ -3380,6 +3382,7 @@ final class FrameReconstructorIntegrationTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 0,
                 coefficients,
                 visibleWidthPixels,
@@ -5813,7 +5816,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -5928,7 +5931,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -6019,7 +6022,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -6113,7 +6116,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -6208,7 +6211,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -6300,7 +6303,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{0, 1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 

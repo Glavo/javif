@@ -1529,6 +1529,7 @@ final class TileResidualSyntaxReaderTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 endOfBlockIndex,
                 coefficients,
                 visibleWidthPixels,
@@ -1630,6 +1631,7 @@ final class TileResidualSyntaxReaderTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 endOfBlockIndex,
                 coefficients,
                 visibleWidthPixels,
@@ -1733,6 +1735,7 @@ final class TileResidualSyntaxReaderTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 -1,
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
                 visibleWidthPixels,
@@ -2097,7 +2100,7 @@ final class TileResidualSyntaxReaderTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(

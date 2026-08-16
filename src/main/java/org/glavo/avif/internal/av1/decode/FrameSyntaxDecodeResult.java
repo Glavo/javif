@@ -271,16 +271,6 @@ public final class FrameSyntaxDecodeResult {
         return finalTileCdfContexts[checkedTileIndex(tileIndex)].copy();
     }
 
-    /// Returns the raw final CDF context selected by `context_update_tile_id`.
-    ///
-    /// Unlike [#savedFrameCdfContext()], the returned tile-local snapshot retains the adaptive-symbol
-    /// counters accumulated while decoding the selected tile.
-    ///
-    /// @return a snapshot of the selected raw tile-final CDF context
-    public CdfContext contextUpdateTileCdfContext() {
-        return finalTileCdfContext(assembly.frameHeader().tiling().updateTileIndex());
-    }
-
     /// Returns the frame CDF context saved for later `primary_ref_frame` inheritance.
     ///
     /// The context is selected by `context_update_tile_id`. Its thresholds retain the selected
@@ -291,25 +281,6 @@ public final class FrameSyntaxDecodeResult {
     public CdfContext savedFrameCdfContext() {
         return finalTileCdfContexts[assembly.frameHeader().tiling().updateTileIndex()]
                 .copyWithResetSymbolCounters();
-    }
-
-    /// Returns a copy of this structural frame-decode result with replaced final tile-local CDF contexts.
-    ///
-    /// Partition trees and decoded temporal motion fields are preserved while the supplied tile-local
-    /// CDF snapshot becomes the new stored entropy state.
-    ///
-    /// @param replacementTileCdfContexts the replacement final tile-local CDF contexts
-    /// @return a copy of this structural frame-decode result with replaced final tile-local CDF contexts
-    public FrameSyntaxDecodeResult withFinalTileCdfContexts(CdfContext[] replacementTileCdfContexts) {
-        return new FrameSyntaxDecodeResult(
-                assembly,
-                tileRoots(),
-                decodedTemporalMotionFields(),
-                restorationUnitMap,
-                replacementTileCdfContexts,
-                segmentIdMap,
-                true
-        );
     }
 
     /// Validates and returns one tile index.

@@ -252,12 +252,10 @@ public final class TileDecodeContext {
         int columns = tiling.columns();
         int tileRow = tileIndex / columns;
         int tileColumn = tileIndex % columns;
-        int[] columnStarts = tiling.columnStartSuperblocks();
-        int[] rowStarts = tiling.rowStartSuperblocks();
-        int columnStartSuperblock = columnStarts[tileColumn];
-        int columnEndSuperblock = columnStarts[tileColumn + 1];
-        int rowStartSuperblock = rowStarts[tileRow];
-        int rowEndSuperblock = rowStarts[tileRow + 1];
+        int columnStartSuperblock = tiling.columnStartSuperblock(tileColumn);
+        int columnEndSuperblock = tiling.columnStartSuperblock(tileColumn + 1);
+        int rowStartSuperblock = tiling.rowStartSuperblock(tileRow);
+        int rowEndSuperblock = tiling.rowStartSuperblock(tileRow + 1);
         int superblockSize = sequenceHeader.features().use128x128Superblocks() ? 128 : 64;
         int startX = columnStartSuperblock * superblockSize;
         int endX = Math.min(frameHeader.frameSize().codedWidth(), columnEndSuperblock * superblockSize);
@@ -742,11 +740,13 @@ public final class TileDecodeContext {
             currentDeltaLfValues[Objects.checkIndex(index, currentDeltaLfValues.length)] = value;
         }
 
-        /// Returns a copy of the current delta-lf runtime slots.
+        /// Returns the live delta-lf runtime slots for immediate package-local inspection.
         ///
-        /// @return a copy of the current delta-lf runtime slots
-        public int[] currentDeltaLfValues() {
-            return java.util.Arrays.copyOf(currentDeltaLfValues, currentDeltaLfValues.length);
+        /// The caller must not modify or retain the returned array.
+        ///
+        /// @return the current delta-lf runtime slots
+        int[] currentDeltaLfValuesView() {
+            return currentDeltaLfValues;
         }
 
         /// Resets the current-superblock CDEF cache when decoding enters a different superblock.

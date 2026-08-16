@@ -447,11 +447,10 @@ final class CdefApplier {
         if (!hasActiveStrength(strengths)) {
             return plane;
         }
-        short[] outputSamples = plane.samples();
+        @Nullable short[] outputSamples = null;
         int maximumSample = (1 << (bitDepthShift + 8)) - 1;
         int processingWidth = Math.min(unitColumns * unitWidth, plane.stride());
         int processingHeight = Math.min(unitRows * unitHeight, plane.storageHeight());
-        boolean changed = false;
         for (int unitY = 0; unitY < unitRows; unitY++) {
             int planeStartY = unitY * unitHeight;
             if (planeStartY >= processingHeight) {
@@ -485,6 +484,9 @@ final class CdefApplier {
                 if (primaryStrength == 0 && secondaryStrength == 0) {
                     continue;
                 }
+                if (outputSamples == null) {
+                    outputSamples = plane.samples();
+                }
                 filterUnit(
                         plane,
                         outputSamples,
@@ -501,10 +503,9 @@ final class CdefApplier {
                         bitDepthShift,
                         maximumSample
                 );
-                changed = true;
             }
         }
-        return changed
+        return outputSamples != null
                 ? PaddedPlane.fromOwnedSamples(plane.width(), plane.height(), plane.stride(), outputSamples)
                 : plane;
     }

@@ -5,6 +5,7 @@ package org.glavo.avif.internal.av1.recon;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(2, 0, 8)
         );
 
@@ -41,7 +49,14 @@ final class LumaDequantizerTest {
         coefficients[1] = 3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(1, -10, 8)
         );
 
@@ -59,7 +74,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(2, 0, 10)
         );
 
@@ -77,7 +99,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(2, 0, 12)
         );
 
@@ -95,7 +124,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_32X32, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_32X32,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(2, 0, 8)
         );
 
@@ -113,7 +149,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(2, 0, 8, true, 0)
         );
 
@@ -131,7 +174,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(2, 0, 8, true, 15)
         );
 
@@ -149,7 +199,14 @@ final class LumaDequantizerTest {
         coefficients[1] = -0x100010;
 
         int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new LumaDequantizer.Context(255, 0, 8)
         );
 
@@ -169,6 +226,7 @@ final class LumaDequantizerTest {
         TransformResidualUnit residualUnit = new TransformResidualUnit(
                 new BlockPosition(0, 0),
                 TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
                 5,
                 coefficients,
                 0x31
@@ -193,7 +251,14 @@ final class LumaDequantizerTest {
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
                 () -> LumaDequantizer.dequantize(
-                        new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 0, coefficients, 0x01),
+                        new TransformResidualUnit(
+                                new BlockPosition(0, 0),
+                                TransformSize.TX_4X4,
+                                TransformType.DCT_DCT,
+                                0,
+                                coefficients,
+                                0x01
+                        ),
                         new LumaDequantizer.Context(0, 0, 9)
                 )
         );

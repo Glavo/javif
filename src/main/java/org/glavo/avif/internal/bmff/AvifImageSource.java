@@ -119,46 +119,6 @@ public final class AvifImageSource {
         this.outputHeight = outputHeight;
     }
 
-    /// Creates a standalone AV1 item source.
-    ///
-    /// @param payload the AV1 item payload
-    /// @param operatingPoint the selected AV1 operating-point index
-    /// @param outputWidth the reconstructed output width
-    /// @param outputHeight the reconstructed output height
-    /// @return the immutable standalone source
-    public static AvifImageSource item(byte[] payload, int operatingPoint, int outputWidth, int outputHeight) {
-        return item(payload, operatingPoint, HIGHEST_SPATIAL_LAYER, outputWidth, outputHeight);
-    }
-
-    /// Creates a standalone AV1 item source with an explicit spatial-layer selection.
-    ///
-    /// @param payload the AV1 item payload
-    /// @param operatingPoint the selected AV1 operating-point index
-    /// @param selectedSpatialLayer the selected spatial-layer identifier, or [#HIGHEST_SPATIAL_LAYER]
-    /// @param outputWidth the reconstructed output width
-    /// @param outputHeight the reconstructed output height
-    /// @return the immutable standalone source
-    public static AvifImageSource item(
-            byte[] payload,
-            int operatingPoint,
-            int selectedSpatialLayer,
-            int outputWidth,
-            int outputHeight
-    ) {
-        return new AvifImageSource(
-                new AvifPayload[]{AvifPayload.copyOf(Objects.requireNonNull(payload, "payload"))},
-                new int[]{operatingPoint},
-                new int[]{selectedSpatialLayer},
-                new int[]{outputWidth},
-                new int[]{outputHeight},
-                false,
-                1,
-                1,
-                outputWidth,
-                outputHeight
-        );
-    }
-
     /// Creates a standalone AV1 item source over an existing payload descriptor.
     ///
     /// @param payload the AV1 item payload descriptor
@@ -183,48 +143,6 @@ public final class AvifImageSource {
                 false,
                 1,
                 1,
-                outputWidth,
-                outputHeight
-        );
-    }
-
-    /// Creates a grid-derived AV1 image source with per-cell spatial-layer selections.
-    ///
-    /// @param cellPayloads the cell AV1 payloads in row-major order
-    /// @param operatingPoints the selected operating point for each cell
-    /// @param selectedSpatialLayers the selected spatial layer for each cell, using
-    ///        [#HIGHEST_SPATIAL_LAYER] where the highest output layer should be used
-    /// @param cellWidths the `ispe` width for each cell
-    /// @param cellHeights the `ispe` height for each cell
-    /// @param rows the grid row count
-    /// @param columns the grid column count
-    /// @param outputWidth the reconstructed output width
-    /// @param outputHeight the reconstructed output height
-    /// @return the immutable grid source
-    public static AvifImageSource grid(
-            byte @Unmodifiable [] @Unmodifiable [] cellPayloads,
-            int @Unmodifiable [] operatingPoints,
-            int @Unmodifiable [] selectedSpatialLayers,
-            int @Unmodifiable [] cellWidths,
-            int @Unmodifiable [] cellHeights,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight
-    ) {
-        Objects.requireNonNull(cellPayloads, "cellPayloads");
-        AvifPayload[] payloads = new AvifPayload[cellPayloads.length];
-        for (int i = 0; i < cellPayloads.length; i++) {
-            payloads[i] = AvifPayload.copyOf(Objects.requireNonNull(cellPayloads[i], "cellPayloads[" + i + "]"));
-        }
-        return grid(
-                payloads,
-                operatingPoints,
-                selectedSpatialLayers,
-                cellWidths,
-                cellHeights,
-                rows,
-                columns,
                 outputWidth,
                 outputHeight
         );
@@ -275,13 +193,6 @@ public final class AvifImageSource {
         return grid;
     }
 
-    /// Returns the number of AV1 payloads.
-    ///
-    /// @return one for a standalone item or the grid cell count
-    public int payloadCount() {
-        return payloads.length;
-    }
-
     /// Returns one AV1 payload descriptor.
     ///
     /// @param index the zero-based payload or cell index
@@ -305,26 +216,12 @@ public final class AvifImageSource {
         return operatingPoints[index];
     }
 
-    /// Returns all operating-point indices.
-    ///
-    /// @return a copy of the operating-point indices
-    public int @Unmodifiable [] operatingPoints() {
-        return operatingPoints.clone();
-    }
-
     /// Returns the selected spatial layer for one payload.
     ///
     /// @param index the zero-based payload or cell index
     /// @return the spatial-layer identifier, or [#HIGHEST_SPATIAL_LAYER]
     public int selectedSpatialLayer(int index) {
         return selectedSpatialLayers[index];
-    }
-
-    /// Returns all spatial-layer selections.
-    ///
-    /// @return a copy of the spatial-layer selections
-    public int @Unmodifiable [] selectedSpatialLayers() {
-        return selectedSpatialLayers.clone();
     }
 
     /// Returns the `ispe` width associated with one payload.
@@ -335,26 +232,12 @@ public final class AvifImageSource {
         return itemWidths[index];
     }
 
-    /// Returns all `ispe` widths.
-    ///
-    /// @return a copy of the item widths
-    public int @Unmodifiable [] itemWidths() {
-        return itemWidths.clone();
-    }
-
     /// Returns the `ispe` height associated with one payload.
     ///
     /// @param index the zero-based payload or cell index
     /// @return the item height in luma samples
     public int itemHeight(int index) {
         return itemHeights[index];
-    }
-
-    /// Returns all `ispe` heights.
-    ///
-    /// @return a copy of the item heights
-    public int @Unmodifiable [] itemHeights() {
-        return itemHeights.clone();
     }
 
     /// Returns the source row count.

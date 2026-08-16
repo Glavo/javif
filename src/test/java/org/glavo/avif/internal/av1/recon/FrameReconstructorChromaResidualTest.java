@@ -23,6 +23,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -828,7 +829,7 @@ final class FrameReconstructorChromaResidualTest {
                 ),
                 FrameHeader.TransformMode.LARGEST,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -1045,6 +1046,7 @@ final class FrameReconstructorChromaResidualTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 lastNonZeroIndex(resolvedCoefficients),
                 resolvedCoefficients,
                 visibleWidthPixels,

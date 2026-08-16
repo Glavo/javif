@@ -383,6 +383,7 @@ final class FilmGrainSynthesizerTest {
                 colorConfig(decodedPlanes, 2)
         );
 
+        assertSame(decodedPlanes.lumaPlane(), result.lumaPlane());
         assertEquals(0, countChangedVisibleSamples(decodedPlanes.lumaPlane(), result.lumaPlane()));
         assertTrue(countChangedVisibleSamples(decodedPlanes.chromaUPlane(), result.chromaUPlane()) > 0);
         assertTrue(countChangedVisibleSamples(decodedPlanes.chromaVPlane(), result.chromaVPlane()) > 0);

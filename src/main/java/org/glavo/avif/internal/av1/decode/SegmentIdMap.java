@@ -5,6 +5,7 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Arrays;
@@ -78,13 +79,12 @@ final class SegmentIdMap {
         SegmentIdMap map = create(nonNullAssembly);
         int tileColumns = nonNullAssembly.frameHeader().tiling().columns();
         int superblockSize4 = nonNullAssembly.sequenceHeader().features().use128x128Superblocks() ? 32 : 16;
-        int[] columnStarts = nonNullAssembly.frameHeader().tiling().columnStartSuperblocks();
-        int[] rowStarts = nonNullAssembly.frameHeader().tiling().rowStartSuperblocks();
+        FrameHeader.TilingInfo tiling = nonNullAssembly.frameHeader().tiling();
         for (int tileIndex = 0; tileIndex < nonNullTileRoots.length; tileIndex++) {
             int tileColumn = tileIndex % tileColumns;
             int tileRow = tileIndex / tileColumns;
-            int startX4 = columnStarts[tileColumn] * superblockSize4;
-            int startY4 = rowStarts[tileRow] * superblockSize4;
+            int startX4 = tiling.columnStartSuperblock(tileColumn) * superblockSize4;
+            int startY4 = tiling.rowStartSuperblock(tileRow) * superblockSize4;
             for (TilePartitionTreeReader.Node root : Objects.requireNonNull(
                     nonNullTileRoots[tileIndex],
                     "tileRoots[" + tileIndex + "]"

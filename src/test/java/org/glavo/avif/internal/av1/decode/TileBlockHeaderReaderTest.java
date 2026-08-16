@@ -2374,7 +2374,7 @@ final class TileBlockHeaderReaderTest {
                 skipModeEnabled ? new int[]{0, 1} : new int[]{-1, -1},
                 warpedMotion,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(

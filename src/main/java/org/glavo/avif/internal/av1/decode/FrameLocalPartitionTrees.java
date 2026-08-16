@@ -87,11 +87,9 @@ public final class FrameLocalPartitionTrees {
         int tileColumn = tileIndex % columns;
         int tileRow = tileIndex / columns;
         int superblockSize4 = nonNullAssembly.sequenceHeader().features().use128x128Superblocks() ? 32 : 16;
-        int[] columnStartSuperblocks = tiling.columnStartSuperblocks();
-        int[] rowStartSuperblocks = tiling.rowStartSuperblocks();
         return new BlockPosition(
-                columnStartSuperblocks[tileColumn] * superblockSize4,
-                rowStartSuperblocks[tileRow] * superblockSize4
+                tiling.columnStartSuperblock(tileColumn) * superblockSize4,
+                tiling.rowStartSuperblock(tileRow) * superblockSize4
         );
     }
 

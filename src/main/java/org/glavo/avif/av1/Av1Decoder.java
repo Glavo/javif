@@ -31,7 +31,6 @@ import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.InvalidFrameReconstructionException;
 import org.glavo.avif.internal.av1.recon.LargeScaleTileOutputBuilder;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
-import org.glavo.avif.internal.av1.runtime.FrameOutputPolicy;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -762,8 +761,7 @@ public final class Av1Decoder implements AutoCloseable {
         lastFrameSyntaxDecodeResult = retainFrameSyntaxDecodeResultsForInspection
                 ? syntaxDecodeResult
                 : null;
-        boolean shouldOutput = !config.largeScaleTileMode()
-                && FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
+        boolean shouldOutput = !config.largeScaleTileMode() && shouldOutputFrame(frameHeader);
         boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
         boolean needsAnchorSnapshot = config.largeScaleTileMode() && frameHeader.showFrame();
         @Nullable ReferenceFrameSyntaxState storedSyntaxState = needsSurfaceSnapshot || needsAnchorSnapshot
@@ -991,9 +989,9 @@ public final class Av1Decoder implements AutoCloseable {
 
         FrameHeader.TilingInfo tiling = cameraFrameHeader.tiling();
         int superblockSize = cameraSequenceHeader.features().use128x128Superblocks() ? 128 : 64;
-        int tileWidth = (tiling.columnStartSuperblocks()[1] - tiling.columnStartSuperblocks()[0])
+        int tileWidth = (tiling.columnStartSuperblock(1) - tiling.columnStartSuperblock(0))
                 * superblockSize;
-        int tileHeight = (tiling.rowStartSuperblocks()[1] - tiling.rowStartSuperblocks()[0])
+        int tileHeight = (tiling.rowStartSuperblock(1) - tiling.rowStartSuperblock(0))
                 * superblockSize;
         int outputWidth;
         int outputHeight;
@@ -1404,7 +1402,11 @@ public final class Av1Decoder implements AutoCloseable {
         if (config.largeScaleTileMode()) {
             return null;
         }
-        if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
+        if (!matchesFrameSelection(
+                referencedFrameHeader.frameType(),
+                referencedFrameHeader.refreshFrameFlags(),
+                config.frameSelection()
+        )) {
             return null;
         }
         DecodedSurface presentationPlanes = applyPresentationFilters(
@@ -1454,10 +1456,42 @@ public final class Av1Decoder implements AutoCloseable {
         DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
-        if (FrameOutputPolicy.requiresFilmGrainSynthesis(checkedFrameHeader, config)) {
+        if (config.applyFilmGrain() && checkedFrameHeader.filmGrain().applyGrain()) {
             return FilmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader, checkedColorConfig);
         }
         return checkedDecodedPlanes;
+    }
+
+    /// Returns whether the current frame should be exposed through the public API.
+    ///
+    /// @param frameHeader the current frame header
+    /// @return whether the frame passes visibility and frame-selection filtering
+    private boolean shouldOutputFrame(FrameHeader frameHeader) {
+        return (frameHeader.showFrame() || config.outputInvisibleFrames())
+                && matchesFrameSelection(
+                        frameHeader.frameType(),
+                        frameHeader.refreshFrameFlags(),
+                        config.frameSelection()
+                );
+    }
+
+    /// Returns whether one frame matches the requested frame selection.
+    ///
+    /// @param frameType the decoded frame type
+    /// @param refreshFrameFlags the decoded reference-slot refresh mask
+    /// @param frameSelection the requested frame selection
+    /// @return whether the frame matches the requested selection
+    static boolean matchesFrameSelection(
+            Av1FrameType frameType,
+            int refreshFrameFlags,
+            Av1FrameSelection frameSelection
+    ) {
+        return switch (frameSelection) {
+            case ALL -> true;
+            case REFERENCE -> refreshFrameFlags != 0;
+            case INTRA -> frameType == Av1FrameType.KEY || frameType == Av1FrameType.INTRA;
+            case KEY -> frameType == Av1FrameType.KEY;
+        };
     }
 
     /// Creates a contextual invalid-bitstream exception for frame-assembly errors.

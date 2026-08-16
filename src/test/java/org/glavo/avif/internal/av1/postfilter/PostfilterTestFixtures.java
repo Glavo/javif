@@ -21,6 +21,7 @@ import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -279,6 +280,7 @@ final class PostfilterTestFixtures {
         TransformResidualUnit lumaResidualUnit = new TransformResidualUnit(
                 position,
                 TransformSize.TX_8X8,
+                TransformType.DCT_DCT,
                 -1,
                 new int[TransformSize.TX_8X8.widthPixels() * TransformSize.TX_8X8.heightPixels()],
                 0
@@ -518,6 +520,7 @@ final class PostfilterTestFixtures {
             residualUnits[index] = new TransformResidualUnit(
                     transformUnit.position(),
                     transformSize,
+                    TransformType.DCT_DCT,
                     -1,
                     new int[transformSize.widthPixels() * transformSize.heightPixels()],
                     0

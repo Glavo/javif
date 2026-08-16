@@ -28,6 +28,7 @@ final class DecodedSurfaceTest {
         short[] exported = plane.samples();
         exported[1] = 0;
         assertArrayEquals(new short[]{1, (short) 0xFFFF, 3, 4}, plane.samples());
+        assertTrue(plane.sampleBuffer().isReadOnly());
     }
 
     /// Verifies that stored-plane reads use the row stride across right and bottom padding.

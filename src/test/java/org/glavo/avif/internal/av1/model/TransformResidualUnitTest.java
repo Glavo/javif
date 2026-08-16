@@ -29,14 +29,15 @@ final class TransformResidualUnitTest {
         assertEquals(6, residualUnit.visibleHeightPixels());
     }
 
-    /// Verifies that legacy constructor shapes keep the historical `DCT_DCT` default.
+    /// Verifies that one residual unit retains its explicitly supplied transform type.
     @Test
-    void defaultsToDctDctTransformType() {
+    void retainsDctDctTransformType() {
         int[] coefficients = new int[16];
         coefficients[0] = 1;
         TransformResidualUnit residualUnit = new TransformResidualUnit(
                 new BlockPosition(0, 0),
                 TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
                 0,
                 coefficients,
                 0x01

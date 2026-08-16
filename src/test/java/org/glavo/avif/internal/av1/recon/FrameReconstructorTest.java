@@ -5290,7 +5290,7 @@ final class FrameReconstructorTest {
                 ),
                 FrameHeader.TransformMode.LARGEST,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -5370,7 +5370,7 @@ final class FrameReconstructorTest {
                 ),
                 FrameHeader.TransformMode.LARGEST,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -5542,7 +5542,7 @@ final class FrameReconstructorTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -5649,7 +5649,7 @@ final class FrameReconstructorTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -5743,7 +5743,7 @@ final class FrameReconstructorTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -6905,7 +6905,14 @@ final class FrameReconstructorTest {
                 position,
                 size,
                 new TransformResidualUnit[]{
-                        new TransformResidualUnit(position, transformSize, endOfBlockIndex, coefficients, coefficientContextByte)
+                        new TransformResidualUnit(
+                                position,
+                                transformSize,
+                                TransformType.DCT_DCT,
+                                endOfBlockIndex,
+                                coefficients,
+                                coefficientContextByte
+                        )
                 }
         );
     }
@@ -6927,6 +6934,7 @@ final class FrameReconstructorTest {
                         new TransformResidualUnit(
                                 position,
                                 transformSize,
+                                TransformType.DCT_DCT,
                                 0,
                                 coefficients,
                                 expectedNonZeroCoefficientContextByte(dcCoefficient)
@@ -6955,6 +6963,7 @@ final class FrameReconstructorTest {
         TransformResidualUnit lumaUnit = new TransformResidualUnit(
                 position,
                 lumaTransformSize,
+                TransformType.DCT_DCT,
                 -1,
                 new int[lumaTransformSize.widthPixels() * lumaTransformSize.heightPixels()],
                 0
@@ -7012,6 +7021,7 @@ final class FrameReconstructorTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 endOfBlockIndex,
                 coefficients,
                 visibleWidthPixels,

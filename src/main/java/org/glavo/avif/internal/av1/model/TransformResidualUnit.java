@@ -226,36 +226,6 @@ public final class TransformResidualUnit {
         this.coefficientContextByte = coefficientContextByte;
     }
 
-    /// Creates one `DCT_DCT` transform residual unit.
-    ///
-    /// @param position the tile-relative block origin of this transform residual unit in luma 4x4 units
-    /// @param size the transform size used by this residual unit
-    /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
-    /// @param coefficients the signed transform-domain coefficients in natural raster order
-    /// @param visibleWidthPixels the exact portion of the residual width inside the coded frame or tile boundary
-    /// @param visibleHeightPixels the exact portion of the residual height inside the coded frame or tile boundary
-    /// @param coefficientContextByte the coefficient-context byte written back to neighbor state
-    public TransformResidualUnit(
-            BlockPosition position,
-            TransformSize size,
-            int endOfBlockIndex,
-            int[] coefficients,
-            int visibleWidthPixels,
-            int visibleHeightPixels,
-            int coefficientContextByte
-    ) {
-        this(
-                position,
-                size,
-                TransformType.DCT_DCT,
-                endOfBlockIndex,
-                coefficients,
-                visibleWidthPixels,
-                visibleHeightPixels,
-                coefficientContextByte
-        );
-    }
-
     /// Creates a position-adjusted unit that shares the source unit's immutable coefficients.
     ///
     /// @param position the replacement residual-unit position
@@ -297,31 +267,6 @@ public final class TransformResidualUnit {
                 coefficients,
                 size.widthPixels(),
                 size.heightPixels(),
-                coefficientContextByte
-        );
-    }
-
-    /// Creates one `DCT_DCT` transform residual unit whose exact visible footprint matches the
-    /// coded transform size.
-    ///
-    /// @param position the tile-relative block origin of this transform residual unit in luma 4x4 units
-    /// @param size the transform size used by this residual unit
-    /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
-    /// @param coefficients the signed transform-domain coefficients in natural raster order
-    /// @param coefficientContextByte the coefficient-context byte written back to neighbor state
-    public TransformResidualUnit(
-            BlockPosition position,
-            TransformSize size,
-            int endOfBlockIndex,
-            int[] coefficients,
-            int coefficientContextByte
-    ) {
-        this(
-                position,
-                size,
-                TransformType.DCT_DCT,
-                endOfBlockIndex,
-                coefficients,
                 coefficientContextByte
         );
     }

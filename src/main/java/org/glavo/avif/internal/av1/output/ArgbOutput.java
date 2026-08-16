@@ -8,6 +8,7 @@ import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.ShortBuffer;
 import java.util.Objects;
 
 /// Converts complete decoded surfaces into opaque ARGB pixel arrays.
@@ -17,21 +18,8 @@ import java.util.Objects;
 /// decoded planes.
 @NotNullByDefault
 public final class ArgbOutput {
-    /// The default YUV-to-RGB transform used by convenience overloads.
-    private static final YuvToRgbTransform DEFAULT_TRANSFORM = YuvToRgbTransform.BT601_FULL_RANGE;
-
     /// Prevents instantiation of this utility class.
     private ArgbOutput() {
-    }
-
-    /// Converts one decoded-plane snapshot into opaque ARGB pixels.
-    ///
-    /// This convenience overload uses `BT.601` full-range coefficients.
-    ///
-    /// @param decodedPlanes the decoded planes to convert
-    /// @return packed opaque non-premultiplied ARGB pixels in presentation order
-    public static int[] toOpaqueArgbPixels(DecodedSurface decodedPlanes) {
-        return toOpaqueArgbPixels(decodedPlanes, DEFAULT_TRANSFORM);
     }
 
     /// Converts one decoded-plane snapshot into opaque ARGB pixels.
@@ -90,16 +78,6 @@ public final class ArgbOutput {
                     checkedTransform
             );
         };
-    }
-
-    /// Converts one decoded-plane snapshot into opaque 16-bit-per-channel ARGB pixels.
-    ///
-    /// This convenience overload uses `BT.601` full-range coefficients.
-    ///
-    /// @param decodedPlanes the decoded planes to convert
-    /// @return packed opaque non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
-    public static long[] toOpaqueArgbLongPixels(DecodedSurface decodedPlanes) {
-        return toOpaqueArgbLongPixels(decodedPlanes, DEFAULT_TRANSFORM);
     }
 
     /// Converts one decoded-plane snapshot into opaque 16-bit-per-channel ARGB pixels.
@@ -238,13 +216,13 @@ public final class ArgbOutput {
             int[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int pixelRow = y * outputWidth;
             for (int x = 0; x < outputWidth; x++) {
-                pixels[pixelRow + x] = transform.toOpaqueGrayArgb(lumaSamples[lumaRow + x] & 0xFFFF, bitDepth);
+                pixels[pixelRow + x] = transform.toOpaqueGrayArgb(lumaSamples.get(lumaRow + x) & 0xFFFF, bitDepth);
             }
         }
         return pixels;
@@ -267,13 +245,13 @@ public final class ArgbOutput {
             long[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int pixelRow = y * outputWidth;
             for (int x = 0; x < outputWidth; x++) {
-                pixels[pixelRow + x] = transform.toOpaqueGrayArgb64(lumaSamples[lumaRow + x] & 0xFFFF, bitDepth);
+                pixels[pixelRow + x] = transform.toOpaqueGrayArgb64(lumaSamples.get(lumaRow + x) & 0xFFFF, bitDepth);
             }
         }
         return pixels;
@@ -300,9 +278,9 @@ public final class ArgbOutput {
             int[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
-        short[] chromaUSamples = chromaUPlane.samples();
-        short[] chromaVSamples = chromaVPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
+        ShortBuffer chromaUSamples = chromaUPlane.sampleBuffer();
+        ShortBuffer chromaVSamples = chromaVPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
@@ -317,17 +295,17 @@ public final class ArgbOutput {
             for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
-                int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
-                int vSample = chromaVSamples[chromaIndexV] & 0xFFFF;
+                int uSample = chromaUSamples.get(chromaIndexU) & 0xFFFF;
+                int vSample = chromaVSamples.get(chromaIndexV) & 0xFFFF;
 
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
                         uSample,
                         vSample,
                         bitDepth
                 );
                 pixels[pixelRow + x + 1] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x + 1] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x + 1) & 0xFFFF,
                         uSample,
                         vSample,
                         bitDepth
@@ -338,9 +316,9 @@ public final class ArgbOutput {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
-                        chromaUSamples[chromaIndexU] & 0xFFFF,
-                        chromaVSamples[chromaIndexV] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
+                        chromaUSamples.get(chromaIndexU) & 0xFFFF,
+                        chromaVSamples.get(chromaIndexV) & 0xFFFF,
                         bitDepth
                 );
             }
@@ -370,9 +348,9 @@ public final class ArgbOutput {
             long[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
-        short[] chromaUSamples = chromaUPlane.samples();
-        short[] chromaVSamples = chromaVPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
+        ShortBuffer chromaUSamples = chromaUPlane.sampleBuffer();
+        ShortBuffer chromaVSamples = chromaVPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
@@ -387,12 +365,12 @@ public final class ArgbOutput {
             for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
-                int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
-                int vSample = chromaVSamples[chromaIndexV] & 0xFFFF;
+                int uSample = chromaUSamples.get(chromaIndexU) & 0xFFFF;
+                int vSample = chromaVSamples.get(chromaIndexV) & 0xFFFF;
 
-                pixels[pixelRow + x] = transform.toOpaqueArgb64(lumaSamples[lumaRow + x] & 0xFFFF, uSample, vSample, bitDepth);
+                pixels[pixelRow + x] = transform.toOpaqueArgb64(lumaSamples.get(lumaRow + x) & 0xFFFF, uSample, vSample, bitDepth);
                 pixels[pixelRow + x + 1] = transform.toOpaqueArgb64(
-                        lumaSamples[lumaRow + x + 1] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x + 1) & 0xFFFF,
                         uSample,
                         vSample,
                         bitDepth
@@ -403,9 +381,9 @@ public final class ArgbOutput {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb64(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
-                        chromaUSamples[chromaIndexU] & 0xFFFF,
-                        chromaVSamples[chromaIndexV] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
+                        chromaUSamples.get(chromaIndexU) & 0xFFFF,
+                        chromaVSamples.get(chromaIndexV) & 0xFFFF,
                         bitDepth
                 );
             }
@@ -434,9 +412,9 @@ public final class ArgbOutput {
             int[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
-        short[] chromaUSamples = chromaUPlane.samples();
-        short[] chromaVSamples = chromaVPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
+        ShortBuffer chromaUSamples = chromaUPlane.sampleBuffer();
+        ShortBuffer chromaVSamples = chromaVPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
@@ -451,17 +429,17 @@ public final class ArgbOutput {
             for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
-                int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
-                int vSample = chromaVSamples[chromaIndexV] & 0xFFFF;
+                int uSample = chromaUSamples.get(chromaIndexU) & 0xFFFF;
+                int vSample = chromaVSamples.get(chromaIndexV) & 0xFFFF;
 
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
                         uSample,
                         vSample,
                         bitDepth
                 );
                 pixels[pixelRow + x + 1] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x + 1] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x + 1) & 0xFFFF,
                         uSample,
                         vSample,
                         bitDepth
@@ -472,9 +450,9 @@ public final class ArgbOutput {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
-                        chromaUSamples[chromaIndexU] & 0xFFFF,
-                        chromaVSamples[chromaIndexV] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
+                        chromaUSamples.get(chromaIndexU) & 0xFFFF,
+                        chromaVSamples.get(chromaIndexV) & 0xFFFF,
                         bitDepth
                 );
             }
@@ -504,9 +482,9 @@ public final class ArgbOutput {
             long[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
-        short[] chromaUSamples = chromaUPlane.samples();
-        short[] chromaVSamples = chromaVPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
+        ShortBuffer chromaUSamples = chromaUPlane.sampleBuffer();
+        ShortBuffer chromaVSamples = chromaVPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
@@ -521,12 +499,12 @@ public final class ArgbOutput {
             for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
-                int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
-                int vSample = chromaVSamples[chromaIndexV] & 0xFFFF;
+                int uSample = chromaUSamples.get(chromaIndexU) & 0xFFFF;
+                int vSample = chromaVSamples.get(chromaIndexV) & 0xFFFF;
 
-                pixels[pixelRow + x] = transform.toOpaqueArgb64(lumaSamples[lumaRow + x] & 0xFFFF, uSample, vSample, bitDepth);
+                pixels[pixelRow + x] = transform.toOpaqueArgb64(lumaSamples.get(lumaRow + x) & 0xFFFF, uSample, vSample, bitDepth);
                 pixels[pixelRow + x + 1] = transform.toOpaqueArgb64(
-                        lumaSamples[lumaRow + x + 1] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x + 1) & 0xFFFF,
                         uSample,
                         vSample,
                         bitDepth
@@ -537,9 +515,9 @@ public final class ArgbOutput {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb64(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
-                        chromaUSamples[chromaIndexU] & 0xFFFF,
-                        chromaVSamples[chromaIndexV] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
+                        chromaUSamples.get(chromaIndexU) & 0xFFFF,
+                        chromaVSamples.get(chromaIndexV) & 0xFFFF,
                         bitDepth
                 );
             }
@@ -568,9 +546,9 @@ public final class ArgbOutput {
             int[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
-        short[] chromaUSamples = chromaUPlane.samples();
-        short[] chromaVSamples = chromaVPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
+        ShortBuffer chromaUSamples = chromaUPlane.sampleBuffer();
+        ShortBuffer chromaVSamples = chromaVPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
@@ -582,9 +560,9 @@ public final class ArgbOutput {
             int pixelRow = y * outputWidth;
             for (int x = 0; x < outputWidth; x++) {
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
-                        chromaUSamples[chromaURow + x] & 0xFFFF,
-                        chromaVSamples[chromaVRow + x] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
+                        chromaUSamples.get(chromaURow + x) & 0xFFFF,
+                        chromaVSamples.get(chromaVRow + x) & 0xFFFF,
                         bitDepth
                 );
             }
@@ -614,9 +592,9 @@ public final class ArgbOutput {
             long[] pixels,
             YuvToRgbTransform transform
     ) {
-        short[] lumaSamples = lumaPlane.samples();
-        short[] chromaUSamples = chromaUPlane.samples();
-        short[] chromaVSamples = chromaVPlane.samples();
+        ShortBuffer lumaSamples = lumaPlane.sampleBuffer();
+        ShortBuffer chromaUSamples = chromaUPlane.sampleBuffer();
+        ShortBuffer chromaVSamples = chromaVPlane.sampleBuffer();
         int lumaStride = lumaPlane.stride();
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
@@ -628,9 +606,9 @@ public final class ArgbOutput {
             int pixelRow = y * outputWidth;
             for (int x = 0; x < outputWidth; x++) {
                 pixels[pixelRow + x] = transform.toOpaqueArgb64(
-                        lumaSamples[lumaRow + x] & 0xFFFF,
-                        chromaUSamples[chromaURow + x] & 0xFFFF,
-                        chromaVSamples[chromaVRow + x] & 0xFFFF,
+                        lumaSamples.get(lumaRow + x) & 0xFFFF,
+                        chromaUSamples.get(chromaURow + x) & 0xFFFF,
+                        chromaVSamples.get(chromaVRow + x) & 0xFFFF,
                         bitDepth
                 );
             }

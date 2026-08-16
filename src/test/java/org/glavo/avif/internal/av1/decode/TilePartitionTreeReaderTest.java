@@ -352,7 +352,7 @@ final class TilePartitionTreeReaderTest {
                 ),
                 FrameHeader.TransformMode.LARGEST,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         TileBitstream[] tiles = new TileBitstream[tileColumns];

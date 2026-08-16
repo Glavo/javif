@@ -191,7 +191,7 @@ public final class TileBlockHeaderReader {
         }
         int cdefIndex = resolveCdefIndex(nonNullPosition, nonNullSize, skip, blockSyntaxState);
         int qIndex = applyDeltaSyntax(nonNullPosition, nonNullSize, skip, blockSyntaxState);
-        int[] deltaLfValues = blockSyntaxState.currentDeltaLfValues();
+        int[] deltaLfValues = blockSyntaxState.currentDeltaLfValuesView();
 
         boolean useIntrabc = false;
         boolean intra;
@@ -2068,6 +2068,9 @@ public final class TileBlockHeaderReader {
     }
 
     /// One decoded leaf block header.
+    ///
+    /// Constructors take ownership of palette array arguments. Callers must not access or modify
+    /// those arrays after construction. Delta-LF values are copied into scalar fields.
     @NotNullByDefault
     public static final class BlockHeader {
         /// The block origin in the coordinate space used by this header.
@@ -2157,8 +2160,17 @@ public final class TileBlockHeaderReader {
         /// The current luma AC quantizer index after any superblock-level delta-q update.
         private final int qIndex;
 
-        /// The current delta-lf runtime slots after any superblock-level updates.
-        private final int @Unmodifiable [] deltaLfValues;
+        /// The current delta-lf runtime slot 0 after any superblock-level updates.
+        private final int deltaLfValue0;
+
+        /// The current delta-lf runtime slot 1 after any superblock-level updates.
+        private final int deltaLfValue1;
+
+        /// The current delta-lf runtime slot 2 after any superblock-level updates.
+        private final int deltaLfValue2;
+
+        /// The current delta-lf runtime slot 3 after any superblock-level updates.
+        private final int deltaLfValue3;
 
         /// The decoded luma intra prediction mode, or `null` for non-intra blocks.
         private final @Nullable LumaIntraPredictionMode yMode;
@@ -2323,7 +2335,14 @@ public final class TileBlockHeaderReader {
             this.segmentId = segmentId;
             this.cdefIndex = cdefIndex;
             this.qIndex = qIndex;
-            this.deltaLfValues = Arrays.copyOf(Objects.requireNonNull(deltaLfValues, "deltaLfValues"), deltaLfValues.length);
+            int[] checkedDeltaLfValues = Objects.requireNonNull(deltaLfValues, "deltaLfValues");
+            if (checkedDeltaLfValues.length != 4) {
+                throw new IllegalArgumentException("deltaLfValues length must be 4");
+            }
+            this.deltaLfValue0 = checkedDeltaLfValues[0];
+            this.deltaLfValue1 = checkedDeltaLfValues[1];
+            this.deltaLfValue2 = checkedDeltaLfValues[2];
+            this.deltaLfValue3 = checkedDeltaLfValues[3];
             this.yMode = yMode;
             this.uvMode = uvMode;
             this.yPaletteSize = yPaletteSize;
@@ -2333,21 +2352,11 @@ public final class TileBlockHeaderReader {
             int[] checkedVPaletteColors = Objects.requireNonNull(vPaletteColors, "vPaletteColors");
             byte[] checkedYPaletteIndices = Objects.requireNonNull(yPaletteIndices, "yPaletteIndices");
             byte[] checkedUvPaletteIndices = Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices");
-            this.yPaletteColors = checkedYPaletteColors.length == 0
-                    ? EMPTY_INT_PAYLOAD
-                    : Arrays.copyOf(checkedYPaletteColors, checkedYPaletteColors.length);
-            this.uPaletteColors = checkedUPaletteColors.length == 0
-                    ? EMPTY_INT_PAYLOAD
-                    : Arrays.copyOf(checkedUPaletteColors, checkedUPaletteColors.length);
-            this.vPaletteColors = checkedVPaletteColors.length == 0
-                    ? EMPTY_INT_PAYLOAD
-                    : Arrays.copyOf(checkedVPaletteColors, checkedVPaletteColors.length);
-            this.yPaletteIndices = checkedYPaletteIndices.length == 0
-                    ? EMPTY_BYTE_PAYLOAD
-                    : Arrays.copyOf(checkedYPaletteIndices, checkedYPaletteIndices.length);
-            this.uvPaletteIndices = checkedUvPaletteIndices.length == 0
-                    ? EMPTY_BYTE_PAYLOAD
-                    : Arrays.copyOf(checkedUvPaletteIndices, checkedUvPaletteIndices.length);
+            this.yPaletteColors = checkedYPaletteColors.length == 0 ? EMPTY_INT_PAYLOAD : checkedYPaletteColors;
+            this.uPaletteColors = checkedUPaletteColors.length == 0 ? EMPTY_INT_PAYLOAD : checkedUPaletteColors;
+            this.vPaletteColors = checkedVPaletteColors.length == 0 ? EMPTY_INT_PAYLOAD : checkedVPaletteColors;
+            this.yPaletteIndices = checkedYPaletteIndices.length == 0 ? EMPTY_BYTE_PAYLOAD : checkedYPaletteIndices;
+            this.uvPaletteIndices = checkedUvPaletteIndices.length == 0 ? EMPTY_BYTE_PAYLOAD : checkedUvPaletteIndices;
             this.filterIntraMode = filterIntraMode;
             this.yAngle = yAngle;
             this.uvAngle = uvAngle;
@@ -2373,9 +2382,6 @@ public final class TileBlockHeaderReader {
             }
             if (qIndex < 0 || qIndex > 255) {
                 throw new IllegalArgumentException("qIndex out of range: " + qIndex);
-            }
-            if (this.deltaLfValues.length != 4) {
-                throw new IllegalArgumentException("deltaLfValues length must be 4");
             }
             if (drlIndex < -1 || drlIndex > 3) {
                 throw new IllegalArgumentException("drlIndex out of range: " + drlIndex);
@@ -2510,7 +2516,10 @@ public final class TileBlockHeaderReader {
             this.segmentId = nonNullSource.segmentId;
             this.cdefIndex = nonNullSource.cdefIndex;
             this.qIndex = nonNullSource.qIndex;
-            this.deltaLfValues = nonNullSource.deltaLfValues;
+            this.deltaLfValue0 = nonNullSource.deltaLfValue0;
+            this.deltaLfValue1 = nonNullSource.deltaLfValue1;
+            this.deltaLfValue2 = nonNullSource.deltaLfValue2;
+            this.deltaLfValue3 = nonNullSource.deltaLfValue3;
             this.yMode = nonNullSource.yMode;
             this.uvMode = nonNullSource.uvMode;
             this.yPaletteSize = nonNullSource.yPaletteSize;
@@ -3192,7 +3201,7 @@ public final class TileBlockHeaderReader {
         ///
         /// @return a copy of the current delta-lf runtime slots
         public int[] deltaLfValues() {
-            return Arrays.copyOf(deltaLfValues, deltaLfValues.length);
+            return new int[]{deltaLfValue0, deltaLfValue1, deltaLfValue2, deltaLfValue3};
         }
 
         /// Returns one current delta-lf runtime slot without copying the complete slot array.
@@ -3200,7 +3209,13 @@ public final class TileBlockHeaderReader {
         /// @param index the zero-based slot index
         /// @return the selected delta-lf value
         public int deltaLfValue(int index) {
-            return deltaLfValues[index];
+            return switch (Objects.checkIndex(index, 4)) {
+                case 0 -> deltaLfValue0;
+                case 1 -> deltaLfValue1;
+                case 2 -> deltaLfValue2;
+                case 3 -> deltaLfValue3;
+                default -> throw new AssertionError();
+            };
         }
 
         /// Returns the decoded luma intra prediction mode, or `null` for non-intra blocks.

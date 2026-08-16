@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /// and the `8-bit` contract for long-output conversion.
 @NotNullByDefault
 final class Av1DecodedPlanesArgbLongOutputTest {
-    /// The fixed transform contract used by the convenience long-output overloads.
+    /// The fixed transform contract used by these conversion tests.
     private static final YuvToRgbTransform DEFAULT_TRANSFORM = YuvToRgbTransform.BT601_FULL_RANGE;
 
     /// Verifies that `10-bit` monochrome samples become opaque grayscale `0xAAAA_RRRR_GGGG_BBBB`
@@ -36,7 +36,7 @@ final class Av1DecodedPlanesArgbLongOutputTest {
                 null
         );
 
-        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
+        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes, DEFAULT_TRANSFORM);
 
         assertArrayEquals(
                 new long[]{
@@ -71,7 +71,7 @@ final class Av1DecodedPlanesArgbLongOutputTest {
                 plane(4, 2, 5, 2048, 1024, 3072, 3840, 15, 1536, 2560, 768, 2048, 17)
         );
 
-        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
+        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes, DEFAULT_TRANSFORM);
 
         assertArrayEquals(
                 new long[]{
@@ -109,7 +109,7 @@ final class Av1DecodedPlanesArgbLongOutputTest {
                 DEFAULT_TRANSFORM.toOpaqueGrayArgb64(255, 8)
         };
 
-        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
+        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes, DEFAULT_TRANSFORM);
 
         assertArrayEquals(expectedPixels, pixels);
         assertOpaquePixels(pixels);

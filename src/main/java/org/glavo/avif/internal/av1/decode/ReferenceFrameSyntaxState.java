@@ -177,13 +177,12 @@ public final class ReferenceFrameSyntaxState {
         }
 
         int superblockSize8 = sequenceHeader.features().use128x128Superblocks() ? 16 : 8;
-        int[] columnStarts = frameHeader.tiling().columnStartSuperblocks();
-        int[] rowStarts = frameHeader.tiling().rowStartSuperblocks();
-        int tileColumn = containingTileAxis(columnStarts, x8 / superblockSize8);
-        int tileRow = containingTileAxis(rowStarts, y8 / superblockSize8);
-        int tileIndex = tileRow * frameHeader.tiling().columns() + tileColumn;
-        int localX8 = x8 - columnStarts[tileColumn] * superblockSize8;
-        int localY8 = y8 - rowStarts[tileRow] * superblockSize8;
+        FrameHeader.TilingInfo tiling = frameHeader.tiling();
+        int tileColumn = containingTileColumn(tiling, x8 / superblockSize8);
+        int tileRow = containingTileRow(tiling, y8 / superblockSize8);
+        int tileIndex = tileRow * tiling.columns() + tileColumn;
+        int localX8 = x8 - tiling.columnStartSuperblock(tileColumn) * superblockSize8;
+        int localY8 = y8 - tiling.rowStartSuperblock(tileRow) * superblockSize8;
         TileDecodeContext.TemporalMotionField field = decodedTemporalMotionFields[tileIndex];
         if (localX8 >= field.width8() || localY8 >= field.height8()) {
             return null;
@@ -191,17 +190,36 @@ public final class ReferenceFrameSyntaxState {
         return field.block(localX8, localY8);
     }
 
-    /// Returns the tile-axis interval containing one superblock coordinate.
+    /// Returns the tile-column interval containing one superblock coordinate.
     ///
-    /// @param starts sorted inclusive tile starts followed by the exclusive frame end
+    /// @param tiling the frame tile layout
     /// @param coordinate the superblock coordinate to locate
     /// @return the zero-based containing interval
-    private static int containingTileAxis(int[] starts, int coordinate) {
+    private static int containingTileColumn(FrameHeader.TilingInfo tiling, int coordinate) {
         int low = 0;
-        int high = starts.length - 1;
+        int high = tiling.columns();
         while (low + 1 < high) {
             int middle = (low + high) >>> 1;
-            if (coordinate < starts[middle]) {
+            if (coordinate < tiling.columnStartSuperblock(middle)) {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        return low;
+    }
+
+    /// Returns the tile-row interval containing one superblock coordinate.
+    ///
+    /// @param tiling the frame tile layout
+    /// @param coordinate the superblock coordinate to locate
+    /// @return the zero-based containing interval
+    private static int containingTileRow(FrameHeader.TilingInfo tiling, int coordinate) {
+        int low = 0;
+        int high = tiling.rows();
+        while (low + 1 < high) {
+            int middle = (low + high) >>> 1;
+            if (coordinate < tiling.rowStartSuperblock(middle)) {
                 high = middle;
             } else {
                 low = middle;

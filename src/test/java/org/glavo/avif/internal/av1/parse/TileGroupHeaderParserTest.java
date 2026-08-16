@@ -146,7 +146,7 @@ final class TileGroupHeaderParserTest {
                 ),
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 

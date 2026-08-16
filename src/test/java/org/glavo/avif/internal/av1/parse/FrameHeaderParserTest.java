@@ -70,8 +70,8 @@ final class FrameHeaderParserTest {
         assertEquals(1, header.tiling().rows());
         assertEquals(0, header.tiling().log2Cols());
         assertEquals(0, header.tiling().log2Rows());
-        assertEquals(10, header.tiling().columnStartSuperblocks()[1]);
-        assertEquals(6, header.tiling().rowStartSuperblocks()[1]);
+        assertEquals(10, header.tiling().columnStartSuperblock(1));
+        assertEquals(6, header.tiling().rowStartSuperblock(1));
 
         assertEquals(0, header.quantization().baseQIndex());
         assertFalse(header.segmentation().enabled());
@@ -80,7 +80,7 @@ final class FrameHeaderParserTest {
         assertTrue(header.loopFilter().modeRefDeltaEnabled());
         assertEquals(FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY, header.transformMode());
         assertFalse(header.reducedTransformSet());
-        assertFalse(header.filmGrainPresent());
+        assertFalse(header.filmGrain().applyGrain());
     }
 
     /// Verifies that showing a stored key frame restores its frame type and refreshes every
@@ -184,7 +184,10 @@ final class FrameHeaderParserTest {
         assertEquals(10, header.frameOffset());
         assertEquals(0x12, header.refreshFrameFlags());
         assertFalse(header.frameReferenceShortSignaling());
-        assertArrayEquals(new int[]{0, 1, 2, 3, 4, 5, 6}, header.referenceFrameIndices());
+        int[] expectedReferenceFrameIndices = {0, 1, 2, 3, 4, 5, 6};
+        for (int index = 0; index < expectedReferenceFrameIndices.length; index++) {
+            assertEquals(expectedReferenceFrameIndices[index], header.referenceFrameIndex(index));
+        }
         assertEquals(64, header.frameSize().codedWidth());
         assertEquals(64, header.frameSize().upscaledWidth());
         assertEquals(64, header.frameSize().height());
@@ -201,10 +204,11 @@ final class FrameHeaderParserTest {
         assertTrue(header.switchableCompoundReferences());
         assertTrue(header.skipModeAllowed());
         assertTrue(header.skipModeEnabled());
-        assertArrayEquals(new int[]{0, 3}, header.skipModeReferenceIndices());
+        assertEquals(0, header.skipModeReferenceIndex(0));
+        assertEquals(3, header.skipModeReferenceIndex(1));
         assertTrue(header.warpedMotion());
         assertFalse(header.reducedTransformSet());
-        assertFalse(header.filmGrainPresent());
+        assertFalse(header.filmGrain().applyGrain());
     }
 
     /// Verifies the normative short-signaled LAST-through-ALTREF reference selection order.
@@ -220,7 +224,10 @@ final class FrameHeaderParserTest {
         );
 
         assertTrue(header.frameReferenceShortSignaling());
-        assertArrayEquals(new int[]{0, 5, 6, 3, 2, 4, 1}, header.referenceFrameIndices());
+        int[] expectedReferenceFrameIndices = {0, 5, 6, 3, 2, 4, 1};
+        for (int index = 0; index < expectedReferenceFrameIndices.length; index++) {
+            assertEquals(expectedReferenceFrameIndices[index], header.referenceFrameIndex(index));
+        }
     }
 
     /// Verifies that translation global-motion parameters are decoded in their normative fixed-point domain.
@@ -293,7 +300,7 @@ final class FrameHeaderParserTest {
                 createInterReferenceFrames()
         );
 
-        assertTrue(header.filmGrainPresent());
+        assertTrue(header.filmGrain().applyGrain());
         FrameHeader.FilmGrainParams filmGrain = header.filmGrain();
         assertTrue(filmGrain.applyGrain());
         assertEquals(0x1234, filmGrain.grainSeed());
@@ -351,7 +358,7 @@ final class FrameHeaderParserTest {
                 references
         );
 
-        assertTrue(header.filmGrainPresent());
+        assertTrue(header.filmGrain().applyGrain());
         FrameHeader.FilmGrainParams filmGrain = header.filmGrain();
         assertTrue(filmGrain.applyGrain());
         assertEquals(0x4567, filmGrain.grainSeed());

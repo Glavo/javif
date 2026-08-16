@@ -1183,7 +1183,7 @@ final class BlockNeighborContextTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(

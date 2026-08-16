@@ -522,12 +522,10 @@ public final class FrameReconstructor {
         int tileColumn = tileIndex % columns;
         int tileRow = tileIndex / columns;
         int superblockSize = assembly.sequenceHeader().features().use128x128Superblocks() ? 128 : 64;
-        int[] columnStartSuperblocks = tiling.columnStartSuperblocks();
-        int[] rowStartSuperblocks = tiling.rowStartSuperblocks();
-        int lumaStartX = Math.min(lumaWidth, columnStartSuperblocks[tileColumn] * superblockSize);
-        int lumaStartY = Math.min(lumaHeight, rowStartSuperblocks[tileRow] * superblockSize);
-        int lumaEndX = Math.min(lumaWidth, columnStartSuperblocks[tileColumn + 1] * superblockSize);
-        int lumaEndY = Math.min(lumaHeight, rowStartSuperblocks[tileRow + 1] * superblockSize);
+        int lumaStartX = Math.min(lumaWidth, tiling.columnStartSuperblock(tileColumn) * superblockSize);
+        int lumaStartY = Math.min(lumaHeight, tiling.rowStartSuperblock(tileRow) * superblockSize);
+        int lumaEndX = Math.min(lumaWidth, tiling.columnStartSuperblock(tileColumn + 1) * superblockSize);
+        int lumaEndY = Math.min(lumaHeight, tiling.rowStartSuperblock(tileRow + 1) * superblockSize);
         return new TileSampleBounds(
                 lumaStartX,
                 lumaStartY,

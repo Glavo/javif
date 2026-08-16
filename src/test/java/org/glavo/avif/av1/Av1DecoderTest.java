@@ -1638,6 +1638,22 @@ final class Av1DecoderTest {
         assertStoredShowExistingFrameIsSuppressedByFrameSelection(referenceState, config);
     }
 
+    /// Verifies all frame-selection modes independently of bitstream assembly and reconstruction.
+    @Test
+    void matchesFrameSelectionUsesFrameTypeAndReferenceRefreshState() {
+        assertTrue(Av1Decoder.matchesFrameSelection(Av1FrameType.INTER, 0, Av1FrameSelection.ALL));
+
+        assertTrue(Av1Decoder.matchesFrameSelection(Av1FrameType.SWITCH, 0x02, Av1FrameSelection.REFERENCE));
+        assertFalse(Av1Decoder.matchesFrameSelection(Av1FrameType.INTER, 0, Av1FrameSelection.REFERENCE));
+
+        assertTrue(Av1Decoder.matchesFrameSelection(Av1FrameType.KEY, 0, Av1FrameSelection.INTRA));
+        assertTrue(Av1Decoder.matchesFrameSelection(Av1FrameType.INTRA, 0, Av1FrameSelection.INTRA));
+        assertFalse(Av1Decoder.matchesFrameSelection(Av1FrameType.INTER, 0, Av1FrameSelection.INTRA));
+
+        assertTrue(Av1Decoder.matchesFrameSelection(Av1FrameType.KEY, 0, Av1FrameSelection.KEY));
+        assertFalse(Av1Decoder.matchesFrameSelection(Av1FrameType.INTRA, 0, Av1FrameSelection.KEY));
+    }
+
     /// Verifies that combined `FRAME` OBUs reject trailing tile data when `show_existing_frame` is set.
     @Test
     void readFrameRejectsCombinedShowExistingFrameWithTrailingTileData() {
@@ -2161,7 +2177,7 @@ final class Av1DecoderTest {
                 new int[]{-1, -1},
                 false,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
 
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
@@ -2755,7 +2771,9 @@ final class Av1DecoderTest {
             );
 
             assertFirstDecodedLeafIsInter(syntaxResult);
-            assertArrayEquals(new int[]{0, 0, 0, 0, 0, 0, 0}, syntaxResult.assembly().frameHeader().referenceFrameIndices());
+            for (int referenceIndex = 0; referenceIndex < 7; referenceIndex++) {
+                assertEquals(0, syntaxResult.assembly().frameHeader().referenceFrameIndex(referenceIndex));
+            }
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 1);
             assertSame(parsedPrimaryReferenceSurface, reader.referenceSurfaceSnapshot(0));
             assertNull(reader.readFrame());
@@ -2921,10 +2939,16 @@ final class Av1DecoderTest {
             tileRoots[i] = new TilePartitionTreeReader.Node[0];
             int tileRow = i / columns;
             int tileColumn = i % columns;
-            int startX = tiling.columnStartSuperblocks()[tileColumn] * superblockSize;
-            int endX = Math.min(frameHeader.frameSize().codedWidth(), tiling.columnStartSuperblocks()[tileColumn + 1] * superblockSize);
-            int startY = tiling.rowStartSuperblocks()[tileRow] * superblockSize;
-            int endY = Math.min(frameHeader.frameSize().height(), tiling.rowStartSuperblocks()[tileRow + 1] * superblockSize);
+            int startX = tiling.columnStartSuperblock(tileColumn) * superblockSize;
+            int endX = Math.min(
+                    frameHeader.frameSize().codedWidth(),
+                    tiling.columnStartSuperblock(tileColumn + 1) * superblockSize
+            );
+            int startY = tiling.rowStartSuperblock(tileRow) * superblockSize;
+            int endY = Math.min(
+                    frameHeader.frameSize().height(),
+                    tiling.rowStartSuperblock(tileRow + 1) * superblockSize
+            );
             int width8 = (endX - startX + 7) >> 3;
             int height8 = (endY - startY + 7) >> 3;
             temporalMotionFields[i] = new TileDecodeContext.TemporalMotionField(width8, height8);
@@ -3251,7 +3275,7 @@ final class Av1DecoderTest {
                 baseFrameHeader.restoration(),
                 baseFrameHeader.transformMode(),
                 baseFrameHeader.reducedTransformSet(),
-                baseFrameHeader.filmGrain().applyGrain()
+                baseFrameHeader.filmGrain()
         );
     }
 
@@ -3482,7 +3506,10 @@ final class Av1DecoderTest {
                 expectedBitDepth,
                 1 << (expectedBitDepth - 1)
         );
-        assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes), decodedFrame.longPixels());
+        assertArrayEquals(
+                ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes, YuvToRgbTransform.BT601_FULL_RANGE),
+                decodedFrame.longPixels()
+        );
     }
 
     /// Asserts that the reader returned one legacy directional still-picture frame.

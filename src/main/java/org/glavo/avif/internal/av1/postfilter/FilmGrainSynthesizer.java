@@ -93,7 +93,7 @@ public final class FilmGrainSynthesizer {
         int[][] lumaGrain = generateLumaGrain(bitDepth, filmGrain);
         PaddedPlane lumaPlane = filmGrain.yPoints().length != 0
                 ? applyLumaGrain(checkedDecodedPlanes.lumaPlane(), bitDepth, filmGrain, lumaScaling, lumaGrain)
-                : copyPlane(checkedDecodedPlanes.lumaPlane());
+                : checkedDecodedPlanes.lumaPlane();
 
         @Nullable PaddedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
         @Nullable PaddedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
@@ -157,7 +157,7 @@ public final class FilmGrainSynthesizer {
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
     /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
-    /// @return the grain-applied chroma plane, or an unchanged copy when the plane has no active grain
+    /// @return the grain-applied chroma plane, or the source plane when it has no active grain
     private static PaddedPlane applyChromaPlaneIfNeeded(
             PaddedPlane chromaPlane,
             PaddedPlane lumaPlane,
@@ -174,7 +174,7 @@ public final class FilmGrainSynthesizer {
                 ? filmGrain.cbPoints()
                 : filmGrain.crPoints();
         if (!filmGrain.chromaScalingFromLuma() && points.length == 0) {
-            return copyPlane(chromaPlane);
+            return chromaPlane;
         }
 
         int[] scaling = filmGrain.chromaScalingFromLuma()
@@ -222,7 +222,7 @@ public final class FilmGrainSynthesizer {
         for (int row = 0; row < rowCount; row++) {
             applyLumaGrainRow(lumaPlane, outputSamples, bitDepth, filmGrain, scaling, grainLookup, row);
         }
-        return new PaddedPlane(lumaPlane.width(), lumaPlane.height(), lumaPlane.stride(), outputSamples);
+        return PaddedPlane.fromOwnedSamples(lumaPlane.width(), lumaPlane.height(), lumaPlane.stride(), outputSamples);
     }
 
     /// Applies generated grain to one luma film-grain block row.
@@ -346,7 +346,7 @@ public final class FilmGrainSynthesizer {
                     row
             );
         }
-        return new PaddedPlane(chromaPlane.width(), chromaPlane.height(), chromaPlane.stride(), outputSamples);
+        return PaddedPlane.fromOwnedSamples(chromaPlane.width(), chromaPlane.height(), chromaPlane.stride(), outputSamples);
     }
 
     /// Applies generated grain to one chroma film-grain block row.
@@ -824,10 +824,11 @@ public final class FilmGrainSynthesizer {
     /// @param index the selected state index
     /// @return one pseudo-random number
     private static int randomNumber(int bits, int[] states, int index) {
-        int[] singleState = new int[]{states[index]};
-        int value = randomNumber(bits, singleState);
-        states[index] = singleState[0];
-        return value;
+        int current = states[index];
+        int bit = ((current >>> 0) ^ (current >>> 1) ^ (current >>> 3) ^ (current >>> 12)) & 1;
+        int next = (current >>> 1) | (bit << 15);
+        states[index] = next;
+        return (next >>> (16 - bits)) & ((1 << bits) - 1);
     }
 
     /// Returns one pseudo-random number and updates the seed.
@@ -836,10 +837,7 @@ public final class FilmGrainSynthesizer {
     /// @param state the mutable single-element LFSR state
     /// @return one pseudo-random number
     private static int randomNumber(int bits, int[] state) {
-        int current = state[0];
-        int bit = ((current >>> 0) ^ (current >>> 1) ^ (current >>> 3) ^ (current >>> 12)) & 1;
-        state[0] = (current >>> 1) | (bit << 15);
-        return (state[0] >>> (16 - bits)) & ((1 << bits) - 1);
+        return randomNumber(bits, state, 0);
     }
 
     /// Returns the overlap blending weight.
@@ -856,14 +854,6 @@ public final class FilmGrainSynthesizer {
             return oldSample ? 27 : 17;
         }
         return oldSample ? 17 : 27;
-    }
-
-    /// Returns one plane copy.
-    ///
-    /// @param plane the source plane
-    /// @return one copied plane
-    private static PaddedPlane copyPlane(PaddedPlane plane) {
-        return new PaddedPlane(plane.width(), plane.height(), plane.stride(), plane.samples());
     }
 
     /// Returns the horizontal chroma subsampling shift for one chroma format.

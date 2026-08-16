@@ -6,6 +6,7 @@ import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.Av1DecodedPlane;
 import org.glavo.avif.Av1DecodedPlanes;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -298,9 +299,22 @@ final class SampleTransformTest {
     /// @return the input descriptors
     private static SampleTransform.Input @Unmodifiable [] inputs(int inputCount) {
         SampleTransform.Input[] inputs = new SampleTransform.Input[inputCount];
+        byte[] encodedPayload = {0};
+        AvifPayload payload = AvifPayload.ofRanges(
+                AvifDataSource.ofBytes(encodedPayload),
+                new long[]{0L},
+                new int[]{encodedPayload.length}
+        );
+        AvifImageSource source = AvifImageSource.item(
+                payload,
+                0,
+                AvifImageSource.HIGHEST_SPATIAL_LAYER,
+                1,
+                1
+        );
         for (int i = 0; i < inputCount; i++) {
             inputs[i] = new SampleTransform.Input(
-                    AvifImageSource.item(new byte[]{0}, 0, 1, 1),
+                    source,
                     AvifBitDepth.EIGHT_BITS,
                     null
             );

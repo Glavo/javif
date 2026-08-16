@@ -820,7 +820,7 @@ final class TileSyntaxReaderTest {
                 ),
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(

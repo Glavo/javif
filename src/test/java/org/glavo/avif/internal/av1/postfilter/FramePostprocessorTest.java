@@ -794,6 +794,51 @@ final class FramePostprocessorTest {
         assertTrue(exception.getMessage().contains("loop filtering"));
     }
 
+    /// Verifies that a frame-level restoration mode does not copy planes when every unit selects
+    /// `NONE`.
+    @Test
+    void postprocessReusesPlanesWhenAllRestorationUnitsAreInactive() {
+        DecodedSurface decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                Av1ChromaFormat.MONOCHROME,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                Av1ChromaFormat.MONOCHROME,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.WIENER,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        6,
+                        6
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(
+                frameHeader,
+                0,
+                RestorationUnit.none()
+        );
+
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertSame(decodedPlanes, postprocessed);
+    }
+
     /// Verifies that active Wiener loop restoration uses decoded restoration-unit coefficients.
     @Test
     void postprocessAppliesActiveWienerRestorationFromDecodedUnit() {

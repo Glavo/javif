@@ -34,7 +34,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes, YuvToRgbTransform.BT601_FULL_RANGE);
 
         assertArrayEquals(
                 new int[]{
@@ -65,7 +65,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes, YuvToRgbTransform.BT601_FULL_RANGE);
 
         assertEquals(6, pixels.length);
         assertArrayEquals(
@@ -96,7 +96,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes, YuvToRgbTransform.BT601_FULL_RANGE);
 
         assertArrayEquals(
                 new int[]{
@@ -128,7 +128,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 plane(2, 1, 3, 128, 0, 6)
         );
 
-        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes, YuvToRgbTransform.BT601_FULL_RANGE);
 
         assertEquals(8, pixels.length);
         assertEquals(0xFF646464, pixels[0]);
@@ -166,7 +166,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 plane(2, 2, 3, 128, 70, 5, 220, 160, 6)
         );
 
-        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes, YuvToRgbTransform.BT601_FULL_RANGE);
 
         assertArrayEquals(
                 new int[]{
@@ -202,7 +202,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 plane(4, 2, 5, 128, 90, 210, 40, 5, 150, 70, 100, 220, 6)
         );
 
-        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes, YuvToRgbTransform.BT601_FULL_RANGE);
 
         assertArrayEquals(
                 new int[]{

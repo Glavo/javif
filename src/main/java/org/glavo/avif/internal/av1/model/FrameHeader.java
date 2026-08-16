@@ -98,114 +98,8 @@ public final class FrameHeader {
     private final boolean reducedTransformSet;
     /// The decoded global-motion parameters for LAST through ALTREF.
     private final GlobalMotionParams @Unmodifiable [] globalMotionParameters;
-    /// Whether film grain is present for this frame.
-    private final boolean filmGrainPresent;
     /// The normalized film grain parameters for this frame.
     private final FilmGrainParams filmGrain;
-
-    /// Creates a parsed frame header with inter-specific fields defaulted to disabled values.
-    ///
-    /// @param temporalId the temporal layer identifier
-    /// @param spatialId the spatial layer identifier
-    /// @param showExistingFrame whether this is a show-existing-frame header
-    /// @param existingFrameIndex the referenced frame slot when `showExistingFrame` is true
-    /// @param frameId the frame identifier when present
-    /// @param framePresentationDelay the frame presentation delay when present
-    /// @param frameType the AV1 frame type
-    /// @param showFrame whether the frame is shown immediately
-    /// @param showableFrame whether the frame can be shown later
-    /// @param errorResilientMode whether error resilient mode is enabled
-    /// @param disableCdfUpdate whether CDF updates are disabled
-    /// @param allowScreenContentTools whether screen content tools are enabled
-    /// @param forceIntegerMotionVectors whether integer motion vectors are forced
-    /// @param frameSizeOverride whether frame size override signaling is enabled
-    /// @param primaryRefFrame the primary reference frame index, or `7` when none is used
-    /// @param frameOffset the frame order hint when present
-    /// @param refreshFrameFlags the refresh frame flags bitset
-    /// @param frameSize the frame dimensions and render size
-    /// @param superResolution the super-resolution settings
-    /// @param allowIntrabc whether `allow_intrabc` is enabled
-    /// @param refreshContext whether context refresh is enabled
-    /// @param tiling the tile layout information
-    /// @param quantization the quantization parameters
-    /// @param segmentation the segmentation parameters
-    /// @param delta the delta-q and delta-lf signaling flags
-    /// @param allLossless whether all segments are lossless
-    /// @param loopFilter the loop filter parameters
-    /// @param cdef the CDEF parameters
-    /// @param restoration the loop restoration parameters
-    /// @param transformMode the transform mode for this frame
-    /// @param reducedTransformSet whether the reduced transform type set is used
-    /// @param filmGrainPresent whether film grain is present for this frame
-    public FrameHeader(
-            int temporalId,
-            int spatialId,
-            boolean showExistingFrame,
-            int existingFrameIndex,
-            long frameId,
-            long framePresentationDelay,
-            Av1FrameType frameType,
-            boolean showFrame,
-            boolean showableFrame,
-            boolean errorResilientMode,
-            boolean disableCdfUpdate,
-            boolean allowScreenContentTools,
-            boolean forceIntegerMotionVectors,
-            boolean frameSizeOverride,
-            int primaryRefFrame,
-            int frameOffset,
-            int refreshFrameFlags,
-            FrameSize frameSize,
-            SuperResolutionInfo superResolution,
-            boolean allowIntrabc,
-            boolean refreshContext,
-            TilingInfo tiling,
-            QuantizationInfo quantization,
-            SegmentationInfo segmentation,
-            DeltaInfo delta,
-            boolean allLossless,
-            LoopFilterInfo loopFilter,
-            CdefInfo cdef,
-            RestorationInfo restoration,
-            TransformMode transformMode,
-            boolean reducedTransformSet,
-            boolean filmGrainPresent
-    ) {
-        this(
-                temporalId,
-                spatialId,
-                showExistingFrame,
-                existingFrameIndex,
-                frameId,
-                framePresentationDelay,
-                frameType,
-                showFrame,
-                showableFrame,
-                errorResilientMode,
-                disableCdfUpdate,
-                allowScreenContentTools,
-                forceIntegerMotionVectors,
-                frameSizeOverride,
-                primaryRefFrame,
-                frameOffset,
-                refreshFrameFlags,
-                frameSize,
-                superResolution,
-                allowIntrabc,
-                refreshContext,
-                tiling,
-                quantization,
-                segmentation,
-                delta,
-                allLossless,
-                loopFilter,
-                cdef,
-                restoration,
-                transformMode,
-                reducedTransformSet,
-                defaultFilmGrain(filmGrainPresent)
-        );
-    }
 
     /// Creates a parsed frame header with inter-specific fields defaulted to disabled values and normalized film grain parameters.
     ///
@@ -319,143 +213,6 @@ public final class FrameHeader {
                 false,
                 reducedTransformSet,
                 filmGrain
-        );
-    }
-
-    /// Creates a parsed frame header.
-    ///
-    /// @param temporalId the temporal layer identifier
-    /// @param spatialId the spatial layer identifier
-    /// @param showExistingFrame whether this is a show-existing-frame header
-    /// @param existingFrameIndex the referenced frame slot when `showExistingFrame` is true
-    /// @param frameId the frame identifier when present
-    /// @param framePresentationDelay the frame presentation delay when present
-    /// @param frameType the AV1 frame type
-    /// @param showFrame whether the frame is shown immediately
-    /// @param showableFrame whether the frame can be shown later
-    /// @param errorResilientMode whether error resilient mode is enabled
-    /// @param disableCdfUpdate whether CDF updates are disabled
-    /// @param allowScreenContentTools whether screen content tools are enabled
-    /// @param forceIntegerMotionVectors whether integer motion vectors are forced
-    /// @param frameSizeOverride whether frame size override signaling is enabled
-    /// @param primaryRefFrame the primary reference frame index, or `7` when none is used
-    /// @param frameOffset the frame order hint when present
-    /// @param refreshFrameFlags the refresh frame flags bitset
-    /// @param frameReferenceShortSignaling whether short signaling was used for references
-    /// @param referenceFrameIndices the decoded reference-frame slot indices for LAST..ALTREF
-    /// @param frameSize the frame dimensions and render size
-    /// @param superResolution the super-resolution settings
-    /// @param allowIntrabc whether `allow_intrabc` is enabled
-    /// @param allowHighPrecisionMotionVectors whether high-precision motion vectors are allowed
-    /// @param subpelFilterMode the interpolation filter mode used for inter prediction
-    /// @param switchableMotionMode whether motion mode signaling is switchable
-    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
-    /// @param refreshContext whether context refresh is enabled
-    /// @param tiling the tile layout information
-    /// @param quantization the quantization parameters
-    /// @param segmentation the segmentation parameters
-    /// @param delta the delta-q and delta-lf signaling flags
-    /// @param allLossless whether all segments are lossless
-    /// @param loopFilter the loop filter parameters
-    /// @param cdef the CDEF parameters
-    /// @param restoration the loop restoration parameters
-    /// @param transformMode the transform mode for this frame
-    /// @param switchableCompoundReferences whether compound reference mode is switchable
-    /// @param skipModeAllowed whether skip mode is permitted
-    /// @param skipModeEnabled whether skip mode is enabled
-    /// @param skipModeReferenceIndices the two skip-mode reference indices, or `-1`
-    /// @param warpedMotion whether warped motion is enabled
-    /// @param reducedTransformSet whether the reduced transform type set is used
-    /// @param filmGrainPresent whether film grain is present for this frame
-    public FrameHeader(
-            int temporalId,
-            int spatialId,
-            boolean showExistingFrame,
-            int existingFrameIndex,
-            long frameId,
-            long framePresentationDelay,
-            Av1FrameType frameType,
-            boolean showFrame,
-            boolean showableFrame,
-            boolean errorResilientMode,
-            boolean disableCdfUpdate,
-            boolean allowScreenContentTools,
-            boolean forceIntegerMotionVectors,
-            boolean frameSizeOverride,
-            int primaryRefFrame,
-            int frameOffset,
-            int refreshFrameFlags,
-            boolean frameReferenceShortSignaling,
-            int[] referenceFrameIndices,
-            FrameSize frameSize,
-            SuperResolutionInfo superResolution,
-            boolean allowIntrabc,
-            boolean allowHighPrecisionMotionVectors,
-            InterpolationFilter subpelFilterMode,
-            boolean switchableMotionMode,
-            boolean useReferenceFrameMotionVectors,
-            boolean refreshContext,
-            TilingInfo tiling,
-            QuantizationInfo quantization,
-            SegmentationInfo segmentation,
-            DeltaInfo delta,
-            boolean allLossless,
-            LoopFilterInfo loopFilter,
-            CdefInfo cdef,
-            RestorationInfo restoration,
-            TransformMode transformMode,
-            boolean switchableCompoundReferences,
-            boolean skipModeAllowed,
-            boolean skipModeEnabled,
-            int[] skipModeReferenceIndices,
-            boolean warpedMotion,
-            boolean reducedTransformSet,
-            boolean filmGrainPresent
-    ) {
-        this(
-                temporalId,
-                spatialId,
-                showExistingFrame,
-                existingFrameIndex,
-                frameId,
-                framePresentationDelay,
-                frameType,
-                showFrame,
-                showableFrame,
-                errorResilientMode,
-                disableCdfUpdate,
-                allowScreenContentTools,
-                forceIntegerMotionVectors,
-                frameSizeOverride,
-                primaryRefFrame,
-                frameOffset,
-                refreshFrameFlags,
-                frameReferenceShortSignaling,
-                referenceFrameIndices,
-                frameSize,
-                superResolution,
-                allowIntrabc,
-                allowHighPrecisionMotionVectors,
-                subpelFilterMode,
-                switchableMotionMode,
-                useReferenceFrameMotionVectors,
-                refreshContext,
-                tiling,
-                quantization,
-                segmentation,
-                delta,
-                allLossless,
-                loopFilter,
-                cdef,
-                restoration,
-                transformMode,
-                switchableCompoundReferences,
-                skipModeAllowed,
-                skipModeEnabled,
-                skipModeReferenceIndices,
-                warpedMotion,
-                reducedTransformSet,
-                defaultFilmGrain(filmGrainPresent)
         );
     }
 
@@ -599,7 +356,6 @@ public final class FrameHeader {
         this.reducedTransformSet = reducedTransformSet;
         this.globalMotionParameters = defaultGlobalMotionParameters();
         this.filmGrain = Objects.requireNonNull(filmGrain, "filmGrain");
-        this.filmGrainPresent = filmGrain.applyGrain();
     }
 
     /// Creates a frame header by replacing the global-motion state of an already parsed header.
@@ -672,7 +428,6 @@ public final class FrameHeader {
             );
         }
         this.filmGrain = nonNullSource.filmGrain;
-        this.filmGrainPresent = nonNullSource.filmGrainPresent;
     }
 
     /// Returns the temporal layer identifier copied from the OBU header.
@@ -799,13 +554,6 @@ public final class FrameHeader {
     /// @return whether short signaling was used to derive the reference-frame list
     public boolean frameReferenceShortSignaling() {
         return frameReferenceShortSignaling;
-    }
-
-    /// Returns the decoded reference-frame slot indices for LAST..ALTREF.
-    ///
-    /// @return the decoded reference-frame slot indices for LAST..ALTREF
-    public int[] referenceFrameIndices() {
-        return Arrays.copyOf(referenceFrameIndices, referenceFrameIndices.length);
     }
 
     /// Returns a decoded reference-frame slot index by position.
@@ -956,13 +704,6 @@ public final class FrameHeader {
         return skipModeEnabled;
     }
 
-    /// Returns the two skip-mode reference indices, or `-1` when unavailable.
-    ///
-    /// @return the two skip-mode reference indices, or `-1` when unavailable
-    public int[] skipModeReferenceIndices() {
-        return Arrays.copyOf(skipModeReferenceIndices, skipModeReferenceIndices.length);
-    }
-
     /// Returns one skip-mode reference index by position.
     ///
     /// @param index the zero-based skip-mode reference position
@@ -1004,13 +745,6 @@ public final class FrameHeader {
         return new FrameHeader(this, parameters);
     }
 
-    /// Returns whether film grain is present for this frame.
-    ///
-    /// @return whether film grain is present for this frame
-    public boolean filmGrainPresent() {
-        return filmGrainPresent;
-    }
-
     /// Returns the normalized film grain parameters for this frame.
     ///
     /// @return the normalized film grain parameters for this frame
@@ -1025,41 +759,6 @@ public final class FrameHeader {
         GlobalMotionParams[] parameters = new GlobalMotionParams[7];
         Arrays.fill(parameters, GlobalMotionParams.identity());
         return parameters;
-    }
-
-    /// Creates default film grain state for compatibility constructors.
-    ///
-    /// @param applyGrain whether film grain should be treated as present
-    /// @return the default film grain state
-    private static FilmGrainParams defaultFilmGrain(boolean applyGrain) {
-        if (!applyGrain) {
-            return FilmGrainParams.disabled();
-        }
-        return new FilmGrainParams(
-                true,
-                0,
-                true,
-                -1,
-                new FilmGrainPoint[0],
-                false,
-                new FilmGrainPoint[0],
-                new FilmGrainPoint[0],
-                8,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                6,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                false,
-                false
-        );
     }
 
     /// Transform mode values used by AV1 frame headers.
@@ -1420,18 +1119,20 @@ public final class FrameHeader {
             return rows;
         }
 
-        /// Returns the tile column start superblock coordinates.
+        /// Returns one tile-column boundary in superblock coordinates.
         ///
-        /// @return the tile column start superblock coordinates
-        public int[] columnStartSuperblocks() {
-            return Arrays.copyOf(columnStartSuperblocks, columnStartSuperblocks.length);
+        /// @param boundaryIndex the boundary index in `[0, columns()]`
+        /// @return the selected tile-column boundary
+        public int columnStartSuperblock(int boundaryIndex) {
+            return columnStartSuperblocks[Objects.checkIndex(boundaryIndex, columnStartSuperblocks.length)];
         }
 
-        /// Returns the tile row start superblock coordinates.
+        /// Returns one tile-row boundary in superblock coordinates.
         ///
-        /// @return the tile row start superblock coordinates
-        public int[] rowStartSuperblocks() {
-            return Arrays.copyOf(rowStartSuperblocks, rowStartSuperblocks.length);
+        /// @param boundaryIndex the boundary index in `[0, rows()]`
+        /// @return the selected tile-row boundary
+        public int rowStartSuperblock(int boundaryIndex) {
+            return rowStartSuperblocks[Objects.checkIndex(boundaryIndex, rowStartSuperblocks.length)];
         }
 
         /// Returns the tile group update index.

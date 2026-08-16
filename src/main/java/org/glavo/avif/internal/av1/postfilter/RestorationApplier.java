@@ -210,8 +210,7 @@ final class RestorationApplier {
         PlaneSampleSource boundarySource = boundaryPlane == plane
                 ? source
                 : new DecodedPlaneSource(boundaryPlane, bitDepth);
-        PlaneBuffer destination = PlaneBuffer.create(plane, bitDepth);
-        boolean changed = false;
+        @Nullable PlaneBuffer destination = null;
         int rows = unitMap.rows(planeIndex);
         int columns = unitMap.columns(planeIndex);
         if (rows == 0 || columns == 0) {
@@ -236,6 +235,9 @@ final class RestorationApplier {
                 if (unit.type() == FrameHeader.RestorationType.NONE) {
                     continue;
                 }
+                if (destination == null) {
+                    destination = PlaneBuffer.create(plane, bitDepth);
+                }
                 UnitLimits horizontalLimits = unitLimits(unitColumn, unitSize, plane.width());
                 applyRestorationUnit(
                         source,
@@ -251,10 +253,9 @@ final class RestorationApplier {
                         processingUnitWidth,
                         workspace
                 );
-                changed = true;
             }
         }
-        return changed ? destination.toDecodedPlane() : plane;
+        return destination != null ? destination.toDecodedPlane() : plane;
     }
 
     /// Applies one restoration unit one processing stripe at a time.

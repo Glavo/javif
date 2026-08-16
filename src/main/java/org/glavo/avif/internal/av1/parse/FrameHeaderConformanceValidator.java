@@ -98,16 +98,15 @@ final class FrameHeaderConformanceValidator {
         }
 
         FrameHeader.TilingInfo tiling = frameHeader.tiling();
-        int[] columnStarts = tiling.columnStartSuperblocks();
-        int[] rowStarts = tiling.rowStartSuperblocks();
         for (int row = 0; row < tiling.rows(); row++) {
-            if (rowStarts[row + 1] - rowStarts[row] != 1) {
+            if (tiling.rowStartSuperblock(row + 1) - tiling.rowStartSuperblock(row) != 1) {
                 throw new IOException("Large Scale Tile camera tiles must be exactly one superblock high");
             }
         }
-        int tileWidthSuperblocks = columnStarts[1] - columnStarts[0];
+        int tileWidthSuperblocks = tiling.columnStartSuperblock(1) - tiling.columnStartSuperblock(0);
         for (int column = 1; column < tiling.columns(); column++) {
-            if (columnStarts[column + 1] - columnStarts[column] != tileWidthSuperblocks) {
+            if (tiling.columnStartSuperblock(column + 1)
+                    - tiling.columnStartSuperblock(column) != tileWidthSuperblocks) {
                 throw new IOException("Large Scale Tile camera tiles must have identical widths");
             }
         }
@@ -334,22 +333,20 @@ final class FrameHeaderConformanceValidator {
             FrameHeader frameHeader
     ) throws IOException {
         FrameHeader.TilingInfo tiling = frameHeader.tiling();
-        int[] columnStarts = tiling.columnStartSuperblocks();
-        int[] rowStarts = tiling.rowStartSuperblocks();
         int superblockSize = sequenceHeader.features().use128x128Superblocks() ? 128 : 64;
         int frameWidth = frameHeader.frameSize().codedWidth();
         int frameHeight = frameHeader.frameSize().height();
 
         for (int column = 0; column < tiling.columns(); column++) {
-            int start = Math.min(frameWidth, columnStarts[column] * superblockSize);
-            int end = Math.min(frameWidth, columnStarts[column + 1] * superblockSize);
+            int start = Math.min(frameWidth, tiling.columnStartSuperblock(column) * superblockSize);
+            int end = Math.min(frameWidth, tiling.columnStartSuperblock(column + 1) * superblockSize);
             if (end - start < 8) {
                 throw new IOException("Cropped tile width is smaller than eight pixels");
             }
         }
         for (int row = 0; row < tiling.rows(); row++) {
-            int start = Math.min(frameHeight, rowStarts[row] * superblockSize);
-            int end = Math.min(frameHeight, rowStarts[row + 1] * superblockSize);
+            int start = Math.min(frameHeight, tiling.rowStartSuperblock(row) * superblockSize);
+            int end = Math.min(frameHeight, tiling.rowStartSuperblock(row + 1) * superblockSize);
             if (end - start < 8) {
                 throw new IOException("Cropped tile height is smaller than eight pixels");
             }

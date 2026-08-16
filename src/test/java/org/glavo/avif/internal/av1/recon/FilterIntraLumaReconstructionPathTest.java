@@ -24,6 +24,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -467,7 +468,7 @@ final class FilterIntraLumaReconstructionPathTest {
                 ),
                 FrameHeader.TransformMode.LARGEST,
                 false,
-                false
+                FrameHeader.FilmGrainParams.disabled()
         );
     }
 
@@ -528,6 +529,7 @@ final class FilterIntraLumaReconstructionPathTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 -1,
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
                 0
@@ -550,6 +552,7 @@ final class FilterIntraLumaReconstructionPathTest {
         return new TransformResidualUnit(
                 position,
                 transformSize,
+                TransformType.DCT_DCT,
                 0,
                 coefficients,
                 expectedNonZeroCoefficientContextByte(dcCoefficient)

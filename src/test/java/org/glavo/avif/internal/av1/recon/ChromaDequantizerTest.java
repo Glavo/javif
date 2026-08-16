@@ -5,6 +5,7 @@ package org.glavo.avif.internal.av1.recon;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +25,14 @@ final class ChromaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = ChromaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new ChromaDequantizer.Context(1, 1, 2, 10)
         );
 
@@ -43,7 +51,14 @@ final class ChromaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = ChromaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new ChromaDequantizer.Context(1, 1, 2, 12)
         );
 
@@ -61,7 +76,14 @@ final class ChromaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = ChromaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_64X64, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_64X64,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new ChromaDequantizer.Context(1, 1, 2, 10)
         );
 
@@ -79,7 +101,14 @@ final class ChromaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = ChromaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new ChromaDequantizer.Context(1, 1, 2, 10, true, 0)
         );
 
@@ -97,7 +126,14 @@ final class ChromaDequantizerTest {
         coefficients[1] = -3;
 
         int[] dequantized = ChromaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new TransformResidualUnit(
+                        new BlockPosition(0, 0),
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        1,
+                        coefficients,
+                        0x11
+                ),
                 new ChromaDequantizer.Context(1, 1, 2, 10, true, 15)
         );
 
@@ -117,6 +153,7 @@ final class ChromaDequantizerTest {
         TransformResidualUnit residualUnit = new TransformResidualUnit(
                 new BlockPosition(0, 0),
                 TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
                 5,
                 coefficients,
                 0x31
@@ -141,7 +178,14 @@ final class ChromaDequantizerTest {
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
                 () -> ChromaDequantizer.dequantize(
-                        new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 0, coefficients, 0x01),
+                        new TransformResidualUnit(
+                                new BlockPosition(0, 0),
+                                TransformSize.TX_4X4,
+                                TransformType.DCT_DCT,
+                                0,
+                                coefficients,
+                                0x01
+                        ),
                         new ChromaDequantizer.Context(0, 0, 0, 11)
                 )
         );
