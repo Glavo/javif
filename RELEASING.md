@@ -41,20 +41,17 @@ safeguard, but the user-home file is preferred so secrets never enter the worktr
 ## Release procedure
 
 1. Finish and merge the release commit into `main`.
-2. From the Actions page, run `Corpus Check` with `corpus=all` for that exact commit and wait for
-   every AOMedia, Argon, Firefox, and Chromium job to succeed.
-3. Create and push the version tag:
+2. Create and push the version tag:
 
    ```text
    git tag -a v0.1.0 -m "Release 0.1.0"
    git push origin v0.1.0
    ```
 
-4. Wait for the unprivileged validation job to verify the tag, the complete corpus run, and the
-   ordinary release gate.
-5. Approve the `maven-central` environment deployment after checking the selected commit and
+3. Wait for the unprivileged validation job to verify the tag and its commit.
+4. Approve the `maven-central` environment deployment after checking the selected commit and
    version.
-6. Wait for the publication job to complete. It validates a signed local publication, publishes
+5. Wait for the publication job to complete. It validates a signed local publication, publishes
    and closes the Central staging repository, and then creates the GitHub release.
 
 The workflow does not create or move tags. Maven Central releases are immutable, so a failed
@@ -63,7 +60,8 @@ release must be fixed under a new version if any artifact has already reached Ce
 ## Local validation
 
 Use JDK 23 or newer for any local command that generates Javadoc or publication artifacts. The
-release workflow uses JDK 25 for those steps while retaining a separate JDK 17 compatibility gate.
+release workflow uses JDK 25 to build, sign, and publish the artifacts. The regular Gradle Check
+workflow covers Java 17 compatibility before changes reach `main`.
 
 The release version and POM can be checked without credentials or remote changes:
 

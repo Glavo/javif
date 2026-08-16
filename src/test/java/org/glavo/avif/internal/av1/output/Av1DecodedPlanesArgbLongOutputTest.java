@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: MPL-2.0
 package org.glavo.avif.internal.av1.output;
 
-import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.av1.Av1DecodedFrame;
-import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -14,24 +11,14 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/// Contract tests for high-bit-depth ARGB output built on `Av1DecodedPlanes`.
+/// Contract tests for converting decoded surfaces to high-bit-depth ARGB output.
 ///
-/// These tests validate the completed Track E long-output path directly through `ArgbOutput`,
-/// covering exact `0xAAAA_RRRR_GGGG_BBBB` packing, `YUV444` per-pixel chroma sampling, public
-/// frame metadata materialization, and the `8-bit` contract for long-output entry points.
+/// These tests cover exact `0xAAAA_RRRR_GGGG_BBBB` packing, `YUV444` per-pixel chroma sampling,
+/// and the `8-bit` contract for long-output conversion.
 @NotNullByDefault
 final class Av1DecodedPlanesArgbLongOutputTest {
     /// The fixed transform contract used by the convenience long-output overloads.
     private static final YuvToRgbTransform DEFAULT_TRANSFORM = YuvToRgbTransform.BT601_FULL_RANGE;
-
-    /// The test frame type supplied to frame-returning long-output converters.
-    private static final Av1FrameType TEST_FRAME_TYPE = Av1FrameType.SWITCH;
-
-    /// The test visibility flag supplied to frame-returning long-output converters.
-    private static final boolean TEST_VISIBLE = false;
-
-    /// The test presentation index supplied to frame-returning long-output converters.
-    private static final long TEST_PRESENTATION_INDEX = 19L;
 
     /// Verifies that `10-bit` monochrome samples become opaque grayscale `0xAAAA_RRRR_GGGG_BBBB`
     /// pixels and ignore stride padding.
@@ -102,40 +89,7 @@ final class Av1DecodedPlanesArgbLongOutputTest {
         assertOpaquePixels(pixels);
     }
 
-    /// Verifies that one frame-returning long-output overload preserves public frame metadata on
-    /// `Av1DecodedFrame`.
-    @Test
-    void returnsDecodedFrameMetadataForTwelveBitI444Output() {
-        DecodedSurface planes = new DecodedSurface(
-                12,
-                Av1ChromaFormat.YUV444,
-                2,
-                1,
-                2,
-                1,
-                plane(2, 1, 3, 1536, 3072, 1),
-                plane(2, 1, 3, 2048, 1024, 2),
-                plane(2, 1, 3, 2048, 3072, 3)
-        );
-
-        Av1DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
-                planes,
-                TEST_FRAME_TYPE,
-                TEST_VISIBLE,
-                TEST_PRESENTATION_INDEX
-        );
-
-        assertArrayEquals(
-                new long[]{
-                        DEFAULT_TRANSFORM.toOpaqueArgb64(1536, 2048, 2048, 12),
-                        DEFAULT_TRANSFORM.toOpaqueArgb64(3072, 1024, 3072, 12)
-                },
-                frame.longPixels()
-        );
-        assertFrameMetadata(frame, planes);
-    }
-
-    /// Verifies that long-output entry points expand `8-bit` samples into 16-bit lanes.
+    /// Verifies that long-output conversion expands `8-bit` samples into 16-bit lanes.
     @Test
     void expandsEightBitDecodedPlanesForLongOutputEntryPoints() {
         DecodedSurface planes = new DecodedSurface(
@@ -156,32 +110,9 @@ final class Av1DecodedPlanesArgbLongOutputTest {
         };
 
         long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
-        Av1DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
-                planes,
-                TEST_FRAME_TYPE,
-                TEST_VISIBLE,
-                TEST_PRESENTATION_INDEX
-        );
 
         assertArrayEquals(expectedPixels, pixels);
         assertOpaquePixels(pixels);
-        assertArrayEquals(expectedPixels, frame.longPixels());
-        assertOpaquePixels(frame.longPixels());
-        assertFrameMetadata(frame, planes);
-    }
-
-    /// Asserts public frame metadata on one `Av1DecodedFrame`.
-    ///
-    /// @param frame the frame to validate
-    /// @param planes the source decoded planes
-    private static void assertFrameMetadata(Av1DecodedFrame frame, DecodedSurface planes) {
-        assertEquals(planes.codedWidth(), frame.width());
-        assertEquals(planes.codedHeight(), frame.height());
-        assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
-        assertEquals(planes.chromaFormat(), frame.chromaFormat());
-        assertEquals(TEST_FRAME_TYPE, frame.frameType());
-        assertEquals(TEST_VISIBLE, frame.visible());
-        assertEquals(TEST_PRESENTATION_INDEX, frame.presentationIndex());
     }
 
     /// Asserts fully opaque `0xFFFF` alpha for every packed 64-bit ARGB pixel.

@@ -32,7 +32,6 @@ import org.glavo.avif.internal.av1.recon.InvalidFrameReconstructionException;
 import org.glavo.avif.internal.av1.recon.LargeScaleTileOutputBuilder;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.av1.runtime.FrameOutputPolicy;
-import org.glavo.avif.internal.av1.runtime.RuntimeReferenceSlot;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -73,8 +72,8 @@ public final class Av1Decoder implements AutoCloseable {
     private final TileListParser tileListParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
-    /// The runtime reference slots used for syntax inheritance and stored-surface reuse.
-    private final RuntimeReferenceSlot[] referenceSlots;
+    /// The stored reference surfaces used for syntax inheritance and reconstructed-surface reuse.
+    private final @Nullable ReferenceSurfaceSnapshot[] referenceSlots;
     /// The currently assembled frame when tile groups span multiple OBUs.
     private @Nullable FrameAssembly pendingFrameAssembly;
     /// The common camera frame retained for Large Scale Tile list decoding.
@@ -118,7 +117,7 @@ public final class Av1Decoder implements AutoCloseable {
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
         this.tileBitstreamParser = new TileBitstreamParser();
         this.tileListParser = new TileListParser();
-        this.referenceSlots = createReferenceSlots();
+        this.referenceSlots = new ReferenceSurfaceSnapshot[8];
         this.largeScaleTileCameraReferenceSyntaxStates = new ReferenceFrameSyntaxState[8];
         this.largeScaleTileAnchorFrames = new ArrayList<>();
         this.frameReconstructor = new FrameReconstructor();
@@ -490,7 +489,8 @@ public final class Av1Decoder implements AutoCloseable {
         if (slot < 0 || slot >= referenceSlots.length) {
             throw new IndexOutOfBoundsException("slot out of range: " + slot);
         }
-        return referenceSlots[slot].syntaxState();
+        @Nullable ReferenceSurfaceSnapshot snapshot = referenceSlots[slot];
+        return snapshot != null ? snapshot.frameSyntaxState() : null;
     }
 
     /// Returns one refreshed reference-frame header, or `null`.
@@ -504,7 +504,8 @@ public final class Av1Decoder implements AutoCloseable {
         if (slot < 0 || slot >= referenceSlots.length) {
             throw new IndexOutOfBoundsException("slot out of range: " + slot);
         }
-        return referenceSlots[slot].frameHeader();
+        @Nullable ReferenceSurfaceSnapshot snapshot = referenceSlots[slot];
+        return snapshot != null ? snapshot.frameHeader() : null;
     }
 
     /// Returns one refreshed reference-surface snapshot, or `null`.
@@ -518,7 +519,7 @@ public final class Av1Decoder implements AutoCloseable {
         if (slot < 0 || slot >= referenceSlots.length) {
             throw new IndexOutOfBoundsException("slot out of range: " + slot);
         }
-        return referenceSlots[slot].surfaceSnapshot();
+        return referenceSlots[slot];
     }
 
     /// Injects one full reference-slot state for same-package tests.
@@ -539,9 +540,7 @@ public final class Av1Decoder implements AutoCloseable {
         }
 
         this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
-        RuntimeReferenceSlot referenceSlot = referenceSlots[slot];
-        referenceSlot.clear();
-        referenceSlot.refresh(Objects.requireNonNull(referenceSurfaceSnapshot, "referenceSurfaceSnapshot"));
+        referenceSlots[slot] = Objects.requireNonNull(referenceSurfaceSnapshot, "referenceSurfaceSnapshot");
     }
 
     /// Ensures that this decoder has not already been closed.
@@ -873,7 +872,10 @@ public final class Av1Decoder implements AutoCloseable {
             if (slotIndex < 0 || slotIndex >= referenceSlots.length) {
                 throw invalidBitstream(packet, "Selected reference frame does not identify a valid slot");
             }
-            @Nullable ReferenceFrameSyntaxState storedState = referenceSlots[slotIndex].syntaxState();
+            @Nullable ReferenceSurfaceSnapshot snapshot = referenceSlots[slotIndex];
+            @Nullable ReferenceFrameSyntaxState storedState = snapshot != null
+                    ? snapshot.frameSyntaxState()
+                    : null;
             if (storedState == null) {
                 throw invalidBitstream(packet, "Selected reference frame slot is not populated");
             }
@@ -1376,7 +1378,7 @@ public final class Av1Decoder implements AutoCloseable {
                     null
             );
         }
-        if (!referenceSlots[existingFrameIndex].isPopulated()) {
+        if (referenceSlots[existingFrameIndex] == null) {
             throw new Av1DecodeException(
                     Av1DecodeErrorCode.STATE_VIOLATION,
                     Av1DecodeStage.FRAME_DECODE,
@@ -1391,7 +1393,7 @@ public final class Av1Decoder implements AutoCloseable {
     /// Prepares one `show_existing_frame` output from the requested reference slot, or `null` when
     /// current public filtering suppresses presentation.
     ///
-    /// The output reuses the reconstructed surface atomically stored with the slot's syntax state.
+    /// The output reuses the reconstructed surface stored with the slot's syntax state.
     /// Showing a stored key frame refreshes every reference slot before presentation filtering.
     ///
     /// @param packet the source OBU packet that requested `show_existing_frame`
@@ -1404,15 +1406,14 @@ public final class Av1Decoder implements AutoCloseable {
     ) throws Av1DecodeException {
         int existingFrameIndex = outputRequestHeader.existingFrameIndex();
         requireExistingFrameState(packet, existingFrameIndex);
-        RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
-        FrameHeader referencedFrameHeader = Objects.requireNonNull(slot.frameHeader(), "referencedFrameHeader");
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
+                referenceSlots[existingFrameIndex],
+                "populated reference slot"
+        );
+        FrameHeader referencedFrameHeader = referenceSurfaceSnapshot.frameHeader();
         if (config.strictStdCompliance() && !referencedFrameHeader.showableFrame()) {
             throw invalidBitstream(packet, "show_existing_frame references a frame that is not showable");
         }
-        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
-                slot.surfaceSnapshot(),
-                "populated reference slot"
-        );
         if (config.largeScaleTileMode()) {
             addLargeScaleTileAnchorFrame(referenceSurfaceSnapshot, packet);
         }
@@ -1589,7 +1590,8 @@ public final class Av1Decoder implements AutoCloseable {
         if (primarySlot < 0 || primarySlot >= referenceSlots.length) {
             return null;
         }
-        return referenceSlots[primarySlot].syntaxState();
+        @Nullable ReferenceSurfaceSnapshot snapshot = referenceSlots[primarySlot];
+        return snapshot != null ? snapshot.frameSyntaxState() : null;
     }
 
     /// Creates the compact syntax state stored in refreshed reference slots.
@@ -1614,7 +1616,7 @@ public final class Av1Decoder implements AutoCloseable {
         return ReferenceFrameSyntaxState.from(syntaxDecodeResult, storedFrameCdfContext);
     }
 
-    /// Atomically refreshes any reference slots targeted by the parsed frame header.
+    /// Refreshes any reference slots targeted by the parsed frame header.
     ///
     /// Only successfully reconstructed and postprocessed frames populate these slots, so a failed
     /// frame never leaves partially updated parser or surface state.
@@ -1625,32 +1627,26 @@ public final class Av1Decoder implements AutoCloseable {
             FrameHeader frameHeader,
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot
     ) {
+        ReferenceSurfaceSnapshot checkedSnapshot = Objects.requireNonNull(
+                referenceSurfaceSnapshot,
+                "referenceSurfaceSnapshot"
+        );
         int refreshFrameFlags = frameHeader.refreshFrameFlags();
         for (int i = 0; i < referenceSlots.length; i++) {
             if ((refreshFrameFlags & (1 << i)) != 0) {
-                referenceSlots[i].refresh(referenceSurfaceSnapshot);
+                referenceSlots[i] = checkedSnapshot;
             }
         }
-    }
-
-    /// Creates one fixed-size array of empty runtime reference slots.
-    ///
-    /// @return one fixed-size array of empty runtime reference slots
-    private static RuntimeReferenceSlot[] createReferenceSlots() {
-        RuntimeReferenceSlot[] slots = new RuntimeReferenceSlot[8];
-        for (int i = 0; i < slots.length; i++) {
-            slots[i] = new RuntimeReferenceSlot();
-        }
-        return slots;
     }
 
     /// Returns the current reference-frame headers as one parser-facing slot array snapshot.
     ///
     /// @return the current reference-frame headers as one parser-facing slot array snapshot
-    private FrameHeader[] referenceFrameHeadersForParsing() {
+    private @Nullable FrameHeader[] referenceFrameHeadersForParsing() {
         FrameHeader[] headers = new FrameHeader[referenceSlots.length];
         for (int i = 0; i < referenceSlots.length; i++) {
-            headers[i] = referenceSlots[i].frameHeader();
+            @Nullable ReferenceSurfaceSnapshot snapshot = referenceSlots[i];
+            headers[i] = snapshot != null ? snapshot.frameHeader() : null;
         }
         return headers;
     }
@@ -1658,10 +1654,11 @@ public final class Av1Decoder implements AutoCloseable {
     /// Returns the current compact reference syntax states as one slot-indexed array.
     ///
     /// @return the current compact reference syntax states as one slot-indexed array
-    private ReferenceFrameSyntaxState[] referenceFrameSyntaxStatesForDecoding() {
+    private @Nullable ReferenceFrameSyntaxState[] referenceFrameSyntaxStatesForDecoding() {
         ReferenceFrameSyntaxState[] states = new ReferenceFrameSyntaxState[referenceSlots.length];
         for (int i = 0; i < referenceSlots.length; i++) {
-            states[i] = referenceSlots[i].syntaxState();
+            @Nullable ReferenceSurfaceSnapshot snapshot = referenceSlots[i];
+            states[i] = snapshot != null ? snapshot.frameSyntaxState() : null;
         }
         return states;
     }
@@ -1670,11 +1667,7 @@ public final class Av1Decoder implements AutoCloseable {
     ///
     /// @return the current stored reference surfaces as one slot-indexed snapshot array
     private @Nullable ReferenceSurfaceSnapshot[] currentReferenceSurfaceSnapshots() {
-        ReferenceSurfaceSnapshot[] snapshots = new ReferenceSurfaceSnapshot[referenceSlots.length];
-        for (int i = 0; i < referenceSlots.length; i++) {
-            snapshots[i] = referenceSlots[i].surfaceSnapshot();
-        }
-        return snapshots;
+        return Arrays.copyOf(referenceSlots, referenceSlots.length);
     }
 
     /// Identifies one exactly reusable decoded tile syntax result within a single Tile List OBU.

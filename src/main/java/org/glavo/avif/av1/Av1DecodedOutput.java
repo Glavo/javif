@@ -3,11 +3,15 @@
 package org.glavo.avif.av1;
 
 import org.glavo.avif.Av1DecodedPlanes;
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
-import org.glavo.avif.internal.av1.runtime.OutputFrameFactory;
+import org.glavo.avif.internal.av1.output.ArgbOutput;
+import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.Objects;
 
 /// Immutable decoded AV1 presentation output with YUV planes and frame metadata.
@@ -133,15 +137,36 @@ public final class Av1DecodedOutput {
     public Av1DecodedFrame toFrame() {
         Av1DecodedFrame result = frame;
         if (result == null) {
-            result = OutputFrameFactory.createFrame(
-                    surface,
-                    colorConfig,
-                    frameType,
-                    visible,
-                    presentationIndex,
-                    temporalId,
-                    spatialId
-            );
+            YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig);
+            result = switch (surface.bitDepth()) {
+                case 8 -> new Av1DecodedFrame(
+                        surface.codedWidth(),
+                        surface.codedHeight(),
+                        AvifBitDepth.EIGHT_BITS,
+                        surface.chromaFormat(),
+                        frameType,
+                        visible,
+                        presentationIndex,
+                        temporalId,
+                        spatialId,
+                        IntBuffer.wrap(ArgbOutput.toOpaqueArgbPixels(surface, transform)).asReadOnlyBuffer()
+                );
+                case 10, 12 -> new Av1DecodedFrame(
+                        surface.codedWidth(),
+                        surface.codedHeight(),
+                        AvifBitDepth.fromBits(surface.bitDepth()),
+                        surface.chromaFormat(),
+                        frameType,
+                        visible,
+                        presentationIndex,
+                        temporalId,
+                        spatialId,
+                        LongBuffer.wrap(ArgbOutput.toOpaqueArgbLongPixels(surface, transform)).asReadOnlyBuffer()
+                );
+                default -> throw new IllegalArgumentException(
+                        "Unsupported decoded bit depth: " + surface.bitDepth()
+                );
+            };
             frame = result;
         }
         return result;

@@ -2055,38 +2055,33 @@ public final class FrameHeaderParser {
     }
 
     /// Parsed frame size and super-resolution state.
+    ///
+    /// @param frameSize the parsed frame dimensions
+    /// @param superResolution the parsed super-resolution settings
     @NotNullByDefault
-    private static final class FrameSizeResult {
-        /// The parsed frame dimensions.
-        private final FrameHeader.FrameSize frameSize;
-        /// The parsed super-resolution settings.
-        private final FrameHeader.SuperResolutionInfo superResolution;
-
-        /// Creates parsed frame size and super-resolution state.
-        ///
-        /// @param frameSize the parsed frame dimensions
-        /// @param superResolution the parsed super-resolution settings
-        private FrameSizeResult(FrameHeader.FrameSize frameSize, FrameHeader.SuperResolutionInfo superResolution) {
-            this.frameSize = Objects.requireNonNull(frameSize, "frameSize");
-            this.superResolution = Objects.requireNonNull(superResolution, "superResolution");
+    private record FrameSizeResult(
+            FrameHeader.FrameSize frameSize,
+            FrameHeader.SuperResolutionInfo superResolution
+    ) {
+        /// Validates parsed frame size and super-resolution state.
+        private FrameSizeResult {
+            Objects.requireNonNull(frameSize, "frameSize");
+            Objects.requireNonNull(superResolution, "superResolution");
         }
     }
 
     /// Derived per-segment lossless state.
+    ///
+    /// @param segmentation the segmentation state with derived qindex and lossless arrays
+    /// @param allLossless whether all segments are lossless
     @NotNullByDefault
-    private static final class DerivedLosslessState {
-        /// The segmentation state with derived qindex and lossless arrays.
-        private final FrameHeader.SegmentationInfo segmentation;
-        /// Whether all segments are lossless.
-        private final boolean allLossless;
-
-        /// Creates derived per-segment lossless state.
-        ///
-        /// @param segmentation the segmentation state with derived arrays
-        /// @param allLossless whether all segments are lossless
-        private DerivedLosslessState(FrameHeader.SegmentationInfo segmentation, boolean allLossless) {
-            this.segmentation = Objects.requireNonNull(segmentation, "segmentation");
-            this.allLossless = allLossless;
+    private record DerivedLosslessState(
+            FrameHeader.SegmentationInfo segmentation,
+            boolean allLossless
+    ) {
+        /// Validates derived per-segment lossless state.
+        private DerivedLosslessState {
+            Objects.requireNonNull(segmentation, "segmentation");
         }
     }
 }

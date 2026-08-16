@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 package org.glavo.avif.internal.av1.output;
 
-import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.av1.Av1DecodedFrame;
-import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -16,21 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Contract tests for 8-bit ARGB output built on `Av1DecodedPlanes`.
+/// Contract tests for converting decoded surfaces to 8-bit ARGB output.
 ///
-/// These tests exercise the stable frame-returning `ArgbOutput` API directly and validate
-/// deterministic `MONOCHROME`, `YUV420`, `YUV422`, and `YUV444` pixel packing behavior.
+/// These tests validate deterministic `MONOCHROME`, `YUV420`, `YUV422`, and `YUV444` pixel
+/// packing behavior.
 @NotNullByDefault
 final class Av1DecodedPlanesArgbIntOutputTest {
-    /// The test frame type supplied to frame-returning converters.
-    private static final Av1FrameType TEST_FRAME_TYPE = Av1FrameType.KEY;
-
-    /// The test visibility flag supplied to frame-returning converters.
-    private static final boolean TEST_VISIBLE = true;
-
-    /// The test presentation index supplied to frame-returning converters.
-    private static final long TEST_PRESENTATION_INDEX = 7L;
-
     /// Verifies that 8-bit monochrome planes become opaque grayscale ARGB pixels and ignore stride padding.
     @Test
     void convertsEightBitI400SamplesIntoOpaqueArgbPixels() {
@@ -46,8 +34,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        Av1DecodedFrame frame = convert(planes);
-        int[] pixels = frame.intPixels();
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
 
         assertArrayEquals(
                 new int[]{
@@ -61,7 +48,6 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 pixels
         );
         assertOpaquePixels(pixels);
-        assertFrameMetadata(frame, planes);
     }
 
     /// Verifies that AV1 render hints neither crop nor resample decoded output pixels.
@@ -79,10 +65,9 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        Av1DecodedFrame frame = convert(planes);
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
 
-        assertEquals(3, frame.width());
-        assertEquals(2, frame.height());
+        assertEquals(6, pixels.length);
         assertArrayEquals(
                 new int[]{
                         0xFF000000,
@@ -92,7 +77,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                         0xFF808080,
                         0xFFC8C8C8
                 },
-                frame.intPixels()
+                pixels
         );
     }
 
@@ -111,8 +96,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        Av1DecodedFrame frame = convert(planes);
-        int[] pixels = frame.intPixels();
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
 
         assertArrayEquals(
                 new int[]{
@@ -123,7 +107,6 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 pixels
         );
         assertOpaquePixels(pixels);
-        assertFrameMetadata(frame, planes);
     }
 
     /// Verifies that 8-bit `YUV420` output reuses one chroma sample for each 2x2 luma block and packs `AARRGGBB`.
@@ -145,8 +128,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 plane(2, 1, 3, 128, 0, 6)
         );
 
-        Av1DecodedFrame frame = convert(planes);
-        int[] pixels = frame.intPixels();
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
 
         assertEquals(8, pixels.length);
         assertEquals(0xFF646464, pixels[0]);
@@ -163,7 +145,6 @@ final class Av1DecodedPlanesArgbIntOutputTest {
         assertTrue(green(pixels[2]) > red(pixels[2]));
 
         assertOpaquePixels(pixels);
-        assertFrameMetadata(frame, planes);
     }
 
     /// Verifies that 8-bit `YUV422` output shares chroma horizontally within each row but not across rows.
@@ -185,8 +166,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 plane(2, 2, 3, 128, 70, 5, 220, 160, 6)
         );
 
-        Av1DecodedFrame frame = convert(planes);
-        int[] pixels = frame.intPixels();
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
 
         assertArrayEquals(
                 new int[]{
@@ -202,7 +182,6 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 pixels
         );
         assertOpaquePixels(pixels);
-        assertFrameMetadata(frame, planes);
     }
 
     /// Verifies that 8-bit `YUV444` output uses one chroma pair per luma sample with no subsampling.
@@ -223,8 +202,7 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 plane(4, 2, 5, 128, 90, 210, 40, 5, 150, 70, 100, 220, 6)
         );
 
-        Av1DecodedFrame frame = convert(planes);
-        int[] pixels = frame.intPixels();
+        int[] pixels = ArgbOutput.toOpaqueArgbPixels(planes);
 
         assertArrayEquals(
                 new int[]{
@@ -240,20 +218,6 @@ final class Av1DecodedPlanesArgbIntOutputTest {
                 pixels
         );
         assertOpaquePixels(pixels);
-        assertFrameMetadata(frame, planes);
-    }
-
-    /// Converts one decoded-plane snapshot through the stable frame-returning output API.
-    ///
-    /// @param planes the decoded planes to convert
-    /// @return one opaque 8-bit ARGB frame
-    private static Av1DecodedFrame convert(DecodedSurface planes) {
-        return ArgbOutput.toOpaqueArgb8Frame(
-                planes,
-                TEST_FRAME_TYPE,
-                TEST_VISIBLE,
-                TEST_PRESENTATION_INDEX
-        );
     }
 
     /// Asserts opaque `0xFF` alpha for every packed ARGB pixel.
@@ -263,20 +227,6 @@ final class Av1DecodedPlanesArgbIntOutputTest {
         for (int pixel : pixels) {
             assertEquals(0xFF, alpha(pixel));
         }
-    }
-
-    /// Asserts public frame metadata on one `Av1DecodedFrame`.
-    ///
-    /// @param frame the frame to validate
-    /// @param planes the source decoded planes
-    private static void assertFrameMetadata(Av1DecodedFrame frame, DecodedSurface planes) {
-        assertEquals(planes.codedWidth(), frame.width());
-        assertEquals(planes.codedHeight(), frame.height());
-        assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
-        assertEquals(planes.chromaFormat(), frame.chromaFormat());
-        assertEquals(TEST_FRAME_TYPE, frame.frameType());
-        assertEquals(TEST_VISIBLE, frame.visible());
-        assertEquals(TEST_PRESENTATION_INDEX, frame.presentationIndex());
     }
 
     /// Creates one immutable decoded plane from unsigned integer sample values.

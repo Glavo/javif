@@ -4406,147 +4406,39 @@ public final class BlockNeighborContext {
     }
 
     /// The result of one dimension-aware AV1 spatial row or column scan.
+    ///
+    /// @param candidateCount the updated number of valid candidates
+    /// @param referenceMatch whether the scan found the requested reference selection
+    /// @param haveNewMotionVectorMatch whether a matching block used a `NEWMV`-carrying mode
+    /// @param scanDistance the spatial-depth contribution returned by the scan
     @NotNullByDefault
-    private static final class ExactSpatialScanResult {
-        /// The updated number of valid candidates.
-        private final int candidateCount;
-
-        /// Whether the scan found the requested reference selection.
-        private final boolean referenceMatch;
-
-        /// Whether a matching block used a `NEWMV`-carrying mode.
-        private final boolean haveNewMotionVectorMatch;
-
-        /// The spatial-depth contribution returned by the scan.
-        private final int scanDistance;
-
-        /// Creates one dimension-aware spatial scan result.
-        ///
-        /// @param candidateCount the updated number of valid candidates
-        /// @param referenceMatch whether the scan found the requested reference selection
-        /// @param haveNewMotionVectorMatch whether a matching block used a `NEWMV`-carrying mode
-        /// @param scanDistance the spatial-depth contribution returned by the scan
-        private ExactSpatialScanResult(
-                int candidateCount,
-                boolean referenceMatch,
-                boolean haveNewMotionVectorMatch,
-                int scanDistance
-        ) {
-            this.candidateCount = candidateCount;
-            this.referenceMatch = referenceMatch;
-            this.haveNewMotionVectorMatch = haveNewMotionVectorMatch;
-            this.scanDistance = scanDistance;
-        }
-
-        /// Returns the updated candidate count.
-        ///
-        /// @return the updated candidate count
-        public int candidateCount() {
-            return candidateCount;
-        }
-
-        /// Returns whether the scan found the requested reference selection.
-        ///
-        /// @return whether the scan found the requested reference selection
-        public boolean referenceMatch() {
-            return referenceMatch;
-        }
-
-        /// Returns whether a matching block used a `NEWMV`-carrying mode.
-        ///
-        /// @return whether a matching block used a `NEWMV`-carrying mode
-        public boolean haveNewMotionVectorMatch() {
-            return haveNewMotionVectorMatch;
-        }
-
-        /// Returns the spatial-depth contribution.
-        ///
-        /// @return the spatial-depth contribution
-        public int scanDistance() {
-            return scanDistance;
-        }
+    private record ExactSpatialScanResult(
+            int candidateCount,
+            boolean referenceMatch,
+            boolean haveNewMotionVectorMatch,
+            int scanDistance
+    ) {
     }
 
     /// The result of sampling the current block's projected temporal motion field.
+    ///
+    /// @param candidateCount the updated number of valid weighted candidates
+    /// @param globalMotionContext the temporal `globalmv` context in `[0, 2)`
     @NotNullByDefault
-    private static final class TemporalScanResult {
-        /// The updated number of valid weighted candidates.
-        private final int candidateCount;
-
-        /// The temporal `globalmv` context in `[0, 2)`.
-        private final int globalMotionContext;
-
-        /// Creates one temporal scan result.
-        ///
-        /// @param candidateCount the updated number of valid weighted candidates
-        /// @param globalMotionContext the temporal `globalmv` context in `[0, 2)`
-        private TemporalScanResult(int candidateCount, int globalMotionContext) {
-            this.candidateCount = candidateCount;
-            this.globalMotionContext = globalMotionContext;
-        }
-
-        /// Returns the updated number of valid weighted candidates.
-        ///
-        /// @return the updated number of valid weighted candidates
-        public int candidateCount() {
-            return candidateCount;
-        }
-
-        /// Returns the temporal `globalmv` context.
-        ///
-        /// @return the temporal `globalmv` context in `[0, 2)`
-        public int globalMotionContext() {
-            return globalMotionContext;
-        }
+    private record TemporalScanResult(int candidateCount, int globalMotionContext) {
     }
 
     /// AV1 `refmvs` syntax contexts derived from the scanned neighbors.
+    ///
+    /// @param singleNewMvContext the zero-based `newmv` context index in `[0, 6)`
+    /// @param singleReferenceMvContext the zero-based `refmv` context index in `[0, 6)`
+    /// @param compoundInterModeContext the zero-based compound inter-mode context index in `[0, 8)`
     @NotNullByDefault
-    private static final class RefMvsContextSummary {
-        /// The zero-based `newmv` context index in `[0, 6)`.
-        private final int singleNewMvContext;
-
-        /// The zero-based `refmv` context index in `[0, 6)`.
-        private final int singleReferenceMvContext;
-
-        /// The zero-based compound inter-mode context index in `[0, 8)`.
-        private final int compoundInterModeContext;
-
-        /// Creates one neighbor-derived `refmvs` syntax context summary.
-        ///
-        /// @param singleNewMvContext the zero-based `newmv` context index in `[0, 6)`
-        /// @param singleReferenceMvContext the zero-based `refmv` context index in `[0, 6)`
-        /// @param compoundInterModeContext the zero-based compound inter-mode context index in `[0, 8)`
-        private RefMvsContextSummary(
-                int singleNewMvContext,
-                int singleReferenceMvContext,
-                int compoundInterModeContext
-        ) {
-            this.singleNewMvContext = singleNewMvContext;
-            this.singleReferenceMvContext = singleReferenceMvContext;
-            this.compoundInterModeContext = compoundInterModeContext;
-        }
-
-        /// Returns the zero-based `newmv` context index in `[0, 6)`.
-        ///
-        /// @return the zero-based `newmv` context index in `[0, 6)`
-        public int singleNewMvContext() {
-            return singleNewMvContext;
-        }
-
-        /// Returns the zero-based `refmv` context index in `[0, 6)`.
-        ///
-        /// @return the zero-based `refmv` context index in `[0, 6)`
-        public int singleReferenceMvContext() {
-            return singleReferenceMvContext;
-        }
-
-        /// Returns the zero-based compound inter-mode context index in `[0, 8)`.
-        ///
-        /// @return the zero-based compound inter-mode context index in `[0, 8)`
-        public int compoundInterModeContext() {
-            return compoundInterModeContext;
-        }
+    private record RefMvsContextSummary(
+            int singleNewMvContext,
+            int singleReferenceMvContext,
+            int compoundInterModeContext
+    ) {
     }
 
     /// The current-frame segment prediction for one block position.

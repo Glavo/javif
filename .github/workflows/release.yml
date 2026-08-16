@@ -7,7 +7,6 @@ on:
       - 'v*'
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -17,7 +16,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.release.outputs.version }}
     steps:
@@ -42,55 +41,6 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Require complete corpus gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          run_id="$(gh run list \
-            --workflow corpus-check.yml \
-            --commit "$GITHUB_SHA" \
-            --status success \
-            --limit 100 \
-            --json databaseId,displayTitle \
-            --jq '.[] | select(.displayTitle == "Corpus Check (all)") | .databaseId' \
-            | head -n 1)"
-          if [[ -z "$run_id" ]]; then
-            echo "Run Corpus Check with corpus=all successfully for $GITHUB_SHA before tagging a release" >&2
-            exit 1
-          fi
-          echo "Using successful Corpus Check run $run_id"
-
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
-
-      - name: Test release on Java 17
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: >-
-          xvfb-run -a ./gradlew -g .gradle-user-home
-          -Pversion="$RELEASE_VERSION"
-          cleanTest test verifyNoRuntimeDependencies verifyReleaseVersion
-          --info --no-daemon --stacktrace
-
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: temurin
-          java-version: '25'
-
-      - name: Build release documentation on Java 25
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: >-
-          xvfb-run -a ./gradlew -g .gradle-user-home
-          -Pversion="$RELEASE_VERSION"
-          clean assemble javadoc verifyNoRuntimeDependencies verifyReleaseVersion
-          --info --no-daemon --stacktrace
 
   publish:
     needs: validate

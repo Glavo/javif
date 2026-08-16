@@ -3381,236 +3381,72 @@ public final class TileBlockHeaderReader {
     }
 
     /// The decoded result of one segment-id read pass.
+    ///
+    /// @param segmentPredicted whether the block used temporal segmentation prediction
+    /// @param segmentId the decoded segment identifier
     @NotNullByDefault
-    private static final class SegmentReadResult {
-        /// Whether the block used temporal segmentation prediction.
-        private final boolean segmentPredicted;
-
-        /// The decoded segment identifier.
-        private final int segmentId;
-
-        /// Creates one decoded segment-id read result.
-        ///
-        /// @param segmentPredicted whether the block used temporal segmentation prediction
-        /// @param segmentId the decoded segment identifier
-        private SegmentReadResult(boolean segmentPredicted, int segmentId) {
-            this.segmentPredicted = segmentPredicted;
-            this.segmentId = segmentId;
-        }
-
-        /// Returns whether the block used temporal segmentation prediction.
-        ///
-        /// @return whether the block used temporal segmentation prediction
-        public boolean segmentPredicted() {
-            return segmentPredicted;
-        }
-
-        /// Returns the decoded segment identifier.
-        ///
-        /// @return the decoded segment identifier
-        public int segmentId() {
-            return segmentId;
-        }
+    private record SegmentReadResult(boolean segmentPredicted, int segmentId) {
     }
 
     /// The decoded switchable interpolation-filter selection for one inter block.
+    ///
+    /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
+    /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
     @NotNullByDefault
-    private static final class InterpolationFilterSelection {
-        /// The decoded horizontal switchable interpolation filter, or `null` when not available.
-        private final @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter;
-
-        /// The decoded vertical switchable interpolation filter, or `null` when not available.
-        private final @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter;
-
-        /// Creates one decoded switchable interpolation-filter selection.
-        ///
-        /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
-        /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
-        private InterpolationFilterSelection(
-                @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
-                @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
-        ) {
-            this.horizontalInterpolationFilter = horizontalInterpolationFilter;
-            this.verticalInterpolationFilter = verticalInterpolationFilter;
-        }
-
-        /// Returns the decoded horizontal switchable interpolation filter, or `null` when not available.
-        ///
-        /// @return the decoded horizontal switchable interpolation filter, or `null` when not available
-        public @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter() {
-            return horizontalInterpolationFilter;
-        }
-
-        /// Returns the decoded vertical switchable interpolation filter, or `null` when not available.
-        ///
-        /// @return the decoded vertical switchable interpolation filter, or `null` when not available
-        public @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter() {
-            return verticalInterpolationFilter;
-        }
+    private record InterpolationFilterSelection(
+            @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+            @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
+    ) {
     }
 
     /// The decoded inter reference selection for one block.
+    ///
+    /// @param compoundReference whether the block uses compound inter references
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
     @NotNullByDefault
-    private static final class InterReferenceSelection {
-        /// Whether the block uses compound inter references.
-        private final boolean compoundReference;
-
-        /// The primary inter reference in internal LAST..ALTREF order.
-        private final int referenceFrame0;
-
-        /// The secondary inter reference in internal LAST..ALTREF order, or `-1`.
-        private final int referenceFrame1;
-
-        /// Creates one decoded inter reference selection.
-        ///
-        /// @param compoundReference whether the block uses compound inter references
-        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
-        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
-        private InterReferenceSelection(boolean compoundReference, int referenceFrame0, int referenceFrame1) {
-            this.compoundReference = compoundReference;
-            this.referenceFrame0 = referenceFrame0;
-            this.referenceFrame1 = referenceFrame1;
-        }
-
-        /// Returns whether the block uses compound inter references.
-        ///
-        /// @return whether the block uses compound inter references
-        public boolean compoundReference() {
-            return compoundReference;
-        }
-
-        /// Returns the primary inter reference in internal LAST..ALTREF order.
-        ///
-        /// @return the primary inter reference in internal LAST..ALTREF order
-        public int referenceFrame0() {
-            return referenceFrame0;
-        }
-
-        /// Returns the secondary inter reference in internal LAST..ALTREF order, or `-1`.
-        ///
-        /// @return the secondary inter reference in internal LAST..ALTREF order, or `-1`
-        public int referenceFrame1() {
-            return referenceFrame1;
-        }
+    private record InterReferenceSelection(
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
     }
 
     /// The decoded compound prediction blend selection for one compound-reference block.
+    ///
+    /// @param type the decoded compound prediction blend type
+    /// @param maskSign whether the decoded segment or wedge mask uses inverted source order
+    /// @param wedgeIndex the decoded compound wedge index, or `-1`
     @NotNullByDefault
-    private static final class CompoundPredictionSelection {
-        /// The decoded compound prediction blend type.
-        private final CompoundPredictionType type;
-
-        /// Whether the decoded segment or wedge mask uses inverted source order.
-        private final boolean maskSign;
-
-        /// The decoded compound wedge index, or `-1` when wedge blending is not used.
-        private final int wedgeIndex;
-
-        /// Creates one decoded compound prediction blend selection.
-        ///
-        /// @param type the decoded compound prediction blend type
-        /// @param maskSign whether the decoded segment or wedge mask uses inverted source order
-        /// @param wedgeIndex the decoded compound wedge index, or `-1`
-        private CompoundPredictionSelection(CompoundPredictionType type, boolean maskSign, int wedgeIndex) {
-            this.type = Objects.requireNonNull(type, "type");
-            this.maskSign = maskSign;
-            this.wedgeIndex = wedgeIndex;
-        }
-
-        /// Returns the decoded compound prediction blend type.
-        ///
-        /// @return the decoded compound prediction blend type
-        public CompoundPredictionType type() {
-            return type;
-        }
-
-        /// Returns whether the decoded segment or wedge mask uses inverted source order.
-        ///
-        /// @return whether the decoded segment or wedge mask uses inverted source order
-        public boolean maskSign() {
-            return maskSign;
-        }
-
-        /// Returns the decoded compound wedge index, or `-1` when wedge blending is not used.
-        ///
-        /// @return the decoded compound wedge index, or `-1`
-        public int wedgeIndex() {
-            return wedgeIndex;
+    private record CompoundPredictionSelection(
+            CompoundPredictionType type,
+            boolean maskSign,
+            int wedgeIndex
+    ) {
+        /// Validates one decoded compound prediction selection.
+        private CompoundPredictionSelection {
+            Objects.requireNonNull(type, "type");
         }
     }
 
     /// The decoded inter prediction mode and provisional dynamic-reference-list index for one block.
+    ///
+    /// @param singleInterMode the decoded single-reference inter mode, or `null`
+    /// @param compoundInterMode the decoded compound inter mode, or `null`
+    /// @param drlIndex the decoded provisional dynamic-reference-list index
+    /// @param motionVector0 the decoded primary motion-vector state chosen for the block
+    /// @param motionVector1 the decoded secondary motion-vector state chosen for the block, or `null`
     @NotNullByDefault
-    private static final class InterModeSelection {
-        /// The decoded single-reference inter mode, or `null` when the block is compound.
-        private final @Nullable SingleInterPredictionMode singleInterMode;
-
-        /// The decoded compound inter mode, or `null` when the block is single-reference.
-        private final @Nullable CompoundInterPredictionMode compoundInterMode;
-
-        /// The decoded provisional dynamic-reference-list index.
-        private final int drlIndex;
-
-        /// The decoded primary motion-vector state chosen for the block.
-        private final InterMotionVector motionVector0;
-
-        /// The decoded secondary motion-vector state chosen for the block, or `null`.
-        private final @Nullable InterMotionVector motionVector1;
-
-        /// Creates one decoded inter prediction-mode selection.
-        ///
-        /// @param singleInterMode the decoded single-reference inter mode, or `null`
-        /// @param compoundInterMode the decoded compound inter mode, or `null`
-        /// @param drlIndex the decoded provisional dynamic-reference-list index
-        /// @param motionVector0 the decoded primary motion-vector state chosen for the block
-        /// @param motionVector1 the decoded secondary motion-vector state chosen for the block, or `null`
-        private InterModeSelection(
-                @Nullable SingleInterPredictionMode singleInterMode,
-                @Nullable CompoundInterPredictionMode compoundInterMode,
-                int drlIndex,
-                InterMotionVector motionVector0,
-                @Nullable InterMotionVector motionVector1
-        ) {
-            this.singleInterMode = singleInterMode;
-            this.compoundInterMode = compoundInterMode;
-            this.drlIndex = drlIndex;
-            this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
-            this.motionVector1 = motionVector1;
-        }
-
-        /// Returns the decoded single-reference inter mode, or `null` when the block is compound.
-        ///
-        /// @return the decoded single-reference inter mode, or `null`
-        public @Nullable SingleInterPredictionMode singleInterMode() {
-            return singleInterMode;
-        }
-
-        /// Returns the decoded compound inter mode, or `null` when the block is single-reference.
-        ///
-        /// @return the decoded compound inter mode, or `null`
-        public @Nullable CompoundInterPredictionMode compoundInterMode() {
-            return compoundInterMode;
-        }
-
-        /// Returns the decoded provisional dynamic-reference-list index.
-        ///
-        /// @return the decoded provisional dynamic-reference-list index
-        public int drlIndex() {
-            return drlIndex;
-        }
-
-        /// Returns the decoded primary motion-vector state chosen for the block.
-        ///
-        /// @return the decoded primary motion-vector state chosen for the block
-        public InterMotionVector motionVector0() {
-            return motionVector0;
-        }
-
-        /// Returns the decoded secondary motion-vector state chosen for the block, or `null`.
-        ///
-        /// @return the decoded secondary motion-vector state chosen for the block, or `null`
-        public @Nullable InterMotionVector motionVector1() {
-            return motionVector1;
+    private record InterModeSelection(
+            @Nullable SingleInterPredictionMode singleInterMode,
+            @Nullable CompoundInterPredictionMode compoundInterMode,
+            int drlIndex,
+            InterMotionVector motionVector0,
+            @Nullable InterMotionVector motionVector1
+    ) {
+        /// Validates one decoded inter prediction-mode selection.
+        private InterModeSelection {
+            Objects.requireNonNull(motionVector0, "motionVector0");
         }
     }
 }

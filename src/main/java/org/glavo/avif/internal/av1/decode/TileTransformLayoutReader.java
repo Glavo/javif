@@ -553,35 +553,17 @@ public final class TileTransformLayoutReader {
     }
 
     /// One decoded inter-like transform result.
+    ///
+    /// @param lumaUnits the decoded luma transform units in bitstream order
+    /// @param variableTransformTree whether the layout came from a variable luma transform tree
     @NotNullByDefault
-    private static final class InterTransformResult {
-        /// The decoded luma transform units in bitstream order.
-        private final TransformUnit @Unmodifiable [] lumaUnits;
-
-        /// Whether the layout came from a variable luma transform tree.
-        private final boolean variableTransformTree;
-
-        /// Creates one decoded inter-like transform result.
-        ///
-        /// @param lumaUnits the decoded luma transform units in bitstream order
-        /// @param variableTransformTree whether the layout came from a variable luma transform tree
-        private InterTransformResult(TransformUnit[] lumaUnits, boolean variableTransformTree) {
-            this.lumaUnits = Objects.requireNonNull(lumaUnits, "lumaUnits");
-            this.variableTransformTree = variableTransformTree;
-        }
-
-        /// Returns the decoded luma transform units in bitstream order.
-        ///
-        /// @return the decoded luma transform units in bitstream order
-        public TransformUnit @Unmodifiable [] lumaUnits() {
-            return lumaUnits;
-        }
-
-        /// Returns whether the layout came from a variable luma transform tree.
-        ///
-        /// @return whether the layout came from a variable luma transform tree
-        public boolean variableTransformTree() {
-            return variableTransformTree;
+    private record InterTransformResult(
+            TransformUnit @Unmodifiable [] lumaUnits,
+            boolean variableTransformTree
+    ) {
+        /// Validates one decoded inter-like transform result.
+        private InterTransformResult {
+            Objects.requireNonNull(lumaUnits, "lumaUnits");
         }
     }
 }
