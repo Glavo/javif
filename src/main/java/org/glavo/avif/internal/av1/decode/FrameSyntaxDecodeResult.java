@@ -245,40 +245,6 @@ public final class FrameSyntaxDecodeResult {
         return decodedTemporalMotionFields[checkedTileIndex(tileIndex)].copy();
     }
 
-    /// Returns the temporal motion block stored at one frame-relative 8x8 coordinate, or `null`.
-    ///
-    /// The returned block is immutable and remains valid for the lifetime of this result. Coordinates
-    /// outside the coded frame return `null`.
-    ///
-    /// @param x8 the frame-relative X coordinate in 8x8 units
-    /// @param y8 the frame-relative Y coordinate in 8x8 units
-    /// @return the temporal motion block at the supplied coordinate, or `null`
-    @Nullable TileDecodeContext.TemporalMotionBlock decodedTemporalMotionBlockAt(int x8, int y8) {
-        if (x8 < 0 || y8 < 0) {
-            return null;
-        }
-        FrameAssembly resultAssembly = assembly;
-        int frameWidth8 = (resultAssembly.frameHeader().frameSize().codedWidth() + 7) >> 3;
-        int frameHeight8 = (resultAssembly.frameHeader().frameSize().height() + 7) >> 3;
-        if (x8 >= frameWidth8 || y8 >= frameHeight8) {
-            return null;
-        }
-
-        int superblockSize8 = resultAssembly.sequenceHeader().features().use128x128Superblocks() ? 16 : 8;
-        int[] columnStarts = resultAssembly.frameHeader().tiling().columnStartSuperblocks();
-        int[] rowStarts = resultAssembly.frameHeader().tiling().rowStartSuperblocks();
-        int tileColumn = containingTileAxis(columnStarts, x8 / superblockSize8);
-        int tileRow = containingTileAxis(rowStarts, y8 / superblockSize8);
-        int tileIndex = tileRow * resultAssembly.frameHeader().tiling().columns() + tileColumn;
-        int localX8 = x8 - columnStarts[tileColumn] * superblockSize8;
-        int localY8 = y8 - rowStarts[tileRow] * superblockSize8;
-        TileDecodeContext.TemporalMotionField field = decodedTemporalMotionFields[tileIndex];
-        if (localX8 >= field.width8() || localY8 >= field.height8()) {
-            return null;
-        }
-        return field.block(localX8, localY8);
-    }
-
     /// Returns a snapshot of the decoded loop-restoration unit syntax.
     ///
     /// @return a snapshot of the decoded loop-restoration unit syntax
@@ -355,25 +321,6 @@ public final class FrameSyntaxDecodeResult {
             throw new IndexOutOfBoundsException("tileIndex out of range: " + tileIndex);
         }
         return tileIndex;
-    }
-
-    /// Returns the tile-axis index containing one superblock coordinate.
-    ///
-    /// @param starts the monotonically increasing tile-axis boundary array
-    /// @param superblockCoordinate the frame-relative superblock coordinate
-    /// @return the zero-based tile-axis index containing the coordinate
-    private static int containingTileAxis(int[] starts, int superblockCoordinate) {
-        int low = 0;
-        int high = starts.length - 1;
-        while (low + 1 < high) {
-            int middle = (low + high) >>> 1;
-            if (starts[middle] <= superblockCoordinate) {
-                low = middle;
-            } else {
-                high = middle;
-            }
-        }
-        return low;
     }
 
     /// Creates default tile-local CDF contexts for the supplied tile count.

@@ -203,16 +203,16 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Primary AV1 item is missing av1C", null);
         }
 
-        AuxiliaryPayloads alphaPayloads = parseAuxiliaryPayloads(
+        @Nullable AvifImageSource alphaSource = parseAuxiliarySource(
                 primaryItem,
                 AvifAuxiliaryImageInfo.ALPHA_TYPE,
                 "Alpha",
                 ispe.width,
                 ispe.height
         );
-        validateItemPremultipliedAlpha(primaryItem, alphaPayloads, "Primary image");
-        boolean alphaPremultiplied = itemAlphaPremultiplied(primaryItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
-        AuxiliaryPayloads depthPayloads = parseAuxiliaryPayloads(
+        validateItemPremultipliedAlpha(primaryItem, alphaSource, "Primary image");
+        boolean alphaPremultiplied = itemAlphaPremultiplied(primaryItem);
+        @Nullable AvifImageSource depthSource = parseAuxiliarySource(
                 primaryItem,
                 AvifAuxiliaryImageInfo.DEPTH_TYPE,
                 "Depth",
@@ -223,7 +223,7 @@ public final class AvifContainerParser {
                 primaryItem,
                 ispe.width,
                 ispe.height,
-                alphaPayloads.present()
+                alphaSource != null
         );
 
         AvifImageSource primarySource = AvifImageSource.item(
@@ -250,7 +250,7 @@ public final class AvifContainerParser {
                 av1Config.chromaFormat()
         ).withTransformInfo(transformInfo)
                 .withAuxiliaryImages(null, auxiliaryImages(primaryItem.id, ispe.width, ispe.height))
-                .withAlpha(alphaPayloads.present(), alphaPremultiplied)
+                .withAlpha(alphaSource != null, alphaPremultiplied)
                 .withGainMapInfo(gainMapPayloads.info)
                 .withColorInfo(primaryItem.firstProperty(AvifColorInfo.class))
                 .withIccProfile(metadata.iccProfile)
@@ -261,8 +261,8 @@ public final class AvifContainerParser {
         return new AvifContainer(
                 info,
                 primarySource,
-                alphaPayloads.source,
-                depthPayloads.source,
+                alphaSource,
+                depthSource,
                 gainMapPayloads.source,
                 sampleTransform
         );
@@ -293,15 +293,15 @@ public final class AvifContainerParser {
     /// @throws AvifDecodeException if the grid is malformed or unsupported
     private AvifContainer parseGridContainer(Item gridItem) throws AvifDecodeException {
         GridPayloads colorGrid = parseGridPayloads(gridItem);
-        AuxiliaryPayloads alphaPayloads = parseGridAuxiliaryPayloads(
+        @Nullable AvifImageSource alphaSource = parseGridAuxiliarySource(
                 gridItem,
                 colorGrid,
                 AvifAuxiliaryImageInfo.ALPHA_TYPE,
                 "Alpha"
         );
-        validateItemPremultipliedAlpha(gridItem, alphaPayloads, "Primary grid");
-        boolean alphaPremultiplied = itemAlphaPremultiplied(gridItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
-        AuxiliaryPayloads depthPayloads = parseGridAuxiliaryPayloads(
+        validateItemPremultipliedAlpha(gridItem, alphaSource, "Primary grid");
+        boolean alphaPremultiplied = itemAlphaPremultiplied(gridItem);
+        @Nullable AvifImageSource depthSource = parseGridAuxiliarySource(
                 gridItem,
                 colorGrid,
                 AvifAuxiliaryImageInfo.DEPTH_TYPE,
@@ -311,7 +311,7 @@ public final class AvifContainerParser {
                 gridItem,
                 colorGrid.outputWidth,
                 colorGrid.outputHeight,
-                alphaPayloads.present()
+                alphaSource != null
         );
         MetadataPayloads metadata = collectMetadataPayloads(gridItem);
         @Nullable AvifImageTransformInfo transformInfo = extractTransformInfo(
@@ -335,7 +335,7 @@ public final class AvifContainerParser {
                 colorGrid.representativeAv1C.chromaFormat()
         ).withTransformInfo(transformInfo)
                 .withAuxiliaryImages(null, auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight))
-                .withAlpha(alphaPayloads.present(), alphaPremultiplied)
+                .withAlpha(alphaSource != null, alphaPremultiplied)
                 .withGainMapInfo(gainMapPayloads.info)
                 .withColorInfo(gridItem.firstProperty(AvifColorInfo.class))
                 .withIccProfile(metadata.iccProfile)
@@ -346,8 +346,8 @@ public final class AvifContainerParser {
         return new AvifContainer(
                 info,
                 colorGrid.source,
-                alphaPayloads.source,
-                depthPayloads.source,
+                alphaSource,
+                depthSource,
                 gainMapPayloads.source,
                 sampleTransform
         );
@@ -416,7 +416,7 @@ public final class AvifContainerParser {
         SampleTransform.Input[] inputs = new SampleTransform.Input[inputIds.size()];
         @Nullable Av1Config representativeConfig = null;
         int primaryInputIndex = -1;
-        boolean primaryPremultiplied = itemAlphaPremultiplied(primaryItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
+        boolean primaryPremultiplied = itemAlphaPremultiplied(primaryItem);
 
         for (int inputIndex = 0; inputIndex < inputIds.size(); inputIndex++) {
             int inputId = inputIds.get(inputIndex);
@@ -456,7 +456,7 @@ public final class AvifContainerParser {
             }
 
             AvifImageSource colorSource;
-            AuxiliaryPayloads alphaPayloads;
+            @Nullable AvifImageSource alphaSource;
             Av1Config inputConfig;
             if ("av01".equals(inputItem.type)) {
                 validateOperatingPointStructure(inputItem, "Sample Transform input image");
@@ -471,7 +471,7 @@ public final class AvifContainerParser {
                         expectedWidth,
                         expectedHeight
                 );
-                alphaPayloads = parseAuxiliaryPayloads(
+                alphaSource = parseAuxiliarySource(
                         inputItem,
                         AvifAuxiliaryImageInfo.ALPHA_TYPE,
                         "Sample Transform alpha",
@@ -485,7 +485,7 @@ public final class AvifContainerParser {
                 }
                 inputConfig = inputGrid.representativeAv1C;
                 colorSource = inputGrid.source;
-                alphaPayloads = parseGridAuxiliaryPayloads(
+                alphaSource = parseGridAuxiliarySource(
                         inputItem,
                         inputGrid,
                         AvifAuxiliaryImageInfo.ALPHA_TYPE,
@@ -510,16 +510,14 @@ public final class AvifContainerParser {
                 throw parseFailed("Sample Transform input chroma layouts differ", 0);
             }
 
-            if (alphaPayloads.present() != primaryAlphaPresent) {
+            if ((alphaSource != null) != primaryAlphaPresent) {
                 throw unsupported("Sample Transform inputs must either all have alpha or all omit alpha", null);
             }
-            @Nullable AvifImageSource alphaSource = null;
-            if (alphaPayloads.present()) {
-                validateItemPremultipliedAlpha(inputItem, alphaPayloads, "Sample Transform input");
-                if (itemAlphaPremultiplied(inputItem, AvifAuxiliaryImageInfo.ALPHA_TYPE) != primaryPremultiplied) {
+            if (alphaSource != null) {
+                validateItemPremultipliedAlpha(inputItem, alphaSource, "Sample Transform input");
+                if (itemAlphaPremultiplied(inputItem) != primaryPremultiplied) {
                     throw unsupported("Sample Transform input alpha premultiplication differs", null);
                 }
-                alphaSource = Objects.requireNonNull(alphaPayloads.source, "alphaPayloads.source");
             }
             inputs[inputIndex] = new SampleTransform.Input(
                     colorSource,
@@ -839,9 +837,9 @@ public final class AvifContainerParser {
     /// @param label the diagnostic auxiliary label
     /// @param expectedWidth the expected auxiliary width
     /// @param expectedHeight the expected auxiliary height
-    /// @return auxiliary payload data, or empty data when no matching auxiliary image is present
+    /// @return the auxiliary image source, or `null` when no matching auxiliary image is present
     /// @throws AvifDecodeException if auxiliary data is malformed or unsupported
-    private AuxiliaryPayloads parseAuxiliaryPayloads(
+    private @Nullable AvifImageSource parseAuxiliarySource(
             Item imageItem,
             String auxiliaryType,
             String label,
@@ -850,7 +848,7 @@ public final class AvifContainerParser {
     ) throws AvifDecodeException {
         Item auxiliaryItem = findAuxiliaryItem(imageItem.id, auxiliaryType);
         if (auxiliaryItem == null) {
-            return AuxiliaryPayloads.empty();
+            return null;
         }
         if (auxiliaryItem.hasUnsupportedEssentialProperty) {
             throw new AvifDecodeException(
@@ -875,13 +873,13 @@ public final class AvifContainerParser {
             outputWidth = auxiliaryIspe.width;
             outputHeight = auxiliaryIspe.height;
         }
-        return AuxiliaryPayloads.of(AvifImageSource.item(
+        return AvifImageSource.item(
                 itemPayload(auxiliaryItem),
                 operatingPoint(auxiliaryItem),
                 selectedSpatialLayer(auxiliaryItem),
                 outputWidth,
                 outputHeight
-        ));
+        );
     }
 
     /// Parses auxiliary payloads for a grid color item.
@@ -890,9 +888,9 @@ public final class AvifContainerParser {
     /// @param colorGrid the parsed color grid
     /// @param auxiliaryType the auxiliary image type string
     /// @param label the diagnostic auxiliary label
-    /// @return auxiliary payload data, or empty data when no matching auxiliary image is present
+    /// @return the auxiliary image source, or `null` when no matching auxiliary image is present
     /// @throws AvifDecodeException if auxiliary data is malformed or unsupported
-    private AuxiliaryPayloads parseGridAuxiliaryPayloads(
+    private @Nullable AvifImageSource parseGridAuxiliarySource(
             Item gridItem,
             GridPayloads colorGrid,
             String auxiliaryType,
@@ -915,7 +913,7 @@ public final class AvifContainerParser {
                 if (isAlphaAuxiliaryType(auxiliaryType)) {
                     validateAlphaGridDimensions(colorGrid, auxiliaryGrid, label);
                 }
-                return AuxiliaryPayloads.of(auxiliaryGrid.source);
+                return auxiliaryGrid.source;
             }
             if (!"av01".equals(auxiliaryItem.type)) {
                 throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
@@ -932,16 +930,16 @@ public final class AvifContainerParser {
                 outputWidth = auxiliaryIspe.width;
                 outputHeight = auxiliaryIspe.height;
             }
-            return AuxiliaryPayloads.of(AvifImageSource.item(
+            return AvifImageSource.item(
                     itemPayload(auxiliaryItem),
                     operatingPoint(auxiliaryItem),
                     selectedSpatialLayer(auxiliaryItem),
                     outputWidth,
                     outputHeight
-            ));
+            );
         }
 
-        return parsePerCellGridAuxiliaryPayloads(gridItem, colorGrid, auxiliaryType, label);
+        return parsePerCellGridAuxiliarySource(gridItem, colorGrid, auxiliaryType, label);
     }
 
     /// Parses the legacy grid-auxiliary shape where each color cell has its own auxiliary item.
@@ -950,9 +948,9 @@ public final class AvifContainerParser {
     /// @param colorGrid the parsed color grid
     /// @param auxiliaryType the auxiliary image type string
     /// @param label the diagnostic auxiliary label
-    /// @return auxiliary payload data, or empty data when no complete per-cell auxiliary set is present
+    /// @return the auxiliary image source, or `null` when no complete per-cell auxiliary set is present
     /// @throws AvifDecodeException if auxiliary data is malformed or unsupported
-    private AuxiliaryPayloads parsePerCellGridAuxiliaryPayloads(
+    private @Nullable AvifImageSource parsePerCellGridAuxiliarySource(
             Item gridItem,
             GridPayloads colorGrid,
             String auxiliaryType,
@@ -969,7 +967,7 @@ public final class AvifContainerParser {
             Item colorCellItem = requireItem(cellId, -1L);
             Item auxiliaryCellItem = findAuxiliaryItem(cellId, auxiliaryType);
             if (auxiliaryCellItem == null) {
-                return AuxiliaryPayloads.empty();
+                return null;
             }
             if (!"av01".equals(auxiliaryCellItem.type)) {
                 throw unsupported(
@@ -1012,7 +1010,7 @@ public final class AvifContainerParser {
             auxiliaryCellOperatingPoints[i] = operatingPoint(auxiliaryCellItem);
             auxiliaryCellSelectedSpatialLayers[i] = selectedSpatialLayer(auxiliaryCellItem);
         }
-        return AuxiliaryPayloads.of(AvifImageSource.grid(
+        return AvifImageSource.grid(
                 auxiliaryCellPayloads,
                 auxiliaryCellOperatingPoints,
                 auxiliaryCellSelectedSpatialLayers,
@@ -1022,7 +1020,7 @@ public final class AvifContainerParser {
                 colorGrid.columns,
                 colorGrid.outputWidth,
                 colorGrid.outputHeight
-        ));
+        );
     }
 
     /// Validates that an alpha grid matches the color grid canvas dimensions.
@@ -1654,7 +1652,7 @@ public final class AvifContainerParser {
         if ("mime".equals(item.type)) {
             item.contentType = readNullTerminatedString(input);
             if (input.hasRemaining()) {
-                item.contentEncoding = readNullTerminatedString(input);
+                readNullTerminatedString(input);
             }
         }
     }
@@ -3144,22 +3142,21 @@ public final class AvifContainerParser {
     /// Returns whether one item declares premultiplied alpha semantics.
     ///
     /// @param imageItem the color image item
-    /// @param auxiliaryType the alpha auxiliary type string
     /// @return whether the color item is premultiplied by that auxiliary item
-    private boolean itemAlphaPremultiplied(Item imageItem, String auxiliaryType) {
-        Item auxiliaryItem = findAuxiliaryItem(imageItem.id, auxiliaryType);
+    private boolean itemAlphaPremultiplied(Item imageItem) {
+        Item auxiliaryItem = findAuxiliaryItem(imageItem.id, AvifAuxiliaryImageInfo.ALPHA_TYPE);
         return auxiliaryItem != null && imageItem.premultipliedById == auxiliaryItem.id;
     }
 
     /// Validates `prem` references from a still-image or grid item.
     ///
     /// @param imageItem the color image or grid item
-    /// @param alphaPayloads the resolved alpha payloads
+    /// @param alphaSource the resolved alpha image source, or `null`
     /// @param label the diagnostic image label
     /// @throws AvifDecodeException if the item's premultiplied-alpha reference is malformed
     private void validateItemPremultipliedAlpha(
             Item imageItem,
-            AuxiliaryPayloads alphaPayloads,
+            @Nullable AvifImageSource alphaSource,
             String label
     ) throws AvifDecodeException {
         if (imageItem.premultipliedById == 0) {
@@ -3169,7 +3166,7 @@ public final class AvifContainerParser {
         AuxiliaryType auxiliaryType = referencedItem != null
                 ? referencedItem.firstProperty(AuxiliaryType.class)
                 : null;
-        if (!alphaPayloads.present()
+        if (alphaSource == null
                 || auxiliaryType == null
                 || !AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(auxiliaryType.type)) {
             throw parseFailed(
@@ -3859,120 +3856,71 @@ public final class AvifContainerParser {
     }
 
     /// Parsed item dimensions, or an unknown marker.
+    ///
+    /// @param width the item width in pixels, or -1 when unknown
+    /// @param height the item height in pixels, or -1 when unknown
     @NotNullByDefault
-    private static final class ItemDimensions {
+    private record ItemDimensions(int width, int height) {
         /// Unknown item dimensions.
         private static final ItemDimensions UNKNOWN = new ItemDimensions(-1, -1);
-
-        /// The item width in pixels, or -1 when unknown.
-        private final int width;
-        /// The item height in pixels, or -1 when unknown.
-        private final int height;
-
-        /// Creates item dimensions.
-        ///
-        /// @param width the item width in pixels, or -1 when unknown
-        /// @param height the item height in pixels, or -1 when unknown
-        private ItemDimensions(int width, int height) {
-            this.width = width;
-            this.height = height;
-        }
     }
 
     /// Extracted AVIS sample payloads for one track.
+    ///
+    /// @param payloads the AV1 OBU payloads for each sample in order
+    /// @param frameDeltas the frame duration deltas in media timescale units
+    /// @param sampleCount the number of samples
     @NotNullByDefault
-    private static final class SequencePayloads {
-        /// The AV1 OBU payloads for each sample in order.
-        private final AvifPayload @Unmodifiable [] payloads;
-        /// The frame duration deltas in media timescale units.
-        private final int @Unmodifiable [] frameDeltas;
-        /// The number of samples.
-        private final int sampleCount;
-
-        /// Creates extracted AVIS sample payloads.
-        ///
-        /// @param payloads the AV1 OBU payloads for each sample in order
-        /// @param frameDeltas the frame duration deltas in media timescale units
-        /// @param sampleCount the number of samples
-        private SequencePayloads(
-                AvifPayload @Unmodifiable [] payloads,
-                int @Unmodifiable [] frameDeltas,
-                int sampleCount
-        ) {
-            this.payloads = Objects.requireNonNull(payloads, "payloads");
-            this.frameDeltas = Objects.requireNonNull(frameDeltas, "frameDeltas");
-            this.sampleCount = sampleCount;
+    private record SequencePayloads(
+            AvifPayload @Unmodifiable [] payloads,
+            int @Unmodifiable [] frameDeltas,
+            int sampleCount
+    ) {
+        /// Creates extracted AVIS sample payloads for one track.
+        private SequencePayloads {
+            Objects.requireNonNull(payloads, "payloads");
+            Objects.requireNonNull(frameDeltas, "frameDeltas");
         }
     }
 
     /// One `stsc` sample-to-chunk entry.
+    ///
+    /// @param firstChunk the one-based first chunk using this layout
+    /// @param samplesPerChunk the number of samples stored in each covered chunk
     @NotNullByDefault
-    private static final class SampleToChunkEntry {
-        /// The one-based first chunk using this layout.
-        private final int firstChunk;
-        /// The number of samples stored in each covered chunk.
-        private final int samplesPerChunk;
-
-        /// Creates one sample-to-chunk entry.
-        ///
-        /// @param firstChunk the one-based first chunk using this layout
-        /// @param samplesPerChunk the number of samples stored in each covered chunk
-        private SampleToChunkEntry(int firstChunk, int samplesPerChunk) {
-            this.firstChunk = firstChunk;
-            this.samplesPerChunk = samplesPerChunk;
-        }
+    private record SampleToChunkEntry(int firstChunk, int samplesPerChunk) {
     }
 
     /// Parsed `tmap` metadata.
+    ///
+    /// @param version the metadata version field
+    /// @param minimumVersion the minimum supported metadata version field
+    /// @param writerVersion the writer metadata version field
+    /// @param metadata the parsed gain-map metadata
     @NotNullByDefault
-    private static final class ToneMapMetadata {
-        /// The metadata version field.
-        private final int version;
-        /// The minimum supported metadata version field.
-        private final int minimumVersion;
-        /// The writer metadata version field.
-        private final int writerVersion;
-        /// The parsed gain-map metadata.
-        private final AvifGainMapMetadata metadata;
-
+    private record ToneMapMetadata(
+            int version,
+            int minimumVersion,
+            int writerVersion,
+            AvifGainMapMetadata metadata
+    ) {
         /// Creates parsed `tmap` metadata.
-        ///
-        /// @param version the metadata version field
-        /// @param minimumVersion the minimum supported metadata version field
-        /// @param writerVersion the writer metadata version field
-        /// @param metadata the parsed gain-map metadata
-        private ToneMapMetadata(
-                int version,
-                int minimumVersion,
-                int writerVersion,
-                AvifGainMapMetadata metadata
-        ) {
-            this.version = version;
-            this.minimumVersion = minimumVersion;
-            this.writerVersion = writerVersion;
-            this.metadata = Objects.requireNonNull(metadata, "metadata");
+        private ToneMapMetadata {
+            Objects.requireNonNull(metadata, "metadata");
         }
     }
 
     /// Parsed BMFF entity group.
+    ///
+    /// @param type the grouping type
+    /// @param groupId the group id
+    /// @param entityIds the entity ids in group order
     @NotNullByDefault
-    private static final class EntityGroup {
-        /// The grouping type.
-        private final String type;
-        /// The group id.
-        private final int groupId;
-        /// The entity ids in group order.
-        private final int @Unmodifiable [] entityIds;
-
-        /// Creates a parsed entity group.
-        ///
-        /// @param type the grouping type
-        /// @param groupId the group id
-        /// @param entityIds the entity ids in group order
-        private EntityGroup(String type, int groupId, int[] entityIds) {
-            this.type = Objects.requireNonNull(type, "type");
-            this.groupId = groupId;
-            this.entityIds = Objects.requireNonNull(entityIds, "entityIds");
+    private record EntityGroup(String type, int groupId, int @Unmodifiable [] entityIds) {
+        /// Creates a parsed BMFF entity group.
+        private EntityGroup {
+            Objects.requireNonNull(type, "type");
+            Objects.requireNonNull(entityIds, "entityIds");
         }
     }
 
@@ -4071,99 +4019,35 @@ public final class AvifContainerParser {
     }
 
     /// Parsed grid payloads and geometry.
+    ///
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the reconstructed output width
+    /// @param outputHeight the reconstructed output height
+    /// @param representativeAv1C the representative AV1 configuration from the first grid cell
+    /// @param source the normalized grid image source
     @NotNullByDefault
-    private static final class GridPayloads {
-        /// The grid row count.
-        private final int rows;
-        /// The grid column count.
-        private final int columns;
-        /// The reconstructed output width.
-        private final int outputWidth;
-        /// The reconstructed output height.
-        private final int outputHeight;
-        /// The representative AV1 configuration from the first grid cell.
-        private final Av1Config representativeAv1C;
-        /// The normalized grid image source.
-        private final AvifImageSource source;
-
+    private record GridPayloads(
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight,
+            Av1Config representativeAv1C,
+            AvifImageSource source
+    ) {
         /// Creates parsed grid payloads and geometry.
-        ///
-        /// @param rows the grid row count
-        /// @param columns the grid column count
-        /// @param outputWidth the reconstructed output width
-        /// @param outputHeight the reconstructed output height
-        /// @param representativeAv1C the representative AV1 configuration from the first grid cell
-        /// @param source the normalized grid image source
-        private GridPayloads(
-                int rows,
-                int columns,
-                int outputWidth,
-                int outputHeight,
-                Av1Config representativeAv1C,
-                AvifImageSource source
-        ) {
-            this.rows = rows;
-            this.columns = columns;
-            this.outputWidth = outputWidth;
-            this.outputHeight = outputHeight;
-            this.representativeAv1C = Objects.requireNonNull(representativeAv1C, "representativeAv1C");
-            this.source = Objects.requireNonNull(source, "source");
-        }
-    }
-
-    /// Parsed auxiliary payloads.
-    @NotNullByDefault
-    private static final class AuxiliaryPayloads {
-        /// The normalized auxiliary image source, or `null` when absent.
-        private final @Nullable AvifImageSource source;
-
-        /// Creates parsed auxiliary payloads.
-        ///
-        /// @param source the normalized auxiliary image source, or `null`
-        private AuxiliaryPayloads(@Nullable AvifImageSource source) {
-            this.source = source;
-        }
-
-        /// Creates empty auxiliary payloads.
-        ///
-        /// @return empty auxiliary payloads
-        private static AuxiliaryPayloads empty() {
-            return new AuxiliaryPayloads(null);
-        }
-
-        /// Creates auxiliary payloads from one normalized image source.
-        ///
-        /// @param source the standalone or grid-derived image source
-        /// @return auxiliary payloads for the source
-        private static AuxiliaryPayloads of(AvifImageSource source) {
-            return new AuxiliaryPayloads(Objects.requireNonNull(source, "source"));
-        }
-
-        /// Returns whether any auxiliary payload is present.
-        ///
-        /// @return whether an auxiliary image is present
-        private boolean present() {
-            return source != null;
+        private GridPayloads {
+            Objects.requireNonNull(representativeAv1C, "representativeAv1C");
+            Objects.requireNonNull(source, "source");
         }
     }
 
     /// Parsed gain-map descriptor and decodable image payloads.
+    ///
+    /// @param info the public gain-map descriptor, or `null`
+    /// @param source the normalized gain-map image source, or `null` when unavailable
     @NotNullByDefault
-    private static final class GainMapPayloads {
-        /// The public gain-map descriptor, or `null`.
-        private final @Nullable AvifGainMapInfo info;
-        /// The normalized gain-map image source, or `null` when unavailable.
-        private final @Nullable AvifImageSource source;
-
-        /// Creates parsed gain-map payloads.
-        ///
-        /// @param info the public gain-map descriptor, or `null`
-        /// @param source the normalized gain-map image source, or `null`
-        private GainMapPayloads(@Nullable AvifGainMapInfo info, @Nullable AvifImageSource source) {
-            this.info = info;
-            this.source = source;
-        }
-
+    private record GainMapPayloads(@Nullable AvifGainMapInfo info, @Nullable AvifImageSource source) {
         /// Creates empty gain-map payloads.
         ///
         /// @return empty gain-map payloads
@@ -4202,25 +4086,16 @@ public final class AvifContainerParser {
     }
 
     /// Parsed image metadata payloads.
+    ///
+    /// @param iccProfile the ICC profile payload, or `null`
+    /// @param exif the Exif metadata payload, or `null`
+    /// @param xmp the XMP metadata payload, or `null`
     @NotNullByDefault
-    private static final class MetadataPayloads {
-        /// The ICC profile payload, or `null`.
-        private final byte @Nullable [] iccProfile;
-        /// The Exif metadata payload, or `null`.
-        private final byte @Nullable [] exif;
-        /// The XMP metadata payload, or `null`.
-        private final byte @Nullable [] xmp;
-
-        /// Creates parsed metadata payloads.
-        ///
-        /// @param iccProfile the ICC profile payload, or `null`
-        /// @param exif the Exif metadata payload, or `null`
-        /// @param xmp the XMP metadata payload, or `null`
-        private MetadataPayloads(byte @Nullable [] iccProfile, byte @Nullable [] exif, byte @Nullable [] xmp) {
-            this.iccProfile = iccProfile;
-            this.exif = exif;
-            this.xmp = xmp;
-        }
+    private record MetadataPayloads(
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp
+    ) {
     }
 
     /// Mutable parser state for one item.
@@ -4234,8 +4109,6 @@ public final class AvifContainerParser {
         private String name = "";
         /// The MIME content type for `mime` items, or an empty string.
         private String contentType = "";
-        /// The MIME content encoding for `mime` items, or an empty string.
-        private String contentEncoding = "";
         /// Whether the item extents are stored in `idat`.
         private boolean idatStored;
         /// The item extents.
@@ -4283,21 +4156,11 @@ public final class AvifContainerParser {
     }
 
     /// One item extent.
+    ///
+    /// @param offset the extent byte offset
+    /// @param length the extent byte length
     @NotNullByDefault
-    private static final class Extent {
-        /// The extent byte offset.
-        private final long offset;
-        /// The extent byte length.
-        private final int length;
-
-        /// Creates one item extent.
-        ///
-        /// @param offset the extent byte offset
-        /// @param length the extent byte length
-        private Extent(long offset, int length) {
-            this.offset = offset;
-            this.length = length;
-        }
+    private record Extent(long offset, int length) {
     }
 
     /// Display dimensions after applying AVIF item transforms.
@@ -4309,21 +4172,11 @@ public final class AvifContainerParser {
     }
 
     /// One full-box header.
+    ///
+    /// @param version the full-box version
+    /// @param flags the full-box flags
     @NotNullByDefault
-    private static final class FullBox {
-        /// The full-box version.
-        private final int version;
-        /// The full-box flags.
-        private final int flags;
-
-        /// Creates one full-box header.
-        ///
-        /// @param version the full-box version
-        /// @param flags the full-box flags
-        private FullBox(int version, int flags) {
-            this.version = version;
-            this.flags = flags;
-        }
+    private record FullBox(int version, int flags) {
     }
 
     /// Marker interface for parsed item properties.
@@ -4332,72 +4185,34 @@ public final class AvifContainerParser {
     }
 
     /// Parsed `ispe` item property.
+    ///
+    /// @param width the image width
+    /// @param height the image height
     @NotNullByDefault
-    private static final class ImageSpatialExtents implements Property {
-        /// The image width.
-        private final int width;
-        /// The image height.
-        private final int height;
-
-        /// Creates parsed image spatial extents.
-        ///
-        /// @param width the image width
-        /// @param height the image height
-        private ImageSpatialExtents(int width, int height) {
-            this.width = width;
-            this.height = height;
-        }
+    private record ImageSpatialExtents(int width, int height) implements Property {
     }
 
     /// Parsed `av1C` item property.
+    ///
+    /// @param seqProfile the AV1 sequence profile
+    /// @param seqLevelIdx0 the AV1 sequence level index
+    /// @param highBitDepth whether high bit depth is signaled
+    /// @param twelveBit whether twelve-bit depth is signaled
+    /// @param monochrome whether monochrome output is signaled
+    /// @param chromaSubsamplingX whether horizontal chroma subsampling is signaled
+    /// @param chromaSubsamplingY whether vertical chroma subsampling is signaled
+    /// @param chromaSamplePosition the chroma sample position
     @NotNullByDefault
-    private static final class Av1Config implements Property {
-        /// The AV1 sequence profile.
-        private final int seqProfile;
-        /// The AV1 sequence level index.
-        private final int seqLevelIdx0;
-        /// Whether high bit depth is signaled.
-        private final boolean highBitDepth;
-        /// Whether twelve-bit depth is signaled.
-        private final boolean twelveBit;
-        /// Whether monochrome output is signaled.
-        private final boolean monochrome;
-        /// Whether horizontal chroma subsampling is signaled.
-        private final boolean chromaSubsamplingX;
-        /// Whether vertical chroma subsampling is signaled.
-        private final boolean chromaSubsamplingY;
-        /// The chroma sample position.
-        private final int chromaSamplePosition;
-
-        /// Creates parsed AV1 codec configuration.
-        ///
-        /// @param seqProfile the AV1 sequence profile
-        /// @param seqLevelIdx0 the AV1 sequence level index
-        /// @param highBitDepth whether high bit depth is signaled
-        /// @param twelveBit whether twelve-bit depth is signaled
-        /// @param monochrome whether monochrome output is signaled
-        /// @param chromaSubsamplingX whether horizontal chroma subsampling is signaled
-        /// @param chromaSubsamplingY whether vertical chroma subsampling is signaled
-        /// @param chromaSamplePosition the chroma sample position
-        private Av1Config(
-                int seqProfile,
-                int seqLevelIdx0,
-                boolean highBitDepth,
-                boolean twelveBit,
-                boolean monochrome,
-                boolean chromaSubsamplingX,
-                boolean chromaSubsamplingY,
-                int chromaSamplePosition
-        ) {
-            this.seqProfile = seqProfile;
-            this.seqLevelIdx0 = seqLevelIdx0;
-            this.highBitDepth = highBitDepth;
-            this.twelveBit = twelveBit;
-            this.monochrome = monochrome;
-            this.chromaSubsamplingX = chromaSubsamplingX;
-            this.chromaSubsamplingY = chromaSubsamplingY;
-            this.chromaSamplePosition = chromaSamplePosition;
-        }
+    private record Av1Config(
+            int seqProfile,
+            int seqLevelIdx0,
+            boolean highBitDepth,
+            boolean twelveBit,
+            boolean monochrome,
+            boolean chromaSubsamplingX,
+            boolean chromaSubsamplingY,
+            int chromaSamplePosition
+    ) implements Property {
 
         /// Returns the decoded bit depth.
         ///
@@ -4532,73 +4347,53 @@ public final class AvifContainerParser {
     }
 
     /// Parsed `colr` item property carrying `nclx` color information.
+    ///
+    /// @param colorInfo the parsed color information
     @NotNullByDefault
-    private static final class ColorProperty implements Property {
-        /// The parsed color information.
-        private final AvifColorInfo colorInfo;
-
+    private record ColorProperty(AvifColorInfo colorInfo) implements Property {
         /// Creates a color property.
-        ///
-        /// @param colorInfo the parsed color information
-        private ColorProperty(AvifColorInfo colorInfo) {
-            this.colorInfo = Objects.requireNonNull(colorInfo, "colorInfo");
+        private ColorProperty {
+            Objects.requireNonNull(colorInfo, "colorInfo");
         }
     }
 
     /// Parsed `colr` item property carrying an ICC profile.
+    ///
+    /// @param profile the ICC profile payload
     @NotNullByDefault
-    private static final class IccColorProfile implements Property {
-        /// The ICC profile payload.
-        private final byte @Unmodifiable [] profile;
-
+    private record IccColorProfile(byte @Unmodifiable [] profile) implements Property {
         /// Creates an ICC color profile property.
-        ///
-        /// @param profile the ICC profile payload
-        private IccColorProfile(byte[] profile) {
-            this.profile = Objects.requireNonNull(profile, "profile");
-        }
-
-        /// Returns the internally owned ICC profile payload.
-        ///
-        /// @return the ICC profile payload
-        private byte @Unmodifiable [] profile() {
-            return profile;
+        private IccColorProfile {
+            Objects.requireNonNull(profile, "profile");
         }
     }
 
     /// Parsed `auxC` item property.
+    ///
+    /// @param type the auxiliary image type string
     @NotNullByDefault
-    private static final class AuxiliaryType implements Property {
-        /// The auxiliary image type string.
-        private final String type;
-
+    private record AuxiliaryType(String type) implements Property {
         /// Creates an auxiliary type property.
-        ///
-        /// @param type the auxiliary image type string
-        private AuxiliaryType(String type) {
-            this.type = Objects.requireNonNull(type, "type");
+        private AuxiliaryType {
+            Objects.requireNonNull(type, "type");
         }
     }
 
     /// Opaque or currently unsupported item property.
+    ///
+    /// @param type the property type
+    /// @param userType the UUID property user type, or `null`
+    /// @param payload the property payload after any UUID user type
     @NotNullByDefault
-    private static final class OpaqueProperty implements Property {
-        /// The property type.
-        private final String type;
-        /// The UUID property user type, or `null` for non-UUID properties.
-        private final byte @Nullable @Unmodifiable [] userType;
-        /// The property payload after any UUID user type.
-        private final byte @Unmodifiable [] payload;
-
+    private record OpaqueProperty(
+            String type,
+            byte @Nullable @Unmodifiable [] userType,
+            byte @Unmodifiable [] payload
+    ) implements Property {
         /// Creates an opaque property.
-        ///
-        /// @param type the property type
-        /// @param userType the UUID property user type, or `null`
-        /// @param payload the property payload after any UUID user type
-        private OpaqueProperty(String type, byte @Nullable [] userType, byte[] payload) {
-            this.type = Objects.requireNonNull(type, "type");
-            this.userType = userType;
-            this.payload = Objects.requireNonNull(payload, "payload");
+        private OpaqueProperty {
+            Objects.requireNonNull(type, "type");
+            Objects.requireNonNull(payload, "payload");
         }
 
         /// Creates a public opaque item property descriptor.
@@ -4610,137 +4405,72 @@ public final class AvifContainerParser {
     }
 
     /// Parsed `pixi` item property.
+    ///
+    /// @param bitsPerChannel the bits-per-channel array
     @NotNullByDefault
-    private static final class PixelInformation implements Property {
-        /// The bits-per-channel array.
-        private final int @Unmodifiable [] bitsPerChannel;
-
-        /// Creates a pixel information property.
-        ///
-        /// @param bitsPerChannel the bits-per-channel array
-        private PixelInformation(int[] bitsPerChannel) {
-            this.bitsPerChannel = bitsPerChannel.clone();
+    private record PixelInformation(int @Unmodifiable [] bitsPerChannel) implements Property {
+        /// Creates a pixel information property with an independent channel-depth array.
+        private PixelInformation {
+            bitsPerChannel = Objects.requireNonNull(bitsPerChannel, "bitsPerChannel").clone();
         }
     }
 
     /// Parsed `pasp` item property.
+    ///
+    /// @param hSpacing the horizontal relative spacing
+    /// @param vSpacing the vertical relative spacing
     @NotNullByDefault
-    private static final class PixelAspectRatio implements Property {
-        /// The horizontal relative spacing.
-        private final int hSpacing;
-        /// The vertical relative spacing.
-        private final int vSpacing;
-
-        /// Creates a pixel aspect ratio property.
-        ///
-        /// @param hSpacing the horizontal relative spacing
-        /// @param vSpacing the vertical relative spacing
-        private PixelAspectRatio(int hSpacing, int vSpacing) {
-            this.hSpacing = hSpacing;
-            this.vSpacing = vSpacing;
-        }
+    private record PixelAspectRatio(int hSpacing, int vSpacing) implements Property {
     }
 
     /// Parsed `clap` item property.
+    ///
+    /// @param cleanApertureWidthN the clean aperture width numerator
+    /// @param cleanApertureWidthD the clean aperture width denominator
+    /// @param cleanApertureHeightN the clean aperture height numerator
+    /// @param cleanApertureHeightD the clean aperture height denominator
+    /// @param horizOffN the horizontal offset numerator
+    /// @param horizOffD the horizontal offset denominator
+    /// @param vertOffN the vertical offset numerator
+    /// @param vertOffD the vertical offset denominator
     @NotNullByDefault
-    private static final class CleanAperture implements Property {
-        /// The clean aperture width numerator.
-        private final int cleanApertureWidthN;
-        /// The clean aperture width denominator.
-        private final int cleanApertureWidthD;
-        /// The clean aperture height numerator.
-        private final int cleanApertureHeightN;
-        /// The clean aperture height denominator.
-        private final int cleanApertureHeightD;
-        /// The horizontal offset numerator.
-        private final int horizOffN;
-        /// The horizontal offset denominator.
-        private final int horizOffD;
-        /// The vertical offset numerator.
-        private final int vertOffN;
-        /// The vertical offset denominator.
-        private final int vertOffD;
-
-        /// Creates a clean aperture property.
-        ///
-        /// @param cleanApertureWidthN the clean aperture width numerator
-        /// @param cleanApertureWidthD the clean aperture width denominator
-        /// @param cleanApertureHeightN the clean aperture height numerator
-        /// @param cleanApertureHeightD the clean aperture height denominator
-        /// @param horizOffN the horizontal offset numerator
-        /// @param horizOffD the horizontal offset denominator
-        /// @param vertOffN the vertical offset numerator
-        /// @param vertOffD the vertical offset denominator
-        private CleanAperture(
-                int cleanApertureWidthN, int cleanApertureWidthD,
-                int cleanApertureHeightN, int cleanApertureHeightD,
-                int horizOffN, int horizOffD,
-                int vertOffN, int vertOffD
-        ) {
-            this.cleanApertureWidthN = cleanApertureWidthN;
-            this.cleanApertureWidthD = cleanApertureWidthD;
-            this.cleanApertureHeightN = cleanApertureHeightN;
-            this.cleanApertureHeightD = cleanApertureHeightD;
-            this.horizOffN = horizOffN;
-            this.horizOffD = horizOffD;
-            this.vertOffN = vertOffN;
-            this.vertOffD = vertOffD;
-        }
+    private record CleanAperture(
+            int cleanApertureWidthN,
+            int cleanApertureWidthD,
+            int cleanApertureHeightN,
+            int cleanApertureHeightD,
+            int horizOffN,
+            int horizOffD,
+            int vertOffN,
+            int vertOffD
+    ) implements Property {
     }
 
     /// Parsed `irot` item property.
+    ///
+    /// @param rotation the rotation angle code
     @NotNullByDefault
-    private static final class ImageRotation implements Property {
-        /// The rotation angle code.
-        private final int rotation;
-
-        /// Creates an image rotation property.
-        ///
-        /// @param rotation the rotation angle code
-        private ImageRotation(int rotation) {
-            this.rotation = rotation;
-        }
+    private record ImageRotation(int rotation) implements Property {
     }
 
     /// Parsed `imir` item property.
+    ///
+    /// @param axis the mirror axis
     @NotNullByDefault
-    private static final class ImageMirror implements Property {
-        /// The mirror axis.
-        private final int axis;
-
-        /// Creates an image mirror property.
-        ///
-        /// @param axis the mirror axis
-        private ImageMirror(int axis) {
-            this.axis = axis;
-        }
+    private record ImageMirror(int axis) implements Property {
     }
 
     /// Parsed `a1op` item property.
+    ///
+    /// @param operatingPoint the operating point index
     @NotNullByDefault
-    private static final class OperatingPoint implements Property {
-        /// The operating point index.
-        private final int operatingPoint;
-
-        /// Creates an operating point property.
-        ///
-        /// @param operatingPoint the operating point index
-        private OperatingPoint(int operatingPoint) {
-            this.operatingPoint = operatingPoint;
-        }
+    private record OperatingPoint(int operatingPoint) implements Property {
     }
 
     /// Parsed `lsel` item property.
+    ///
+    /// @param layerId the selected AV1 spatial-layer identifier, or `65535` for progressive selection
     @NotNullByDefault
-    private static final class LayerSelector implements Property {
-        /// The selected AV1 spatial-layer identifier, or `65535` for progressive selection.
-        private final int layerId;
-
-        /// Creates a layer-selector property.
-        ///
-        /// @param layerId the selected AV1 spatial-layer identifier
-        private LayerSelector(int layerId) {
-            this.layerId = layerId;
-        }
+    private record LayerSelector(int layerId) implements Property {
     }
 }

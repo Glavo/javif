@@ -31,7 +31,7 @@ final class TileListParserTest {
                 0x7f, 0x00, 0x00, 0x00, 0x00, 0x77
         });
 
-        TileList tileList = new TileListParser().parse(packet, sequenceHeader(), cameraFrameHeader(), false);
+        TileList tileList = TileListParser.parse(packet, sequenceHeader(), cameraFrameHeader(), false);
 
         assertEquals(2, tileList.outputTileColumns());
         assertEquals(1, tileList.outputTileRows());
@@ -55,36 +55,35 @@ final class TileListParserTest {
 
         assertThrows(
                 Av1DecodeException.class,
-                () -> new TileListParser().parse(packet, sequenceHeader(), cameraFrameHeader(), false)
+                () -> TileListParser.parse(packet, sequenceHeader(), cameraFrameHeader(), false)
         );
     }
 
     /// Verifies anchor, source-grid, payload-length, and trailing-byte validation.
     @Test
     void rejectsInvalidEntryFieldsAndPayloadBounds() {
-        TileListParser parser = new TileListParser();
         SequenceHeader sequenceHeader = sequenceHeader();
         FrameHeader frameHeader = cameraFrameHeader();
 
-        assertThrows(Av1DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> TileListParser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, (byte) 128, 0, 0, 0, 0, 1}),
                 sequenceHeader,
                 frameHeader,
                 false
         ));
-        assertThrows(Av1DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> TileListParser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, 0, 2, 0, 0, 0, 1}),
                 sequenceHeader,
                 frameHeader,
                 false
         ));
-        assertThrows(Av1DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> TileListParser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 1, 1}),
                 sequenceHeader,
                 frameHeader,
                 false
         ));
-        assertThrows(Av1DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> TileListParser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2}),
                 sequenceHeader,
                 frameHeader,

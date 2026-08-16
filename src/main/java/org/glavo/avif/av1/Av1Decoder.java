@@ -60,16 +60,6 @@ public final class Av1Decoder implements AutoCloseable {
     private final Av1DecoderConfig config;
     /// The sequential OBU reader used by this decoder.
     private final ObuStreamReader obuReader;
-    /// The parser used for sequence header OBUs.
-    private final SequenceHeaderParser sequenceHeaderParser;
-    /// The parser used for standalone frame header OBUs.
-    private final FrameHeaderParser frameHeaderParser;
-    /// The parser used for tile-group headers.
-    private final TileGroupHeaderParser tileGroupHeaderParser;
-    /// The parser used for per-tile bitstream views inside tile groups.
-    private final TileBitstreamParser tileBitstreamParser;
-    /// The parser used for Large Scale Tile list OBUs.
-    private final TileListParser tileListParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
     /// The stored reference surfaces used for syntax inheritance and reconstructed-surface reuse.
@@ -92,10 +82,6 @@ public final class Av1Decoder implements AutoCloseable {
     private boolean retainFrameSyntaxDecodeResultsForInspection;
     /// The AV1 pixel reconstructor used for decoded frame output.
     private final FrameReconstructor frameReconstructor;
-    /// The postfilter pipeline used before storing reference surfaces.
-    private final FramePostprocessor framePostprocessor;
-    /// The deterministic film-grain synthesizer used only at presentation time.
-    private final FilmGrainSynthesizer filmGrainSynthesizer;
     /// The zero-based presentation index assigned to the next returned frame.
     private long nextPresentationIndex;
     /// Whether this decoder has already been closed.
@@ -112,17 +98,10 @@ public final class Av1Decoder implements AutoCloseable {
         this.obuReader = annexB
                 ? ObuStreamReader.forAnnexB(source, config.obuPayloadSizeLimit())
                 : new ObuStreamReader(source, config.obuPayloadSizeLimit());
-        this.sequenceHeaderParser = new SequenceHeaderParser();
-        this.frameHeaderParser = new FrameHeaderParser();
-        this.tileGroupHeaderParser = new TileGroupHeaderParser();
-        this.tileBitstreamParser = new TileBitstreamParser();
-        this.tileListParser = new TileListParser();
         this.referenceSlots = new ReferenceSurfaceSnapshot[8];
         this.largeScaleTileCameraReferenceSyntaxStates = new ReferenceFrameSyntaxState[8];
         this.largeScaleTileAnchorFrames = new ArrayList<>();
         this.frameReconstructor = new FrameReconstructor();
-        this.framePostprocessor = new FramePostprocessor();
-        this.filmGrainSynthesizer = new FilmGrainSynthesizer();
     }
 
     /// Opens a low-overhead AV1 decoder over a byte channel.
@@ -342,7 +321,7 @@ public final class Av1Decoder implements AutoCloseable {
             }
             if (type == ObuType.SEQUENCE_HEADER) {
                 ensureNoPendingFrameAssembly(packet, "Sequence header OBU appeared before the current frame was completed");
-                SequenceHeader parsedSequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
+                SequenceHeader parsedSequenceHeader = SequenceHeaderParser.parse(packet, config.strictStdCompliance());
                 validateSelectedOperatingPoint(parsedSequenceHeader, packet);
                 sequenceHeader = parsedSequenceHeader;
                 continue;
@@ -682,7 +661,7 @@ public final class Av1Decoder implements AutoCloseable {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
         ensureNoPendingFrameAssembly(packet, "Standalone frame header OBU appeared before the previous frame was completed");
 
-        FrameHeader frameHeader = frameHeaderParser.parse(
+        FrameHeader frameHeader = FrameHeaderParser.parse(
                 packet,
                 activeSequenceHeader,
                 config.strictStdCompliance(),
@@ -714,7 +693,7 @@ public final class Av1Decoder implements AutoCloseable {
         ensureNoPendingFrameAssembly(packet, "Combined frame OBU appeared before the previous frame was completed");
 
         BitReader reader = new BitReader(packet.payload());
-        FrameHeader frameHeader = frameHeaderParser.parseFramePayload(
+        FrameHeader frameHeader = FrameHeaderParser.parseFramePayload(
                 reader,
                 packet,
                 activeSequenceHeader,
@@ -741,7 +720,7 @@ public final class Av1Decoder implements AutoCloseable {
                 packet.obuIndex()
         );
         reader.byteAlign();
-        TileGroupHeader tileGroupHeader = tileGroupHeaderParser.parse(reader, packet, frameHeader);
+        TileGroupHeader tileGroupHeader = TileGroupHeaderParser.parse(reader, packet, frameHeader);
         if (config.strictStdCompliance() && tileGroupHeader.explicitTilePositions()) {
             throw invalidBitstream(packet, "Combined frame OBU must not signal explicit tile positions");
         }
@@ -814,7 +793,7 @@ public final class Av1Decoder implements AutoCloseable {
 
         @Nullable DecodedSurface postprocessedPlanes = null;
         if (decodedPlanes != null) {
-            FramePostprocessor.PreparedFrame preparedPostprocessing = framePostprocessor.prepare(
+            FramePostprocessor.PreparedFrame preparedPostprocessing = FramePostprocessor.prepare(
                     decodedPlanes,
                     frameHeader,
                     syntaxDecodeResult
@@ -822,7 +801,7 @@ public final class Av1Decoder implements AutoCloseable {
             // The prepared postfilter state retains compact maps only. Drop the multi-million-object
             // syntax tree before any pixel-domain postfilter allocates another full-frame surface.
             syntaxDecodeResult = null;
-            postprocessedPlanes = framePostprocessor.finish(preparedPostprocessing);
+            postprocessedPlanes = FramePostprocessor.finish(preparedPostprocessing);
             if (needsSurfaceSnapshot || needsAnchorSnapshot) {
                 ReferenceSurfaceSnapshot snapshot = new ReferenceSurfaceSnapshot(
                         frameHeader,
@@ -921,7 +900,7 @@ public final class Av1Decoder implements AutoCloseable {
         FrameAssembly assembly = requirePendingFrameAssembly(packet);
 
         BitReader reader = new BitReader(packet.payload());
-        TileGroupHeader tileGroupHeader = tileGroupHeaderParser.parse(reader, packet, assembly.frameHeader());
+        TileGroupHeader tileGroupHeader = TileGroupHeaderParser.parse(reader, packet, assembly.frameHeader());
         reader.byteAlign();
         appendTileGroup(assembly, packet, tileGroupHeader, reader.byteOffset());
         return assembly;
@@ -973,7 +952,7 @@ public final class Av1Decoder implements AutoCloseable {
             FrameAssembly assembly,
             ObuPacket packet
     ) throws Av1DecodeException {
-        tileListParser.validateCameraFrame(
+        TileListParser.validateCameraFrame(
                 packet,
                 assembly.sequenceHeader(),
                 assembly.frameHeader(),
@@ -1003,7 +982,7 @@ public final class Av1Decoder implements AutoCloseable {
         );
         SequenceHeader cameraSequenceHeader = cameraAssembly.sequenceHeader();
         FrameHeader cameraFrameHeader = cameraAssembly.frameHeader();
-        TileList tileList = tileListParser.parse(
+        TileList tileList = TileListParser.parse(
                 packet,
                 cameraSequenceHeader,
                 cameraFrameHeader,
@@ -1101,10 +1080,7 @@ public final class Av1Decoder implements AutoCloseable {
                         tileAssembly.totalTiles()
                 );
                 tileAssembly.addTileGroup(
-                        packet,
                         tileHeader,
-                        entry.bitstream().dataOffset(),
-                        entry.bitstream().dataLength(),
                         new TileBitstream[]{entry.bitstream()}
                 );
 
@@ -1301,9 +1277,16 @@ public final class Av1Decoder implements AutoCloseable {
             );
         }
 
-        int tileDataLength = packet.payload().length - tileDataOffset;
-        TileBitstream[] tiles = tileBitstreamParser.parse(packet, assembly.frameHeader(), tileGroupHeader, tileDataOffset);
-        assembly.addTileGroup(packet, tileGroupHeader, tileDataOffset, tileDataLength, tiles);
+        TileBitstream[] tiles = TileBitstreamParser.parse(
+                packet,
+                assembly.frameHeader(),
+                tileGroupHeader,
+                tileDataOffset
+        );
+        assembly.addTileGroup(
+                tileGroupHeader,
+                tiles
+        );
     }
 
     /// Returns the active sequence header or throws a contextual state violation.
@@ -1472,7 +1455,7 @@ public final class Av1Decoder implements AutoCloseable {
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         if (FrameOutputPolicy.requiresFilmGrainSynthesis(checkedFrameHeader, config)) {
-            return filmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader, checkedColorConfig);
+            return FilmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader, checkedColorConfig);
         }
         return checkedDecodedPlanes;
     }
@@ -1861,38 +1844,20 @@ public final class Av1Decoder implements AutoCloseable {
     ///
     /// Combined frames either start a normal `FrameAssembly` or resolve immediately through the
     /// `show_existing_frame` output path.
+    ///
+    /// @param frameAssembly the started frame assembly, or `null` when output resolved immediately
+    /// @param immediateOutput the immediate output, or `null` when assembly continues or filtering suppresses output
     @NotNullByDefault
-    private static final class CombinedFrameStart {
-        /// The started frame assembly, or `null` when output resolved immediately.
-        private final @Nullable FrameAssembly frameAssembly;
-
-        /// The immediate output, or `null` when normal frame assembly should continue.
-        private final @Nullable PendingOutput immediateOutput;
-
-        /// Whether this combined frame resolved immediately through `show_existing_frame`.
-        private final boolean resolvedImmediately;
-
-        /// Creates one combined-frame start result.
-        ///
-        /// @param frameAssembly the started frame assembly, or `null`
-        /// @param immediateOutput the immediate output frame, or `null`
-        /// @param resolvedImmediately whether this combined frame resolved immediately
-        private CombinedFrameStart(
-                @Nullable FrameAssembly frameAssembly,
-                @Nullable PendingOutput immediateOutput,
-                boolean resolvedImmediately
-        ) {
-            this.frameAssembly = frameAssembly;
-            this.immediateOutput = immediateOutput;
-            this.resolvedImmediately = resolvedImmediately;
-        }
-
+    private record CombinedFrameStart(
+            @Nullable FrameAssembly frameAssembly,
+            @Nullable PendingOutput immediateOutput
+    ) {
         /// Creates one result that continues with normal frame assembly.
         ///
         /// @param frameAssembly the started frame assembly
         /// @return one result that continues with normal frame assembly
         private static CombinedFrameStart frameAssembly(FrameAssembly frameAssembly) {
-            return new CombinedFrameStart(Objects.requireNonNull(frameAssembly, "frameAssembly"), null, false);
+            return new CombinedFrameStart(Objects.requireNonNull(frameAssembly, "frameAssembly"), null);
         }
 
         /// Creates one result that resolves immediately to output.
@@ -1900,31 +1865,25 @@ public final class Av1Decoder implements AutoCloseable {
         /// @param immediateOutput the immediate output, or `null` when filtering suppresses output
         /// @return one result that resolves immediately to output
         private static CombinedFrameStart immediateOutput(@Nullable PendingOutput immediateOutput) {
-            return new CombinedFrameStart(null, immediateOutput, true);
+            return new CombinedFrameStart(null, immediateOutput);
         }
 
         /// Returns whether this combined frame resolved immediately through `show_existing_frame`.
         ///
         /// @return whether this combined frame resolved immediately through `show_existing_frame`
         private boolean resolvedImmediately() {
-            return resolvedImmediately;
+            return frameAssembly == null;
         }
 
         /// Returns the started frame assembly.
         ///
         /// @return the started frame assembly
-        private FrameAssembly frameAssembly() {
+        public FrameAssembly frameAssembly() {
             if (frameAssembly == null) {
                 throw new IllegalStateException("Combined frame start resolved without a frame assembly");
             }
             return frameAssembly;
         }
 
-        /// Returns the immediate output, or `null`.
-        ///
-        /// @return the immediate output, or `null`
-        private @Nullable PendingOutput immediateOutput() {
-            return immediateOutput;
-        }
     }
 }

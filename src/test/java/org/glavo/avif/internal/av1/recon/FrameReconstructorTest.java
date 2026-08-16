@@ -7,9 +7,6 @@ import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
@@ -44,7 +41,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -2310,48 +2306,6 @@ final class FrameReconstructorTest {
                 4,
                 1
         );
-    }
-
-    /// Verifies that two synthetic tile-root arrays can reconstruct into one shared luma plane
-    /// without the later tile overwriting the earlier tile's completed region.
-    @Test
-    void reconstructsSyntheticMultiTileRootsIntoSharedLumaPlaneWithoutCrossTileOverwrite() {
-        BlockSize size = BlockSize.SIZE_4X4;
-        TilePartitionTreeReader.LeafNode leftTileLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(new BlockPosition(0, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(0, 0), size, Av1ChromaFormat.MONOCHROME),
-                createResidualLayout(new BlockPosition(0, 0), size, 64)
-        );
-        TilePartitionTreeReader.LeafNode rightTileLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(new BlockPosition(1, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(1, 0), size, Av1ChromaFormat.MONOCHROME),
-                createResidualLayout(new BlockPosition(1, 0), size, -64)
-        );
-        TilePartitionTreeReader.Node[] tileZeroRoots = new TilePartitionTreeReader.Node[]{leftTileLeaf};
-        TilePartitionTreeReader.Node[] tileOneRoots = new TilePartitionTreeReader.Node[]{rightTileLeaf};
-
-        FrameReconstructor reconstructor = new FrameReconstructor();
-        PaddedPlane expectedAfterTileZero = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 4, leftTileLeaf)
-        ).lumaPlane();
-        PaddedPlane expectedAfterBothTiles = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 4, leftTileLeaf, rightTileLeaf)
-        ).lumaPlane();
-
-        MutablePlaneBuffer sharedLumaPlane = new MutablePlaneBuffer(8, 4, 8);
-        FrameHeader frameHeader = createFrameHeader(Av1FrameType.KEY, 8, 4);
-
-        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, Av1ChromaFormat.MONOCHROME, frameHeader, tileZeroRoots);
-        PaddedPlane afterTileZero = sharedLumaPlane.toDecodedPlane();
-
-        assertPlanesEqual(expectedAfterTileZero, afterTileZero);
-        assertPlaneBlockFilled(afterTileZero, 4, 0, 4, 4, 0);
-
-        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, Av1ChromaFormat.MONOCHROME, frameHeader, tileOneRoots);
-        PaddedPlane afterBothTiles = sharedLumaPlane.toDecodedPlane();
-
-        assertPlanesEqual(expectedAfterBothTiles, afterBothTiles);
-        assertPlaneRegionEquals(afterTileZero, afterBothTiles, 0, 0, 4, 4);
     }
 
     /// Verifies that one monochrome single-reference inter block copies samples from one stored
@@ -4954,10 +4908,7 @@ final class FrameReconstructorTest {
     ) {
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(
@@ -4991,10 +4942,7 @@ final class FrameReconstructorTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(
@@ -5057,10 +5005,7 @@ final class FrameReconstructorTest {
         FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot0, referenceSlot1, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(
@@ -5092,10 +5037,7 @@ final class FrameReconstructorTest {
         FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(
@@ -5129,10 +5071,7 @@ final class FrameReconstructorTest {
         FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(
@@ -5168,10 +5107,7 @@ final class FrameReconstructorTest {
         FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot0, referenceSlot1, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(
@@ -7260,55 +7196,6 @@ final class FrameReconstructorTest {
         return index;
     }
 
-    /// Reconstructs one tile-root array into one already allocated shared luma plane.
-    ///
-    /// This helper reflects into the private node-reconstruction path so tests can model
-    /// multi-tile composition without exposing that implementation method.
-    ///
-    /// @param sharedLumaPlane the shared luma destination plane
-    /// @param chromaFormat the decoded chroma layout to expose to reconstruction
-    /// @param frameHeader the frame header that owns the active quantization state
-    /// @param roots the top-level roots for one synthetic tile
-    private static void reconstructSyntheticTileRootsIntoSharedLumaPlane(
-            MutablePlaneBuffer sharedLumaPlane,
-            Av1ChromaFormat chromaFormat,
-            FrameHeader frameHeader,
-            TilePartitionTreeReader.Node[] roots
-    ) {
-        try {
-            Method reconstructNode = FrameReconstructor.class.getDeclaredMethod(
-                    "reconstructNode",
-                    TilePartitionTreeReader.Node.class,
-                    MutablePlaneBuffer.class,
-                    MutablePlaneBuffer.class,
-                    MutablePlaneBuffer.class,
-                    Av1ChromaFormat.class,
-                    FrameHeader.class,
-                    int.class,
-                    boolean.class,
-                    ReferenceSurfaceSnapshot[].class
-            );
-            reconstructNode.setAccessible(true);
-            FrameReconstructor reconstructor = new FrameReconstructor();
-            for (TilePartitionTreeReader.Node root : roots) {
-                reconstructNode.invoke(
-                        reconstructor,
-                        root,
-                        sharedLumaPlane,
-                        null,
-                        null,
-                        chromaFormat,
-                        frameHeader,
-                        0,
-                        false,
-                        null
-                );
-            }
-        } catch (ReflectiveOperationException exception) {
-            throw new AssertionError("Failed to reconstruct synthetic tile roots into one shared plane", exception);
-        }
-    }
-
     /// Asserts that one decoded plane is filled with one constant sample value.
     ///
     /// @param plane the decoded plane to inspect
@@ -7772,7 +7659,7 @@ final class FrameReconstructorTest {
     /// @param frameHeader the frame header that owns the planes
     /// @return the postprocessed planes
     private static DecodedSurface postprocess(DecodedSurface reconstructedPlanes, FrameHeader frameHeader) {
-        return new FramePostprocessor().postprocess(reconstructedPlanes, frameHeader);
+        return FramePostprocessor.postprocess(reconstructedPlanes, frameHeader);
     }
 
     /// Returns one guaranteed-present decoded plane after a non-null assertion.

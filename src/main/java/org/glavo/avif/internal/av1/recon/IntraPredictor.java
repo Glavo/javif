@@ -1070,51 +1070,6 @@ final class IntraPredictor {
         };
     }
 
-    /// Reconstructs one intra-predicted block directly into the destination plane.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param width the block width in samples
-    /// @param height the block height in samples
-    /// @param mode the internal prediction mode
-    /// @param angleDelta the signed directional angle delta
-    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
-    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
-    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
-    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    private void predict(
-            MutableSamplePlane plane,
-            int x,
-            int y,
-            int width,
-            int height,
-            PredictionMode mode,
-            int angleDelta,
-            boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences,
-            int directionalTopReferenceLength,
-            int directionalLeftReferenceLength
-    ) {
-        predict(
-                plane,
-                x,
-                y,
-                width,
-                height,
-                mode,
-                angleDelta,
-                intraEdgeFilterEnabled,
-                smoothEdgeReferences,
-                directionalTopReferenceLength,
-                directionalLeftReferenceLength,
-                0,
-                0,
-                plane.width(),
-                plane.height()
-        );
-    }
-
     /// Reconstructs one supported intra-predicted block directly into the destination plane with
     /// explicit tile-boundary availability.
     ///
@@ -1830,17 +1785,6 @@ final class IntraPredictor {
         return clamp(requestedLength, 0, defaultLength);
     }
 
-    /// Returns the fallback top-left predictor sample for one block origin.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param defaultSample the frame-edge default sample
-    /// @return the fallback top-left predictor sample for one block origin
-    private int defaultTopLeft(MutableSamplePlane plane, int x, int y, int defaultSample) {
-        return defaultTopLeft(plane, x, y, defaultSample, 0, 0);
-    }
-
     /// Returns the fallback top-left predictor sample for one block origin with tile boundaries.
     ///
     /// @param plane the mutable destination plane
@@ -1893,18 +1837,6 @@ final class IntraPredictor {
         fillBlock(plane, x, y, width, height, value);
     }
 
-    /// Returns the stable DC predictor value for one block.
-    ///
-    /// @param plane the destination plane that supplies already reconstructed neighbors
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param width the block width in samples
-    /// @param height the block height in samples
-    /// @return the stable DC predictor value for one block
-    private int dcPredictionValue(MutableSamplePlane plane, int x, int y, int width, int height) {
-        return dcPredictionValue(plane, x, y, width, height, 0, 0, plane.width(), plane.height());
-    }
-
     /// Returns the stable DC predictor value for one block with tile-boundary availability.
     ///
     /// @param plane the destination plane that supplies already reconstructed neighbors
@@ -1932,21 +1864,6 @@ final class IntraPredictor {
         int[] top = topReferenceSamples(plane, x, y, width, defaultSample, leftBoundary, topBoundary, rightBoundary, bottomBoundary);
         int[] left = leftReferenceSamples(plane, x, y, height, defaultSample, leftBoundary, topBoundary, rightBoundary, bottomBoundary);
         return dcPredictionValue(width, height, top, left, defaultSample, y > topBoundary, x > leftBoundary);
-    }
-
-    /// Returns the stable DC predictor value for one block using caller-supplied edge samples.
-    ///
-    /// @param plane the destination plane that supplies already reconstructed neighbors
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param width the block width in samples
-    /// @param height the block height in samples
-    /// @param top the top reference samples
-    /// @param left the left reference samples
-    /// @param defaultSample the frame-edge default sample
-    /// @return the stable DC predictor value for one block using caller-supplied edge samples
-    private int dcPredictionValue(int x, int y, int width, int height, int[] top, int[] left, int defaultSample) {
-        return dcPredictionValue(width, height, top, left, defaultSample, y > 0, x > 0);
     }
 
     /// Returns the stable DC predictor value for one block using caller-supplied edge samples and
@@ -2272,28 +2189,6 @@ final class IntraPredictor {
         }
     }
 
-    /// Returns one top-edge directional reference buffer with top-right extension.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param width the block width in samples
-    /// @param height the block height in samples
-    /// @param defaultSample the frame-edge default sample
-    /// @param length the required reference-buffer length
-    /// @return one top-edge directional reference buffer with top-right extension
-    private int[] topDirectionalReferences(
-            MutableSamplePlane plane,
-            int x,
-            int y,
-            int width,
-            int height,
-            int defaultSample,
-            int length
-    ) {
-        return topDirectionalReferences(plane, x, y, width, height, defaultSample, length, 0, 0, plane.width(), plane.height());
-    }
-
     /// Returns one top-edge directional reference buffer with tile-bounded top-right extension.
     ///
     /// @param plane the mutable destination plane
@@ -2324,28 +2219,6 @@ final class IntraPredictor {
         return topReferenceSamples(plane, x, y, length, defaultSample, leftBoundary, topBoundary, rightBoundary, bottomBoundary);
     }
 
-    /// Returns one left-edge directional reference buffer with bottom-left extension.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param width the block width in samples
-    /// @param height the block height in samples
-    /// @param defaultSample the frame-edge default sample
-    /// @param length the required reference-buffer length
-    /// @return one left-edge directional reference buffer with bottom-left extension
-    private int[] leftDirectionalReferences(
-            MutableSamplePlane plane,
-            int x,
-            int y,
-            int width,
-            int height,
-            int defaultSample,
-            int length
-    ) {
-        return leftDirectionalReferences(plane, x, y, width, height, defaultSample, length, 0, 0, plane.width(), plane.height());
-    }
-
     /// Returns one left-edge directional reference buffer with tile-bounded bottom-left extension.
     ///
     /// @param plane the mutable destination plane
@@ -2374,18 +2247,6 @@ final class IntraPredictor {
             int bottomBoundary
     ) {
         return leftReferenceSamples(plane, x, y, length, defaultSample, leftBoundary, topBoundary, rightBoundary, bottomBoundary);
-    }
-
-    /// Returns one top-edge reference buffer with AV1 frame-edge fallback and right extension.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param length the required reference-buffer length
-    /// @param defaultSample the midpoint frame-edge default sample
-    /// @return one top-edge reference buffer with AV1 frame-edge fallback and right extension
-    private int[] topReferenceSamples(MutableSamplePlane plane, int x, int y, int length, int defaultSample) {
-        return topReferenceSamples(plane, x, y, length, defaultSample, 0, 0, plane.width(), plane.height());
     }
 
     /// Returns one top-edge reference buffer with AV1 tile-edge fallback and right extension.
@@ -2426,18 +2287,6 @@ final class IntraPredictor {
             references[i] = plane.sample(sampleX, y - 1);
         }
         return references;
-    }
-
-    /// Returns one left-edge reference buffer with AV1 frame-edge fallback and bottom extension.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param length the required reference-buffer length
-    /// @param defaultSample the midpoint frame-edge default sample
-    /// @return one left-edge reference buffer with AV1 frame-edge fallback and bottom extension
-    private int[] leftReferenceSamples(MutableSamplePlane plane, int x, int y, int length, int defaultSample) {
-        return leftReferenceSamples(plane, x, y, length, defaultSample, 0, 0, plane.width(), plane.height());
     }
 
     /// Returns one left-edge reference buffer with AV1 tile-edge fallback and bottom extension.

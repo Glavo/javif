@@ -620,23 +620,20 @@ public final class TileDecodeContext {
     }
 
     /// One temporal motion-field sample projected into the current tile.
+    ///
+    /// @param compoundReference whether the temporal sample carries compound references
+    /// @param referenceFrame0 the primary reference frame in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary reference frame in internal LAST..ALTREF order, or `-1`
+    /// @param motionVector0 the primary temporal motion-vector state
+    /// @param motionVector1 the secondary temporal motion-vector state, or `null`
     @NotNullByDefault
-    public static final class TemporalMotionBlock {
-        /// Whether the temporal sample carries compound references.
-        private final boolean compoundReference;
-
-        /// The primary reference frame in internal LAST..ALTREF order.
-        private final int referenceFrame0;
-
-        /// The secondary reference frame in internal LAST..ALTREF order, or `-1`.
-        private final int referenceFrame1;
-
-        /// The primary temporal motion-vector state.
-        private final InterMotionVector motionVector0;
-
-        /// The secondary temporal motion-vector state, or `null`.
-        private final @org.jetbrains.annotations.Nullable InterMotionVector motionVector1;
-
+    public record TemporalMotionBlock(
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            InterMotionVector motionVector0,
+            @Nullable InterMotionVector motionVector1
+    ) {
         /// Creates one single-reference temporal motion-field sample.
         ///
         /// @param referenceFrame0 the primary reference frame in internal LAST..ALTREF order
@@ -663,19 +660,7 @@ public final class TileDecodeContext {
         }
 
         /// Creates one temporal motion-field sample.
-        ///
-        /// @param compoundReference whether the temporal sample carries compound references
-        /// @param referenceFrame0 the primary reference frame in internal LAST..ALTREF order
-        /// @param referenceFrame1 the secondary reference frame in internal LAST..ALTREF order, or `-1`
-        /// @param motionVector0 the primary temporal motion-vector state
-        /// @param motionVector1 the secondary temporal motion-vector state, or `null`
-        public TemporalMotionBlock(
-                boolean compoundReference,
-                int referenceFrame0,
-                int referenceFrame1,
-                InterMotionVector motionVector0,
-                @org.jetbrains.annotations.Nullable InterMotionVector motionVector1
-        ) {
+        public TemporalMotionBlock {
             if (referenceFrame0 < 0) {
                 throw new IllegalArgumentException("referenceFrame0 < 0: " + referenceFrame0);
             }
@@ -694,46 +679,7 @@ public final class TileDecodeContext {
                     throw new IllegalArgumentException("Single-reference temporal motion blocks must not carry motionVector1");
                 }
             }
-            this.compoundReference = compoundReference;
-            this.referenceFrame0 = referenceFrame0;
-            this.referenceFrame1 = referenceFrame1;
-            this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
-            this.motionVector1 = motionVector1;
-        }
-
-        /// Returns whether the temporal sample carries compound references.
-        ///
-        /// @return whether the temporal sample carries compound references
-        public boolean compoundReference() {
-            return compoundReference;
-        }
-
-        /// Returns the primary reference frame in internal LAST..ALTREF order.
-        ///
-        /// @return the primary reference frame in internal LAST..ALTREF order
-        public int referenceFrame0() {
-            return referenceFrame0;
-        }
-
-        /// Returns the secondary reference frame in internal LAST..ALTREF order, or `-1`.
-        ///
-        /// @return the secondary reference frame in internal LAST..ALTREF order, or `-1`
-        public int referenceFrame1() {
-            return referenceFrame1;
-        }
-
-        /// Returns the primary temporal motion-vector state.
-        ///
-        /// @return the primary temporal motion-vector state
-        public InterMotionVector motionVector0() {
-            return motionVector0;
-        }
-
-        /// Returns the secondary temporal motion-vector state, or `null`.
-        ///
-        /// @return the secondary temporal motion-vector state, or `null`
-        public @org.jetbrains.annotations.Nullable InterMotionVector motionVector1() {
-            return motionVector1;
+            Objects.requireNonNull(motionVector0, "motionVector0");
         }
     }
 

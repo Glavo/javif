@@ -104,15 +104,6 @@ public final class BitReader {
         return readBit() != 0;
     }
 
-    /// Reads an unsigned literal value.
-    ///
-    /// @param bitCount the number of bits to read, in the range `0..32`
-    /// @return the decoded unsigned literal
-    /// @throws IOException if the payload is truncated
-    public long readUnsignedLiteral(int bitCount) throws IOException {
-        return readBits(bitCount);
-    }
-
     /// Reads up to thirty-two bits as an unsigned literal.
     ///
     /// @param bitCount the number of bits to read, in the range `0..32`

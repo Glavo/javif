@@ -34,8 +34,15 @@ final class FrameHeaderParserTest {
     /// @throws IOException if the test payload cannot be parsed
     @Test
     void parsesReducedStillPictureKeyFrameHeader() throws IOException {
-        SequenceHeader sequenceHeader = new SequenceHeaderParser().parse(sequenceHeaderObu(reducedStillPictureSequencePayload()), false);
-        FrameHeader header = new FrameHeaderParser().parse(frameHeaderObu(reducedStillPictureFrameHeaderPayload()), sequenceHeader, false);
+        SequenceHeader sequenceHeader = SequenceHeaderParser.parse(
+                sequenceHeaderObu(reducedStillPictureSequencePayload()),
+                false
+        );
+        FrameHeader header = FrameHeaderParser.parse(
+                frameHeaderObu(reducedStillPictureFrameHeaderPayload()),
+                sequenceHeader,
+                false
+        );
 
         assertFalse(header.showExistingFrame());
         assertEquals(Av1FrameType.KEY, header.frameType());
@@ -92,7 +99,7 @@ final class FrameHeaderParserTest {
                 68
         );
 
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(showExistingFrameHeaderPayload(0)),
                 fullInterSequenceHeader(),
                 false,
@@ -112,7 +119,7 @@ final class FrameHeaderParserTest {
         ObuPacket obu = frameObu(payload);
 
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () ->
-                new FrameHeaderParser().parseFramePayload(
+                FrameHeaderParser.parseFramePayload(
                         new BitReader(payload),
                         obu,
                         fullInterSequenceHeader(),
@@ -130,11 +137,11 @@ final class FrameHeaderParserTest {
     /// @throws IOException if the test payload cannot be parsed
     @Test
     void retainsZeroValuedEnabledSegmentationFeature() throws IOException {
-        SequenceHeader sequenceHeader = new SequenceHeaderParser().parse(
+        SequenceHeader sequenceHeader = SequenceHeaderParser.parse(
                 sequenceHeaderObu(reducedStillPictureSequencePayload()),
                 false
         );
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(reducedStillPictureFrameHeaderPayloadWithZeroValuedSegmentFeature()),
                 sequenceHeader,
                 false
@@ -157,7 +164,7 @@ final class FrameHeaderParserTest {
         SequenceHeader sequenceHeader = fullInterSequenceHeader();
         FrameHeader[] references = createInterReferenceFrames();
 
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(interFrameHeaderPayload()),
                 sequenceHeader,
                 false,
@@ -205,7 +212,7 @@ final class FrameHeaderParserTest {
     /// @throws IOException if the test payload cannot be parsed
     @Test
     void derivesShortSignaledReferenceFrameIndices() throws IOException {
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(interFrameHeaderPayloadWithShortSignaling()),
                 fullInterSequenceHeader(),
                 false,
@@ -221,7 +228,7 @@ final class FrameHeaderParserTest {
     /// @throws IOException if the test payload cannot be parsed
     @Test
     void parsesInterFrameHeaderWithTranslationGlobalMotion() throws IOException {
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(interFrameHeaderPayloadWithTranslationGlobalMotion()),
                 fullInterSequenceHeader(),
                 false,
@@ -244,7 +251,7 @@ final class FrameHeaderParserTest {
         SequenceHeader sequenceHeader = fullInterSequenceHeader();
         FrameHeader[] references = createInterReferenceFramesWithInheritedState();
 
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(interFrameHeaderPayloadWithPrimaryReferenceCopy()),
                 sequenceHeader,
                 false,
@@ -279,7 +286,7 @@ final class FrameHeaderParserTest {
     @Test
     void parsesInterFrameHeaderWithExplicitFilmGrainParameters() throws IOException {
         SequenceHeader sequenceHeader = fullInterSequenceHeader(true);
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(interFrameHeaderPayloadWithFilmGrain()),
                 sequenceHeader,
                 false,
@@ -337,7 +344,7 @@ final class FrameHeaderParserTest {
         FrameHeader.FilmGrainParams referencedFilmGrain = sampleFilmGrainParams();
         FrameHeader[] references = createInterReferenceFramesWithFilmGrainSource(referencedFilmGrain);
 
-        FrameHeader header = new FrameHeaderParser().parse(
+        FrameHeader header = FrameHeaderParser.parse(
                 frameHeaderObu(interFrameHeaderPayloadWithReferencedFilmGrain()),
                 sequenceHeader,
                 false,
@@ -422,7 +429,7 @@ final class FrameHeaderParserTest {
     /// @param expectedMessage the expected validation message
     private static void assertFilmGrainParseFailure(byte[] payload, FrameHeader[] references, String expectedMessage) {
         Av1DecodeException exception = assertThrows(Av1DecodeException.class, () ->
-                new FrameHeaderParser().parse(
+                FrameHeaderParser.parse(
                         frameHeaderObu(payload),
                         fullInterSequenceHeader(true),
                         false,

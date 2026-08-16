@@ -64,18 +64,6 @@ public final class BlockNeighborContext {
             {3, 5, 5, 5, 6}
     };
 
-    /// The weight penalty applied to secondary spatial candidates relative to direct-edge candidates.
-    private static final int SECONDARY_SPATIAL_WEIGHT_PENALTY = 192;
-
-    /// The extra penalty applied for each farther odd-aligned secondary spatial offset layer.
-    private static final int SECONDARY_SPATIAL_WEIGHT_PENALTY_STEP = 64;
-
-    /// The weight penalty applied to top-right spatial candidates relative to direct-edge candidates.
-    private static final int TOP_RIGHT_SPATIAL_WEIGHT_PENALTY = 64;
-
-    /// The weight penalty applied to top-left spatial candidates relative to direct-edge candidates.
-    private static final int TOP_LEFT_SPATIAL_WEIGHT_PENALTY = 320;
-
     /// The tile width rounded up to 4x4 units.
     private final int tileWidth4;
 
@@ -1174,75 +1162,6 @@ public final class BlockNeighborContext {
         return nonNullFallback;
     }
 
-    /// Builds an inter-mode syntax context using a zero global-motion baseline.
-    ///
-    /// This compatibility overload is intended for callers that do not need the temporal
-    /// `globalmv` context. Tile syntax decoding supplies the actual block global motion through
-    /// the overload that accepts `globalMotionVector0`.
-    ///
-    /// @param position the current block position
-    /// @param size the current block size
-    /// @param compoundReference whether the current block uses compound references
-    /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
-    /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
-    /// @return an inter-mode syntax context derived from available neighbors
-    public ProvisionalInterModeContext provisionalInterModeContext(
-            BlockPosition position,
-            BlockSize size,
-            boolean compoundReference,
-            int referenceFrame0,
-            int referenceFrame1
-    ) {
-        return provisionalInterModeContext(
-                position,
-                size,
-                compoundReference,
-                referenceFrame0,
-                referenceFrame1,
-                MotionVector.zero(),
-                MotionVector.zero(),
-                FrameHeader.GlobalMotionType.TRANSLATION,
-                FrameHeader.GlobalMotionType.TRANSLATION
-        );
-    }
-
-    /// Builds an inter-mode syntax context from spatial and projected temporal neighbors.
-    ///
-    /// This helper scans the direct top row and left column across the full current-block span,
-    /// then augments that with odd-aligned secondary 8x8-resolution row/column offsets and
-    /// dedicated top-right and top-left spatial candidates. Projected temporal candidates are
-    /// sampled over the current block footprint before the secondary spatial walk.
-    ///
-    /// @param position the current block position
-    /// @param size the current block size
-    /// @param compoundReference whether the current block uses compound references
-    /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
-    /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
-    /// @param globalMotionVector0 the current block's primary global-motion vector
-    /// @param globalMotionVector1 the current block's secondary global-motion vector, or zero for single-reference blocks
-    /// @return an inter-mode syntax context derived from available neighbors
-    public ProvisionalInterModeContext provisionalInterModeContext(
-            BlockPosition position,
-            BlockSize size,
-            boolean compoundReference,
-            int referenceFrame0,
-            int referenceFrame1,
-            MotionVector globalMotionVector0,
-            MotionVector globalMotionVector1
-    ) {
-        return provisionalInterModeContext(
-                position,
-                size,
-                compoundReference,
-                referenceFrame0,
-                referenceFrame1,
-                globalMotionVector0,
-                globalMotionVector1,
-                FrameHeader.GlobalMotionType.TRANSLATION,
-                FrameHeader.GlobalMotionType.TRANSLATION
-        );
-    }
-
     /// Builds an inter-mode syntax context from spatial and projected temporal neighbors.
     ///
     /// Non-translation global-motion types affect exact spatial candidates: an eligible
@@ -1984,28 +1903,6 @@ public final class BlockNeighborContext {
         return (coordinate4 - (secondaryOffset << 1) + 1) | 1;
     }
 
-    /// Returns the start coordinate used when scanning secondary 8x8-resolution spans.
-    ///
-    /// The secondary spatial scan in `dav1d` samples odd-aligned coordinates inside the current
-    /// block footprint. This helper keeps that odd alignment while still guaranteeing that narrow
-    /// blocks contribute at least one sampled coordinate.
-    ///
-    /// @param spanStart4 the inclusive start of the current block span in 4x4 units
-    /// @param spanEnd4 the exclusive end of the current block span in 4x4 units
-    /// @return the odd-aligned start coordinate used by secondary spatial scans
-    private static int secondaryScanSpanStart(int spanStart4, int spanEnd4) {
-        return Math.min(spanEnd4 - 1, spanStart4 | 1);
-    }
-
-    /// Returns the weight penalty applied to one secondary spatial offset layer.
-    ///
-    /// @param secondaryOffset the one-based secondary offset layer index starting at `2`
-    /// @return the weight penalty applied to the requested secondary spatial offset layer
-    private static int secondarySpatialWeightPenalty(int secondaryOffset) {
-        return SECONDARY_SPATIAL_WEIGHT_PENALTY
-                + (secondaryOffset - 2) * SECONDARY_SPATIAL_WEIGHT_PENALTY_STEP;
-    }
-
     /// Returns the temporal segmentation-prediction context for the supplied block position.
     ///
     /// @param position the current block position
@@ -2320,17 +2217,6 @@ public final class BlockNeighborContext {
         return 7 + (notOneBlock ? 3 : 0) + (aboveHasNonZero ? 1 : 0) + (leftHasNonZero ? 1 : 0);
     }
 
-    /// Returns the chroma DC-sign context for one transform unit on the supplied plane.
-    ///
-    /// @param plane the chroma plane index, where `0` is U and `1` is V
-    /// @param position the current block origin in tile-relative luma 4x4 units
-    /// @param transformSize the current chroma transform size
-    /// @return the chroma DC-sign context in `[0, 3)`
-    public int chromaDcSignContext(int plane, BlockPosition position, TransformSize transformSize) {
-        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        return chromaDcSignContext(plane, nonNullPosition.x4(), nonNullPosition.y4(), transformSize);
-    }
-
     /// Returns the chroma DC-sign context for one tile-local transform span.
     ///
     /// @param plane the chroma plane index, where `0` is U and `1` is V
@@ -2604,22 +2490,6 @@ public final class BlockNeighborContext {
             }
         }
         return sum;
-    }
-
-    /// Returns the chroma-grid X coordinate corresponding to one tile-relative luma-grid origin.
-    ///
-    /// @param position the tile-relative luma-grid origin
-    /// @return the chroma-grid X coordinate corresponding to the supplied origin
-    private int chromaX4(BlockPosition position) {
-        return Objects.requireNonNull(position, "position").x4() >> chromaSubsamplingX;
-    }
-
-    /// Returns the chroma-grid Y coordinate corresponding to one tile-relative luma-grid origin.
-    ///
-    /// @param position the tile-relative luma-grid origin
-    /// @return the chroma-grid Y coordinate corresponding to the supplied origin
-    private int chromaY4(BlockPosition position) {
-        return Objects.requireNonNull(position, "position").y4() >> chromaSubsamplingY;
     }
 
     /// Returns the effective chroma-block width log2 in chroma 4x4 units for one coded block size.
@@ -4327,13 +4197,6 @@ public final class BlockNeighborContext {
             return height4;
         }
 
-        /// Returns the decoded segment identifier.
-        ///
-        /// @return the decoded segment identifier
-        public int segmentId() {
-            return segmentId;
-        }
-
         /// Returns whether the stored block is intra-coded.
         ///
         /// @return whether the stored block is intra-coded
@@ -4442,35 +4305,10 @@ public final class BlockNeighborContext {
     }
 
     /// The current-frame segment prediction for one block position.
+    ///
+    /// @param predictedSegmentId the predicted segment identifier derived from already-decoded neighbors
+    /// @param context the zero-based segment-id context derived from already-decoded neighbors
     @NotNullByDefault
-    public static final class SegmentPrediction {
-        /// The predicted segment identifier derived from already-decoded neighbors.
-        private final int predictedSegmentId;
-
-        /// The zero-based segment-id context derived from already-decoded neighbors.
-        private final int context;
-
-        /// Creates one current-frame segment prediction.
-        ///
-        /// @param predictedSegmentId the predicted segment identifier derived from already-decoded neighbors
-        /// @param context the zero-based segment-id context derived from already-decoded neighbors
-        public SegmentPrediction(int predictedSegmentId, int context) {
-            this.predictedSegmentId = predictedSegmentId;
-            this.context = context;
-        }
-
-        /// Returns the predicted segment identifier derived from already-decoded neighbors.
-        ///
-        /// @return the predicted segment identifier derived from already-decoded neighbors
-        public int predictedSegmentId() {
-            return predictedSegmentId;
-        }
-
-        /// Returns the zero-based segment-id context derived from already-decoded neighbors.
-        ///
-        /// @return the zero-based segment-id context derived from already-decoded neighbors
-        public int context() {
-            return context;
-        }
+    public record SegmentPrediction(int predictedSegmentId, int context) {
     }
 }

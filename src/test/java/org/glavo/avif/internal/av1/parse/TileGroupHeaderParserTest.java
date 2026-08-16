@@ -27,12 +27,11 @@ final class TileGroupHeaderParserTest {
     /// @throws IOException if the synthetic payload cannot be parsed
     @Test
     void parsesImplicitSingleTileRange() throws IOException {
-        TileGroupHeaderParser parser = new TileGroupHeaderParser();
         FrameHeader frameHeader = tileGroupFrameHeader(1, 1, 0, 0);
         ObuPacket obu = tileGroupObu(new byte[0]);
         BitReader reader = new BitReader(obu.payload());
 
-        TileGroupHeader header = parser.parse(reader, obu, frameHeader);
+        TileGroupHeader header = TileGroupHeaderParser.parse(reader, obu, frameHeader);
 
         assertFalse(header.explicitTilePositions());
         assertEquals(0, header.startTileIndex());
@@ -47,13 +46,12 @@ final class TileGroupHeaderParserTest {
     /// @throws IOException if the synthetic payload cannot be parsed
     @Test
     void parsesExplicitTileRange() throws IOException {
-        TileGroupHeaderParser parser = new TileGroupHeaderParser();
         FrameHeader frameHeader = tileGroupFrameHeader(2, 2, 1, 1);
         byte[] payload = tileGroupHeaderPayload(true, 1, 2, 2);
         ObuPacket obu = tileGroupObu(payload);
         BitReader reader = new BitReader(obu.payload());
 
-        TileGroupHeader header = parser.parse(reader, obu, frameHeader);
+        TileGroupHeader header = TileGroupHeaderParser.parse(reader, obu, frameHeader);
 
         assertTrue(header.explicitTilePositions());
         assertEquals(1, header.startTileIndex());

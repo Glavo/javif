@@ -3,7 +3,6 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -22,9 +21,9 @@ import java.util.Objects;
 /// uses the AV1 two-stage horizontal/vertical rounding model, while self-guided filtering uses the
 /// AV1 self-guided A/B projection model.
 @NotNullByDefault
-public final class RestorationApplier {
-    /// Creates a loop-restoration applier.
-    public RestorationApplier() {
+final class RestorationApplier {
+    /// Prevents instantiation of this stateless filter.
+    private RestorationApplier() {
     }
 
     /// The AV1 restoration processing stripe size in luma samples.
@@ -83,55 +82,6 @@ public final class RestorationApplier {
     /// The dav1d `sgr_x_by_x` reciprocal values indexed by normalized variance.
     private static final int @Unmodifiable [] SELF_GUIDED_X_BY_X = createSelfGuidedXByXTable();
 
-    /// Applies restoration to one decoded frame.
-    ///
-    /// @param decodedPlanes the decoded planes after CDEF
-    /// @param restoration the normalized frame-level restoration state
-    /// @return the post-restoration planes
-    public DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader.RestorationInfo restoration) {
-        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
-        FrameHeader.RestorationInfo checkedRestoration = Objects.requireNonNull(restoration, "restoration");
-        if (hasActiveRestoration(checkedRestoration, checkedDecodedPlanes.hasChroma())) {
-            throw new IllegalStateException("Active AV1 loop restoration requires decoded restoration unit syntax");
-        }
-        return checkedDecodedPlanes;
-    }
-
-    /// Applies restoration to one decoded frame using decoded restoration-unit syntax.
-    ///
-    /// @param decodedPlanes the decoded planes after CDEF
-    /// @param restoration the normalized frame-level restoration state
-    /// @param syntaxDecodeResult the decoded frame syntax that carries restoration units, or `null`
-    /// @return the post-restoration planes
-    public DecodedSurface apply(
-            DecodedSurface decodedPlanes,
-            FrameHeader.RestorationInfo restoration,
-            @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
-    ) {
-        return apply(decodedPlanes, decodedPlanes, restoration, syntaxDecodeResult);
-    }
-
-    /// Applies restoration to one decoded frame using decoded restoration-unit syntax.
-    ///
-    /// @param decodedPlanes the decoded planes after CDEF
-    /// @param boundaryPlanes the decoded planes after loop filtering and before CDEF
-    /// @param restoration the normalized frame-level restoration state
-    /// @param syntaxDecodeResult the decoded frame syntax that carries restoration units, or `null`
-    /// @return the post-restoration planes
-    public DecodedSurface apply(
-            DecodedSurface decodedPlanes,
-            DecodedSurface boundaryPlanes,
-            FrameHeader.RestorationInfo restoration,
-            @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
-    ) {
-        return applyPrepared(
-                decodedPlanes,
-                boundaryPlanes,
-                restoration,
-                syntaxDecodeResult == null ? null : syntaxDecodeResult.restorationUnitMap()
-        );
-    }
-
     /// Applies restoration using a compact restoration-unit map extracted from frame syntax.
     ///
     /// @param decodedPlanes the decoded planes after CDEF
@@ -139,7 +89,7 @@ public final class RestorationApplier {
     /// @param restoration the normalized frame-level restoration state
     /// @param unitMap the compact restoration-unit map, or `null` when syntax is unavailable
     /// @return the post-restoration planes
-    DecodedSurface applyPrepared(
+    static DecodedSurface applyPrepared(
             DecodedSurface decodedPlanes,
             DecodedSurface boundaryPlanes,
             FrameHeader.RestorationInfo restoration,
@@ -674,9 +624,6 @@ public final class RestorationApplier {
         /// The processing block width in samples.
         private int width;
 
-        /// The processing stripe height in samples.
-        private int height;
-
         /// The inverted A field used by the dav1d finish equations.
         private int[] a = new int[0];
 
@@ -719,7 +666,6 @@ public final class RestorationApplier {
                 throw new IllegalArgumentException("radius must be 1 or 2: " + radius);
             }
             this.width = width;
-            this.height = height;
             int count = radius == 1 ? 9 : 25;
             int oneByX = radius == 1 ? 455 : 164;
             int bitDepthShift = source.bitDepth() - 8;
@@ -1222,7 +1168,7 @@ public final class RestorationApplier {
         /// @param plane the decoded plane
         /// @param bitDepth the decoded bit depth
         /// @return a mutable copy of one decoded plane
-        public static PlaneBuffer create(PaddedPlane plane, int bitDepth) {
+        private static PlaneBuffer create(PaddedPlane plane, int bitDepth) {
             PaddedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
             return new PlaneBuffer(
                     checkedPlane.width(),

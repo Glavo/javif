@@ -5,9 +5,6 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
@@ -2104,10 +2101,7 @@ final class TileResidualSyntaxReaderTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return TileDecodeContext.create(assembly, 0);

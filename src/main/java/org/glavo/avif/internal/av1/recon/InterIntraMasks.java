@@ -131,25 +131,6 @@ final class InterIntraMasks {
         };
     }
 
-    /// Returns the wedge entropy context for one inter-intra-capable block size.
-    ///
-    /// @param size the block size to inspect
-    /// @return the wedge entropy context for the supplied block size
-    static int wedgeContext(BlockSize size) {
-        return switch (Objects.requireNonNull(size, "size")) {
-            case SIZE_8X8 -> 0;
-            case SIZE_8X16 -> 1;
-            case SIZE_16X8 -> 2;
-            case SIZE_16X16 -> 3;
-            case SIZE_16X32 -> 4;
-            case SIZE_32X16 -> 5;
-            case SIZE_32X32 -> 6;
-            case SIZE_8X32 -> 7;
-            case SIZE_32X8 -> 8;
-            default -> throw new IllegalArgumentException("Block size does not have a wedge context: " + size);
-        };
-    }
-
     /// Returns one inter-intra blend mask value in `[0, 64]`.
     ///
     /// @param mode the decoded inter-intra prediction mode

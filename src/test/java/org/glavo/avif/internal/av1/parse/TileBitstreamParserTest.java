@@ -19,6 +19,7 @@ import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `TileBitstreamParser`.
@@ -29,7 +30,6 @@ final class TileBitstreamParserTest {
     /// @throws IOException if a parsed tile bitstream cannot be read
     @Test
     void parsesTileBitstreams() throws IOException {
-        TileBitstreamParser parser = new TileBitstreamParser();
         ObuPacket obu = tileGroupObu(new byte[]{
                 0x01,
                 0x10, 0x11,
@@ -40,7 +40,7 @@ final class TileBitstreamParserTest {
         FrameHeader frameHeader = tileGroupFrameHeader(2, 2, 1, 1, 1);
         TileGroupHeader tileGroupHeader = new TileGroupHeader(true, 0, 2, 4);
 
-        TileBitstream[] bitstreams = parser.parse(obu, frameHeader, tileGroupHeader, 0);
+        TileBitstream[] bitstreams = TileBitstreamParser.parse(obu, frameHeader, tileGroupHeader, 0);
 
         assertEquals(3, bitstreams.length);
         assertEquals(0, bitstreams[0].tileIndex());
@@ -65,7 +65,6 @@ final class TileBitstreamParserTest {
     /// @throws Av1DecodeException if the tile-data layout cannot be parsed
     @Test
     void parsesTileBitstreamsWithNonZeroTileDataOffset() throws Av1DecodeException {
-        TileBitstreamParser parser = new TileBitstreamParser();
         ObuPacket obu = tileGroupObu(new byte[]{
                 0x00,
                 0x7E
@@ -73,11 +72,24 @@ final class TileBitstreamParserTest {
         FrameHeader frameHeader = tileGroupFrameHeader(1, 1, 0, 0, 0);
         TileGroupHeader tileGroupHeader = new TileGroupHeader(false, 0, 0, 1);
 
-        TileBitstream[] bitstreams = parser.parse(obu, frameHeader, tileGroupHeader, 1);
+        TileBitstream[] bitstreams = TileBitstreamParser.parse(obu, frameHeader, tileGroupHeader, 1);
 
         assertEquals(1, bitstreams.length);
         assertEquals(1, bitstreams[0].dataOffset());
         assertArrayEquals(new byte[]{0x7E}, bitstreams[0].copyBytes());
+    }
+
+    /// Verifies that tile size entries cannot point past the end of the OBU payload.
+    @Test
+    void rejectsOverlongTilePayload() {
+        ObuPacket obu = tileGroupObu(new byte[]{0x03, 0x10, 0x11});
+        FrameHeader frameHeader = tileGroupFrameHeader(2, 1, 1, 0, 1);
+        TileGroupHeader tileGroupHeader = new TileGroupHeader(true, 0, 1, 2);
+
+        assertThrows(
+                Av1DecodeException.class,
+                () -> TileBitstreamParser.parse(obu, frameHeader, tileGroupHeader, 0)
+        );
     }
 
     /// Verifies exact payload comparison across distinct backing arrays and slice offsets.

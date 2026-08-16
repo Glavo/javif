@@ -5,9 +5,6 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
@@ -454,10 +451,7 @@ final class FrameSyntaxDecoderTest {
             );
         }
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, tilePayloads.length - 1, tilePayloads.length),
-                0,
-                0,
                 tileBitstreams
         );
         return assembly;

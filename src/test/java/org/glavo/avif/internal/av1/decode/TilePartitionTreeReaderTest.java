@@ -5,9 +5,6 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
@@ -363,10 +360,7 @@ final class TilePartitionTreeReaderTest {
             tiles[i] = new TileBitstream(i, payload, 0, payload.length);
         }
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(tileColumns > 1, 0, tileColumns - 1, tileColumns),
-                0,
-                0,
                 tiles
         );
         return TileDecodeContext.create(assembly, tileIndex);

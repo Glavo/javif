@@ -25,9 +25,9 @@ import java.util.Objects;
 /// Inactive loop filtering preserves samples exactly. Active loop filtering uses decoded block and
 /// transform boundaries to run the deblocking sample filters before CDEF sees the frame.
 @NotNullByDefault
-public final class LoopFilterApplier {
-    /// Creates a loop-filter applier.
-    public LoopFilterApplier() {
+final class LoopFilterApplier {
+    /// Prevents instantiation of this stateless filter.
+    private LoopFilterApplier() {
     }
 
     /// The number of luma samples represented by one AV1 mode-info unit.
@@ -60,27 +60,13 @@ public final class LoopFilterApplier {
     /// Transform-size constants indexed by their declaration ordinal.
     private static final TransformSize @Unmodifiable [] TRANSFORM_SIZES = TransformSize.values();
 
-    /// Applies loop filtering to one reconstructed frame.
-    ///
-    /// @param decodedPlanes the reconstructed planes to post-process
-    /// @param loopFilter the normalized frame-level loop-filter state
-    /// @return the post-loop-filter planes
-    public DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader.LoopFilterInfo loopFilter) {
-        DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
-        FrameHeader.LoopFilterInfo checkedLoopFilter = Objects.requireNonNull(loopFilter, "loopFilter");
-        if (hasActiveLevels(checkedLoopFilter, checkedDecodedPlanes.hasChroma())) {
-            throw new IllegalStateException("Active AV1 loop filtering requires decoded block edge state");
-        }
-        return checkedDecodedPlanes;
-    }
-
     /// Applies loop filtering to one reconstructed frame using decoded block syntax.
     ///
     /// @param decodedPlanes the reconstructed planes to post-process
     /// @param frameHeader the normalized frame header that owns the planes
     /// @param syntaxDecodeResult the decoded frame syntax that carries block and transform edges
     /// @return the post-loop-filter planes
-    public DecodedSurface apply(
+    static DecodedSurface apply(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
@@ -102,7 +88,7 @@ public final class LoopFilterApplier {
     /// @param frameHeader the normalized frame header that owns the planes
     /// @param syntaxDecodeResult the decoded frame syntax that carries block and transform edges, or `null`
     /// @return the compact prepared loop-filter state
-    PreparedApplication prepare(
+    static PreparedApplication prepare(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
@@ -140,7 +126,7 @@ public final class LoopFilterApplier {
     /// @param decodedPlanes the same reconstructed surface used to prepare the operation
     /// @param preparedApplication the compact prepared loop-filter state
     /// @return the post-loop-filter planes
-    DecodedSurface applyPrepared(
+    static DecodedSurface applyPrepared(
             DecodedSurface decodedPlanes,
             PreparedApplication preparedApplication
     ) {
@@ -991,7 +977,7 @@ public final class LoopFilterApplier {
         /// @param plane the immutable decoded plane
         /// @param bitDepth the decoded sample bit depth
         /// @return a mutable copy of one decoded plane
-        public static PlaneBuffer create(PaddedPlane plane, int bitDepth) {
+        private static PlaneBuffer create(PaddedPlane plane, int bitDepth) {
             PaddedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
             return new PlaneBuffer(
                     checkedPlane.width(),
@@ -1006,14 +992,14 @@ public final class LoopFilterApplier {
         /// Returns the plane width in samples.
         ///
         /// @return the plane width in samples
-        public int width() {
+        private int width() {
             return width;
         }
 
         /// Returns the plane height in samples.
         ///
         /// @return the plane height in samples
-        public int height() {
+        private int height() {
             return height;
         }
 
@@ -1021,7 +1007,7 @@ public final class LoopFilterApplier {
         ///
         /// @param requestedWidth the requested processing width
         /// @param requestedHeight the requested processing height
-        public void setProcessingExtent(int requestedWidth, int requestedHeight) {
+        private void setProcessingExtent(int requestedWidth, int requestedHeight) {
             processingWidth = Math.min(stride, requestedWidth);
             processingHeight = Math.min(storageHeight, requestedHeight);
         }
@@ -1029,21 +1015,21 @@ public final class LoopFilterApplier {
         /// Returns the horizontal sample extent processed by loop filtering.
         ///
         /// @return the processing width
-        public int processingWidth() {
+        private int processingWidth() {
             return processingWidth;
         }
 
         /// Returns the vertical sample extent processed by loop filtering.
         ///
         /// @return the processing height
-        public int processingHeight() {
+        private int processingHeight() {
             return processingHeight;
         }
 
         /// Returns the decoded sample bit depth.
         ///
         /// @return the decoded sample bit depth
-        public int bitDepth() {
+        private int bitDepth() {
             return bitDepth;
         }
 
@@ -1052,7 +1038,7 @@ public final class LoopFilterApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return whether one sample coordinate is inside this plane
-        public boolean contains(int x, int y) {
+        private boolean contains(int x, int y) {
             return x >= 0 && y >= 0 && x < processingWidth && y < processingHeight;
         }
 
@@ -1061,7 +1047,7 @@ public final class LoopFilterApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return one mutable sample
-        public int sample(int x, int y) {
+        private int sample(int x, int y) {
             return samples[y * stride + x] & 0xFFFF;
         }
 
@@ -1070,7 +1056,7 @@ public final class LoopFilterApplier {
         /// @param x the sample X coordinate, which may be outside the plane
         /// @param y the sample Y coordinate, which may be outside the plane
         /// @return the nearest in-plane sample
-        public int sampleClamped(int x, int y) {
+        private int sampleClamped(int x, int y) {
             return sample(clamp(x, 0, processingWidth - 1), clamp(y, 0, processingHeight - 1));
         }
 
@@ -1079,14 +1065,14 @@ public final class LoopFilterApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @param value the replacement sample value
-        public void setSample(int x, int y, int value) {
+        private void setSample(int x, int y, int value) {
             samples[y * stride + x] = (short) clamp(value, 0, maxSampleValue);
         }
 
         /// Returns one immutable decoded-plane snapshot from the current samples.
         ///
         /// @return one immutable decoded-plane snapshot from the current samples
-        public PaddedPlane toDecodedPlane() {
+        private PaddedPlane toDecodedPlane() {
             return PaddedPlane.fromOwnedSamples(width, height, stride, samples);
         }
     }

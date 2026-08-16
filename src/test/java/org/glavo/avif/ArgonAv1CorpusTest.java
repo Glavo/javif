@@ -491,7 +491,6 @@ final class ArgonAv1CorpusTest {
         ZipFile archive = archive();
         String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
         ZipEntry streamEntry = requireEntry(archive, streamPath);
-        SequenceHeaderParser parser = new SequenceHeaderParser();
         int commonCount = 32;
         boolean foundSequenceHeader = false;
         try (BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry))) {
@@ -501,7 +500,7 @@ final class ArgonAv1CorpusTest {
                 if (packet.header().type() != ObuType.SEQUENCE_HEADER) {
                     continue;
                 }
-                SequenceHeader sequenceHeader = parser.parse(packet, false);
+                SequenceHeader sequenceHeader = SequenceHeaderParser.parse(packet, false);
                 commonCount = Math.min(commonCount, sequenceHeader.operatingPoints().length);
                 foundSequenceHeader = true;
             }

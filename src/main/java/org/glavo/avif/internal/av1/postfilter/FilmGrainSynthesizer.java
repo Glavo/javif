@@ -24,8 +24,8 @@ import java.util.zip.GZIPInputStream;
 /// per-32x32 block offsets, optional overlap blending, and per-plane scaling functions.
 @NotNullByDefault
 public final class FilmGrainSynthesizer {
-    /// Creates a film-grain synthesizer.
-    public FilmGrainSynthesizer() {
+    /// Prevents instantiation of this stateless synthesizer.
+    private FilmGrainSynthesizer() {
     }
 
     /// The luma grain lookup width.
@@ -75,7 +75,7 @@ public final class FilmGrainSynthesizer {
     /// @param frameHeader the normalized frame header that owns the grain parameters
     /// @param colorConfig the active sequence color configuration
     /// @return the grain-applied presentation planes
-    public DecodedSurface apply(
+    public static DecodedSurface apply(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             Av1ColorConfig colorConfig

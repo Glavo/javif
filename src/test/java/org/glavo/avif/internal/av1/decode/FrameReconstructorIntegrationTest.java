@@ -539,7 +539,7 @@ final class FrameReconstructorIntegrationTest {
                 zeroResidualSyntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = FramePostprocessor.postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 zeroResidualSyntaxDecodeResult
@@ -841,16 +841,13 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(
-                        0,
-                        BITSTREAM_DERIVED_INTER_PAYLOAD,
-                        0,
-                        BITSTREAM_DERIVED_INTER_PAYLOAD.length
-                )}
+                                        0,
+                                        BITSTREAM_DERIVED_INTER_PAYLOAD,
+                                        0,
+                                        BITSTREAM_DERIVED_INTER_PAYLOAD.length
+                                )}
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
@@ -870,7 +867,7 @@ final class FrameReconstructorIntegrationTest {
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = FramePostprocessor.postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 syntaxDecodeResult
@@ -1030,7 +1027,7 @@ final class FrameReconstructorIntegrationTest {
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = FramePostprocessor.postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 syntaxDecodeResult
@@ -3160,10 +3157,7 @@ final class FrameReconstructorIntegrationTest {
             tiles[i] = new TileBitstream(i, new byte[0], 0, 0);
         }
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, tileRoots.length - 1, tileRoots.length),
-                0,
-                0,
                 tiles
         );
 
@@ -4886,21 +4880,23 @@ final class FrameReconstructorIntegrationTest {
             byte[] sequenceHeaderPayload,
             byte[] combinedPayload
     ) throws IOException {
-        SequenceHeader sequenceHeader = new SequenceHeaderParser().parse(sequenceHeaderObu(sequenceHeaderPayload), false);
+        SequenceHeader sequenceHeader = SequenceHeaderParser.parse(sequenceHeaderObu(sequenceHeaderPayload), false);
         ObuPacket frameObu = frameObu(combinedPayload);
         BitReader reader = new BitReader(combinedPayload);
-        FrameHeader frameHeader = new FrameHeaderParser().parseFramePayload(reader, frameObu, sequenceHeader, false);
-        TileGroupHeader tileGroupHeader = new TileGroupHeaderParser().parse(reader, frameObu, frameHeader);
+        FrameHeader frameHeader = FrameHeaderParser.parseFramePayload(reader, frameObu, sequenceHeader, false);
+        TileGroupHeader tileGroupHeader = TileGroupHeaderParser.parse(reader, frameObu, frameHeader);
         reader.byteAlign();
         int tileDataOffset = reader.byteOffset();
-        TileBitstream[] tileBitstreams = new TileBitstreamParser().parse(frameObu, frameHeader, tileGroupHeader, tileDataOffset);
+        TileBitstream[] tileBitstreams = TileBitstreamParser.parse(
+                frameObu,
+                frameHeader,
+                tileGroupHeader,
+                tileDataOffset
+        );
 
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, frameObu.streamOffset(), frameObu.obuIndex());
         assembly.addTileGroup(
-                frameObu,
                 tileGroupHeader,
-                tileDataOffset,
-                combinedPayload.length - tileDataOffset,
                 tileBitstreams
         );
         return assembly;
@@ -4915,13 +4911,18 @@ final class FrameReconstructorIntegrationTest {
     private static FrameAssembly createReducedStillPictureStandaloneAssembly(byte[] tileGroupPayload) throws IOException {
         SequenceHeader sequenceHeader = parseReducedStillPictureSequenceHeader();
         ObuPacket frameHeaderObu = frameHeaderObu(reducedStillPictureFrameHeaderPayload());
-        FrameHeader frameHeader = new FrameHeaderParser().parse(frameHeaderObu, sequenceHeader, false);
+        FrameHeader frameHeader = FrameHeaderParser.parse(frameHeaderObu, sequenceHeader, false);
         ObuPacket tileGroupObu = tileGroupObu(tileGroupPayload);
         BitReader tileGroupReader = new BitReader(tileGroupPayload);
-        TileGroupHeader tileGroupHeader = new TileGroupHeaderParser().parse(tileGroupReader, tileGroupObu, frameHeader);
+        TileGroupHeader tileGroupHeader = TileGroupHeaderParser.parse(tileGroupReader, tileGroupObu, frameHeader);
         tileGroupReader.byteAlign();
         int tileDataOffset = tileGroupReader.byteOffset();
-        TileBitstream[] tileBitstreams = new TileBitstreamParser().parse(tileGroupObu, frameHeader, tileGroupHeader, tileDataOffset);
+        TileBitstream[] tileBitstreams = TileBitstreamParser.parse(
+                tileGroupObu,
+                frameHeader,
+                tileGroupHeader,
+                tileDataOffset
+        );
 
         FrameAssembly assembly = new FrameAssembly(
                 sequenceHeader,
@@ -4930,10 +4931,7 @@ final class FrameReconstructorIntegrationTest {
                 frameHeaderObu.obuIndex()
         );
         assembly.addTileGroup(
-                tileGroupObu,
                 tileGroupHeader,
-                tileDataOffset,
-                tileGroupPayload.length - tileDataOffset,
                 tileBitstreams
         );
         return assembly;
@@ -4944,7 +4942,7 @@ final class FrameReconstructorIntegrationTest {
     /// @return the parsed reduced still-picture sequence header
     /// @throws IOException if the fixture cannot be parsed
     private static SequenceHeader parseReducedStillPictureSequenceHeader() throws IOException {
-        return new SequenceHeaderParser().parse(sequenceHeaderObu(reducedStillPicturePayload()), false);
+        return SequenceHeaderParser.parse(sequenceHeaderObu(reducedStillPicturePayload()), false);
     }
 
     /// Creates one synthetic single-tile frame assembly.
@@ -5012,10 +5010,7 @@ final class FrameReconstructorIntegrationTest {
         FrameHeader frameHeader = createSyntheticFrameHeader(Av1FrameType.KEY, codedWidth, codedHeight, 1, transformMode);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
@@ -5237,7 +5232,7 @@ final class FrameReconstructorIntegrationTest {
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedSurface decodedPlanes = new FramePostprocessor().postprocess(
+        DecodedSurface decodedPlanes = FramePostprocessor.postprocess(
                 reconstructedPlanes,
                 assembly.frameHeader(),
                 syntaxDecodeResult
@@ -5353,10 +5348,7 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
@@ -5389,10 +5381,7 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
@@ -5429,16 +5418,13 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(
-                        0,
-                        BITSTREAM_DERIVED_INTER_PAYLOAD,
-                        0,
-                        BITSTREAM_DERIVED_INTER_PAYLOAD.length
-                )}
+                                        0,
+                                        BITSTREAM_DERIVED_INTER_PAYLOAD,
+                                        0,
+                                        BITSTREAM_DERIVED_INTER_PAYLOAD.length
+                                )}
         );
         return assembly;
     }
@@ -5470,10 +5456,7 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
@@ -5529,10 +5512,7 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
@@ -5572,10 +5552,7 @@ final class FrameReconstructorIntegrationTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;

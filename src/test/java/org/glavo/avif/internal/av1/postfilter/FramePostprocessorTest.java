@@ -99,7 +99,7 @@ final class FramePostprocessorTest {
                 PostfilterTestFixtures.disabledFilmGrain()
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader);
 
         assertSame(decodedPlanes, postprocessed);
         assertEquals(120, postprocessed.lumaPlane().sample(0, 0));
@@ -152,7 +152,7 @@ final class FramePostprocessorTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 64);
@@ -203,7 +203,7 @@ final class FramePostprocessorTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, -1);
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 64);
@@ -255,7 +255,7 @@ final class FramePostprocessorTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0, true);
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertSame(decodedPlanes, postprocessed);
         assertEquals(64, postprocessed.lumaPlane().sample(3, 3));
@@ -306,7 +306,7 @@ final class FramePostprocessorTest {
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int filteredCenter = postprocessed.lumaPlane().sample(3, 3);
         assertNotSame(decodedPlanes, postprocessed);
@@ -351,7 +351,7 @@ final class FramePostprocessorTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> new FramePostprocessor().postprocess(decodedPlanes, frameHeader)
+                () -> FramePostprocessor.postprocess(decodedPlanes, frameHeader)
         );
 
         assertTrue(exception.getMessage().contains("CDEF"));
@@ -402,7 +402,7 @@ final class FramePostprocessorTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(frameHeader, 0, 0);
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) > decodedPlanes.lumaPlane().sample(3, 3));
@@ -456,7 +456,7 @@ final class FramePostprocessorTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
             for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
@@ -507,7 +507,7 @@ final class FramePostprocessorTest {
                 null
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedRow = new int[]{40, 40, 40, 40, 40, 41, 42, 43, 45, 46, 47, 48, 48, 48, 48, 48};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
@@ -557,7 +557,7 @@ final class FramePostprocessorTest {
                 null
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedRow = new int[]{164, 164, 164, 164, 164, 164, 164, 164, 163, 163, 162};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
@@ -617,7 +617,7 @@ final class FramePostprocessorTest {
                 null
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedRow = new int[]{
                 40, 40, 40, 40, 40, 40, 40, 40,
@@ -673,7 +673,7 @@ final class FramePostprocessorTest {
                 TransformSize.TX_8X8
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedChromaRow = new int[]{60, 60, 60, 60, 60, 60, 61, 63, 65, 67, 68, 68, 68, 68, 68, 68};
         for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
@@ -745,7 +745,7 @@ final class FramePostprocessorTest {
                 TransformSize.TX_4X4
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         int[] expectedPaddingRow = new int[]{60, 60, 62, 63, 65, 66, 68, 68};
         short[] filteredChroma = postprocessed.chromaUPlane().samples();
@@ -788,7 +788,7 @@ final class FramePostprocessorTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> new FramePostprocessor().postprocess(decodedPlanes, frameHeader)
+                () -> FramePostprocessor.postprocess(decodedPlanes, frameHeader)
         );
 
         assertTrue(exception.getMessage().contains("loop filtering"));
@@ -836,7 +836,7 @@ final class FramePostprocessorTest {
                 })
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 96);
@@ -900,7 +900,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.wiener(wienerCoefficients)
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertEquals(8, postprocessed.lumaPlane().stride());
@@ -952,7 +952,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.selfGuided(0, new int[]{31, 31})
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertTrue(postprocessed.lumaPlane().sample(3, 3) < 96);
@@ -1013,7 +1013,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.selfGuided(0, projectionCoefficients)
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertNotSame(decodedPlanes, postprocessed);
         assertEquals(8, postprocessed.lumaPlane().stride());
@@ -1068,7 +1068,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.wiener(wienerCoefficients)
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertWienerRestoredPlaneEquals(
                 decodedPlanes.lumaPlane(),
@@ -1117,7 +1117,7 @@ final class FramePostprocessorTest {
                 RestorationUnit.selfGuided(0, projectionCoefficients)
         );
 
-        DecodedSurface postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+        DecodedSurface postprocessed = FramePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
 
         assertSelfGuidedRestoredPlaneEquals(
                 decodedPlanes.lumaPlane(),
@@ -1160,7 +1160,7 @@ final class FramePostprocessorTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> new FramePostprocessor().postprocess(decodedPlanes, frameHeader)
+                () -> FramePostprocessor.postprocess(decodedPlanes, frameHeader)
         );
 
         assertTrue(exception.getMessage().contains("loop restoration"));

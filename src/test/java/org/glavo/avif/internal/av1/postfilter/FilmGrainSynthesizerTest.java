@@ -48,7 +48,7 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.disabledFilmGrain()
         );
 
-        DecodedSurface result = new FilmGrainSynthesizer().apply(
+        DecodedSurface result = FilmGrainSynthesizer.apply(
                 decodedPlanes,
                 frameHeader,
                 colorConfig(decodedPlanes, 2)
@@ -101,9 +101,8 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.createFilmGrainParams(0x1234, false)
         );
 
-        FilmGrainSynthesizer synthesizer = new FilmGrainSynthesizer();
-        DecodedSurface first = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
-        DecodedSurface second = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
+        DecodedSurface first = FilmGrainSynthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
+        DecodedSurface second = FilmGrainSynthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
 
         assertNotSame(decodedPlanes, first);
         assertEquals(first.lumaPlane().sample(0, 0), second.lumaPlane().sample(0, 0));
@@ -165,18 +164,17 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.createFilmGrainParams(0x5678, true)
         );
 
-        FilmGrainSynthesizer synthesizer = new FilmGrainSynthesizer();
-        DecodedSurface unrestricted = synthesizer.apply(
+        DecodedSurface unrestricted = FilmGrainSynthesizer.apply(
                 decodedPlanes,
                 unrestrictedFrameHeader,
                 colorConfig(decodedPlanes, 2)
         );
-        DecodedSurface restricted = synthesizer.apply(
+        DecodedSurface restricted = FilmGrainSynthesizer.apply(
                 decodedPlanes,
                 restrictedFrameHeader,
                 colorConfig(decodedPlanes, 2)
         );
-        DecodedSurface identityMatrixRestricted = synthesizer.apply(
+        DecodedSurface identityMatrixRestricted = FilmGrainSynthesizer.apply(
                 decodedPlanes,
                 restrictedFrameHeader,
                 colorConfig(decodedPlanes, 0)
@@ -286,7 +284,7 @@ final class FilmGrainSynthesizerTest {
                 )
         );
 
-        DecodedSurface result = new FilmGrainSynthesizer().apply(
+        DecodedSurface result = FilmGrainSynthesizer.apply(
                 decodedPlanes,
                 frameHeader,
                 colorConfig(decodedPlanes, 2)
@@ -379,7 +377,7 @@ final class FilmGrainSynthesizerTest {
                 )
         );
 
-        DecodedSurface result = new FilmGrainSynthesizer().apply(
+        DecodedSurface result = FilmGrainSynthesizer.apply(
                 decodedPlanes,
                 frameHeader,
                 colorConfig(decodedPlanes, 2)

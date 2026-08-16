@@ -18,8 +18,8 @@ import java.util.Objects;
 /// Parser for AV1 tile-group headers embedded inside `TILE_GROUP` and `FRAME` OBUs.
 @NotNullByDefault
 public final class TileGroupHeaderParser {
-    /// Creates a tile-group-header parser.
-    public TileGroupHeaderParser() {
+    /// Prevents instantiation of this stateless parser.
+    private TileGroupHeaderParser() {
     }
 
     /// Parses a tile-group header from the supplied bit reader.
@@ -29,7 +29,7 @@ public final class TileGroupHeaderParser {
     /// @param frameHeader the active frame header
     /// @return the parsed tile-group header
     /// @throws IOException if the payload is truncated or invalid
-    public TileGroupHeader parse(BitReader reader, ObuPacket obu, FrameHeader frameHeader) throws IOException {
+    public static TileGroupHeader parse(BitReader reader, ObuPacket obu, FrameHeader frameHeader) throws IOException {
         Objects.requireNonNull(reader, "reader");
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(frameHeader, "frameHeader");

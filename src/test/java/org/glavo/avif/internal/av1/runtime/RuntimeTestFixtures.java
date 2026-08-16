@@ -5,9 +5,6 @@ package org.glavo.avif.internal.av1.runtime;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -223,10 +220,7 @@ final class RuntimeTestFixtures {
     static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(FrameHeader frameHeader) {
         FrameAssembly assembly = new FrameAssembly(createSequenceHeader(), frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return new FrameSyntaxDecodeResult(

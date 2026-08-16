@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: MPL-2.0
 package org.glavo.avif.internal.av1.model;
 
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Objects;
 
 /// Incrementally assembled AV1 frame state before pixel decoding begins.
@@ -27,8 +24,10 @@ public final class FrameAssembly {
     private final int obuIndex;
     /// The total number of tiles declared by the frame header.
     private final int totalTiles;
-    /// The tile groups accumulated for this frame so far.
-    private final List<TileGroup> tileGroups = new ArrayList<>();
+    /// The tile bitstreams collected so far, indexed by frame tile index.
+    private final @Nullable TileBitstream[] tileBitstreams;
+    /// The number of tile groups collected so far.
+    private int tileGroupCount;
     /// The next tile index that must be covered by the next tile group.
     private int nextTileIndex;
 
@@ -84,6 +83,7 @@ public final class FrameAssembly {
         this.streamOffset = streamOffset;
         this.obuIndex = obuIndex;
         this.totalTiles = tileCount;
+        this.tileBitstreams = new TileBitstream[tileCount];
     }
 
     /// Returns the active sequence header for this frame.
@@ -151,7 +151,7 @@ public final class FrameAssembly {
     ///
     /// @return the number of tile groups collected so far
     public int tileGroupCount() {
-        return tileGroups.size();
+        return tileGroupCount;
     }
 
     /// Returns the number of tiles collected so far across all tile groups.
@@ -159,27 +159,6 @@ public final class FrameAssembly {
     /// @return the number of tiles collected so far across all tile groups
     public int collectedTileCount() {
         return nextTileIndex;
-    }
-
-    /// Returns a snapshot of the collected tile groups.
-    ///
-    /// @return a snapshot of the collected tile groups
-    public TileGroup[] tileGroups() {
-        return tileGroups.toArray(new TileGroup[0]);
-    }
-
-    /// Returns the collected tile bitstreams in frame order.
-    ///
-    /// @return the collected tile bitstreams in frame order
-    public TileBitstream[] collectedTiles() {
-        TileBitstream[] tiles = new TileBitstream[nextTileIndex];
-        int outputIndex = 0;
-        for (TileGroup tileGroup : tileGroups) {
-            for (TileBitstream tile : tileGroup.tiles) {
-                tiles[outputIndex++] = tile;
-            }
-        }
-        return tiles;
     }
 
     /// Returns a collected tile bitstream by tile index.
@@ -190,126 +169,36 @@ public final class FrameAssembly {
         if (tileIndex < 0 || tileIndex >= nextTileIndex) {
             throw new IllegalArgumentException("Tile index out of collected range: " + tileIndex);
         }
-        for (TileGroup tileGroup : tileGroups) {
-            for (TileBitstream tile : tileGroup.tiles) {
-                if (tile.tileIndex() == tileIndex) {
-                    return tile;
-                }
-            }
-        }
-        throw new IllegalStateException("Collected tile index was not found: " + tileIndex);
+        return Objects.requireNonNull(tileBitstreams[tileIndex], "tileBitstreams[" + tileIndex + "]");
     }
 
-    /// Appends tile-group metadata and advances the expected tile cursor.
+    /// Appends one tile group's bitstreams and advances the expected tile cursor.
     ///
-    /// @param sourceObu the source OBU that carried the tile group
     /// @param header the parsed tile-group header
-    /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
-    /// @param tileDataLength the byte length of the tile data inside the OBU payload
     /// @param tiles the parsed per-tile bitstream views
-    public void addTileGroup(
-            ObuPacket sourceObu,
-            TileGroupHeader header,
-            int tileDataOffset,
-            int tileDataLength,
-            TileBitstream[] tiles
-    ) {
-        if (tileDataOffset < 0) {
-            throw new IllegalArgumentException("tileDataOffset < 0: " + tileDataOffset);
-        }
-        if (tileDataLength < 0) {
-            throw new IllegalArgumentException("tileDataLength < 0: " + tileDataLength);
-        }
-        if (header.totalTileCount() != totalTiles) {
+    public void addTileGroup(TileGroupHeader header, TileBitstream[] tiles) {
+        TileGroupHeader checkedHeader = Objects.requireNonNull(header, "header");
+        if (checkedHeader.totalTileCount() != totalTiles) {
             throw new IllegalArgumentException("Tile-group header belongs to a different frame layout");
         }
-        Objects.requireNonNull(tiles, "tiles");
-        if (tiles.length != header.tileCount()) {
+        if (checkedHeader.startTileIndex() != nextTileIndex) {
+            throw new IllegalArgumentException("Tile groups must be added in frame order");
+        }
+        TileBitstream[] checkedTiles = Objects.requireNonNull(tiles, "tiles");
+        if (checkedTiles.length != checkedHeader.tileCount()) {
             throw new IllegalArgumentException("Tile entry count does not match the tile-group header");
         }
-
-        tileGroups.add(new TileGroup(sourceObu, header, tileDataOffset, tileDataLength, tiles));
-        nextTileIndex = header.endTileIndex() + 1;
-    }
-
-    /// Tile-group payload metadata collected while assembling a frame.
-    @NotNullByDefault
-    public static final class TileGroup {
-        /// The source OBU that carried the tile-group payload.
-        private final ObuPacket sourceObu;
-        /// The parsed tile-group header.
-        private final TileGroupHeader header;
-        /// The byte offset of the tile data inside the source OBU payload.
-        private final int tileDataOffset;
-        /// The byte length of the tile data inside the source OBU payload.
-        private final int tileDataLength;
-        /// The parsed per-tile bitstream views inside this tile group.
-        private final TileBitstream @Unmodifiable [] tiles;
-
-        /// Creates tile-group payload metadata.
-        ///
-        /// @param sourceObu the source OBU that carried the tile-group payload
-        /// @param header the parsed tile-group header
-        /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
-        /// @param tileDataLength the byte length of the tile data inside the OBU payload
-        /// @param tiles the parsed per-tile bitstream views inside this tile group
-        public TileGroup(
-                ObuPacket sourceObu,
-                TileGroupHeader header,
-                int tileDataOffset,
-                int tileDataLength,
-                TileBitstream[] tiles
-        ) {
-            this.sourceObu = Objects.requireNonNull(sourceObu, "sourceObu");
-            this.header = Objects.requireNonNull(header, "header");
-            if (tileDataOffset < 0 || tileDataOffset > sourceObu.payload().length) {
-                throw new IllegalArgumentException("tileDataOffset out of range: " + tileDataOffset);
+        for (int i = 0; i < checkedTiles.length; i++) {
+            int expectedTileIndex = checkedHeader.startTileIndex() + i;
+            TileBitstream tile = Objects.requireNonNull(checkedTiles[i], "tiles[" + i + "]");
+            if (tile.tileIndex() != expectedTileIndex) {
+                throw new IllegalArgumentException(
+                        "Tile entry index mismatch: expected " + expectedTileIndex + " but was " + tile.tileIndex()
+                );
             }
-            if (tileDataLength < 0 || tileDataOffset + tileDataLength > sourceObu.payload().length) {
-                throw new IllegalArgumentException("tileDataLength out of range: " + tileDataLength);
-            }
-            Objects.requireNonNull(tiles, "tiles");
-            if (tiles.length != header.tileCount()) {
-                throw new IllegalArgumentException("Tile entry count does not match the tile-group header");
-            }
-            this.tileDataOffset = tileDataOffset;
-            this.tileDataLength = tileDataLength;
-            this.tiles = Arrays.copyOf(tiles, tiles.length);
+            tileBitstreams[expectedTileIndex] = tile;
         }
-
-        /// Returns the source OBU that carried the tile-group payload.
-        ///
-        /// @return the source OBU that carried the tile-group payload
-        public ObuPacket sourceObu() {
-            return sourceObu;
-        }
-
-        /// Returns the parsed tile-group header.
-        ///
-        /// @return the parsed tile-group header
-        public TileGroupHeader header() {
-            return header;
-        }
-
-        /// Returns the byte offset of the tile data inside the OBU payload.
-        ///
-        /// @return the byte offset of the tile data inside the OBU payload
-        public int tileDataOffset() {
-            return tileDataOffset;
-        }
-
-        /// Returns the byte length of the tile data inside the OBU payload.
-        ///
-        /// @return the byte length of the tile data inside the OBU payload
-        public int tileDataLength() {
-            return tileDataLength;
-        }
-
-        /// Returns the parsed per-tile bitstream views inside this tile group.
-        ///
-        /// @return the parsed per-tile bitstream views inside this tile group
-        public TileBitstream[] tiles() {
-            return Arrays.copyOf(tiles, tiles.length);
-        }
+        tileGroupCount++;
+        nextTileIndex = checkedHeader.endTileIndex() + 1;
     }
 }

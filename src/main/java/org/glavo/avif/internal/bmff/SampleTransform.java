@@ -153,13 +153,6 @@ public final class SampleTransform {
         return fullRange;
     }
 
-    /// Returns the signed intermediate arithmetic bit depth.
-    ///
-    /// @return the intermediate bit depth, one of `8`, `16`, `32`, or `64`
-    public int intermediateBitDepth() {
-        return intermediateBitDepth;
-    }
-
     /// Returns the number of ordered input images.
     ///
     /// @return the input image count
@@ -552,49 +545,20 @@ public final class SampleTransform {
     }
 
     /// One ordered Sample Transform input and its matching optional alpha image.
+    ///
+    /// @param colorSource the color image source
+    /// @param colorBitDepth the coded bit depth required for a matching alpha image
+    /// @param alphaSource the matching alpha image source, or `null`
     @NotNullByDefault
-    public static final class Input {
-        /// The color image source.
-        private final AvifImageSource colorSource;
-        /// The coded bit depth required for a matching alpha image.
-        private final AvifBitDepth colorBitDepth;
-        /// The alpha image source, or `null` when the transform has no alpha.
-        private final @Nullable AvifImageSource alphaSource;
-
+    public record Input(
+            AvifImageSource colorSource,
+            AvifBitDepth colorBitDepth,
+            @Nullable AvifImageSource alphaSource
+    ) {
         /// Creates an ordered Sample Transform input.
-        ///
-        /// @param colorSource the color image source
-        /// @param colorBitDepth the coded color-image bit depth
-        /// @param alphaSource the matching alpha image source, or `null`
-        public Input(
-                AvifImageSource colorSource,
-                AvifBitDepth colorBitDepth,
-                @Nullable AvifImageSource alphaSource
-        ) {
-            this.colorSource = Objects.requireNonNull(colorSource, "colorSource");
-            this.colorBitDepth = Objects.requireNonNull(colorBitDepth, "colorBitDepth");
-            this.alphaSource = alphaSource;
-        }
-
-        /// Returns the color image source.
-        ///
-        /// @return the color image source
-        public AvifImageSource colorSource() {
-            return colorSource;
-        }
-
-        /// Returns the coded color-image bit depth required for matching alpha.
-        ///
-        /// @return the coded color-image bit depth
-        public AvifBitDepth colorBitDepth() {
-            return colorBitDepth;
-        }
-
-        /// Returns the matching alpha image source.
-        ///
-        /// @return the alpha image source, or `null`
-        public @Nullable AvifImageSource alphaSource() {
-            return alphaSource;
+        public Input {
+            Objects.requireNonNull(colorSource, "colorSource");
+            Objects.requireNonNull(colorBitDepth, "colorBitDepth");
         }
     }
 

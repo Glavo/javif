@@ -24,8 +24,8 @@ import java.util.Objects;
 /// Parser for AV1 frame headers carried by standalone or combined frame OBUs.
 @NotNullByDefault
 public final class FrameHeaderParser {
-    /// Creates a frame-header parser.
-    public FrameHeaderParser() {
+    /// Prevents instantiation of this stateless parser.
+    private FrameHeaderParser() {
     }
 
     /// The AV1 `primary_ref_none` sentinel value.
@@ -64,7 +64,11 @@ public final class FrameHeaderParser {
     /// @param strictStdCompliance whether strict standards compliance should be enforced
     /// @return the parsed frame header
     /// @throws IOException if the OBU is truncated, unreadable, or invalid
-    public FrameHeader parse(ObuPacket obu, SequenceHeader sequenceHeader, boolean strictStdCompliance) throws IOException {
+    public static FrameHeader parse(
+            ObuPacket obu,
+            SequenceHeader sequenceHeader,
+            boolean strictStdCompliance
+    ) throws IOException {
         return parse(obu, sequenceHeader, strictStdCompliance, new FrameHeader[TOTAL_REFERENCE_FRAMES]);
     }
 
@@ -76,7 +80,7 @@ public final class FrameHeaderParser {
     /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
     /// @return the parsed frame header
     /// @throws IOException if the OBU is truncated, unreadable, or invalid
-    public FrameHeader parse(
+    public static FrameHeader parse(
             ObuPacket obu,
             SequenceHeader sequenceHeader,
             boolean strictStdCompliance,
@@ -127,7 +131,7 @@ public final class FrameHeaderParser {
     /// @param strictStdCompliance whether strict standards compliance should be enforced
     /// @return the parsed frame header
     /// @throws IOException if the payload is truncated, unreadable, or invalid
-    public FrameHeader parseFramePayload(
+    public static FrameHeader parseFramePayload(
             BitReader reader,
             ObuPacket obu,
             SequenceHeader sequenceHeader,
@@ -145,7 +149,7 @@ public final class FrameHeaderParser {
     /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
     /// @return the parsed frame header
     /// @throws IOException if the payload is truncated, unreadable, or invalid
-    public FrameHeader parseFramePayload(
+    public static FrameHeader parseFramePayload(
             BitReader reader,
             ObuPacket obu,
             SequenceHeader sequenceHeader,
@@ -196,7 +200,7 @@ public final class FrameHeaderParser {
     /// @param strictStdCompliance whether strict standards compliance should be enforced
     /// @return the parsed frame header
     /// @throws IOException if the payload is truncated or invalid
-    private FrameHeader parse(
+    private static FrameHeader parse(
             BitReader reader,
             ObuPacket obu,
             SequenceHeader sequenceHeader,
@@ -2033,24 +2037,19 @@ public final class FrameHeaderParser {
     }
 
     /// Parsed skip-mode availability and enabled state.
+    ///
+    /// @param allowed whether skip mode is permitted for the frame
+    /// @param enabled whether skip mode is enabled for the frame
+    /// @param referenceIndices the two skip-mode reference positions, or `-1` when unavailable
     @NotNullByDefault
-    private static final class SkipModeResult {
-        /// Whether skip mode is permitted for the frame.
-        private final boolean allowed;
-        /// Whether skip mode is enabled for the frame.
-        private final boolean enabled;
-        /// The two skip-mode reference positions, or `-1` when unavailable.
-        private final int @Unmodifiable [] referenceIndices;
-
-        /// Creates parsed skip-mode state.
-        ///
-        /// @param allowed whether skip mode is permitted for the frame
-        /// @param enabled whether skip mode is enabled for the frame
-        /// @param referenceIndices the two skip-mode reference positions, or `-1`
-        private SkipModeResult(boolean allowed, boolean enabled, int[] referenceIndices) {
-            this.allowed = allowed;
-            this.enabled = enabled;
-            this.referenceIndices = Arrays.copyOf(referenceIndices, referenceIndices.length);
+    private record SkipModeResult(
+            boolean allowed,
+            boolean enabled,
+            int @Unmodifiable [] referenceIndices
+    ) {
+        /// Creates parsed skip-mode state with an independent reference-index array.
+        private SkipModeResult {
+            referenceIndices = Arrays.copyOf(referenceIndices, referenceIndices.length);
         }
     }
 

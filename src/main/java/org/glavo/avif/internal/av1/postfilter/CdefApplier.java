@@ -22,9 +22,9 @@ import java.util.Objects;
 /// primary filtering reuses the luma direction, stored edge padding participates up to the aligned
 /// CDEF processing boundary, and fully skipped CDEF units are preserved.
 @NotNullByDefault
-public final class CdefApplier {
-    /// Creates a CDEF applier.
-    public CdefApplier() {
+final class CdefApplier {
+    /// Prevents instantiation of this stateless filter.
+    private CdefApplier() {
     }
 
     /// The luma CDEF unit size in samples.
@@ -51,22 +51,13 @@ public final class CdefApplier {
     /// Chroma direction remapping used by AV1 for `YUV422`.
     private static final int @Unmodifiable [] I422_UV_DIRECTIONS = {7, 0, 2, 4, 5, 6, 6, 6};
 
-    /// Applies CDEF to one decoded frame.
-    ///
-    /// @param decodedPlanes the decoded planes after loop filtering
-    /// @param cdef the normalized frame-level CDEF state
-    /// @return the post-CDEF planes
-    public DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader.CdefInfo cdef) {
-        return apply(decodedPlanes, cdef, null);
-    }
-
     /// Applies CDEF to one decoded frame using block-level syntax for CDEF index selection.
     ///
     /// @param decodedPlanes the decoded planes after loop filtering
     /// @param cdef the normalized frame-level CDEF state
     /// @param syntaxDecodeResult the decoded block syntax that carries CDEF indices, or `null`
     /// @return the post-CDEF planes
-    public DecodedSurface apply(
+    static DecodedSurface apply(
             DecodedSurface decodedPlanes,
             FrameHeader.CdefInfo cdef,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
@@ -88,7 +79,7 @@ public final class CdefApplier {
     /// @param cdef the normalized frame-level CDEF state
     /// @param syntaxDecodeResult the decoded block syntax that carries CDEF indices, or `null`
     /// @return the compact prepared CDEF state
-    PreparedApplication prepare(
+    static PreparedApplication prepare(
             DecodedSurface decodedPlanes,
             FrameHeader.CdefInfo cdef,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
@@ -126,7 +117,7 @@ public final class CdefApplier {
     /// @param decodedPlanes the same loop-filtered surface used to prepare the operation
     /// @param preparedApplication the compact prepared CDEF state
     /// @return the post-CDEF planes
-    DecodedSurface applyPrepared(
+    static DecodedSurface applyPrepared(
             DecodedSurface decodedPlanes,
             PreparedApplication preparedApplication
     ) {
@@ -658,36 +649,6 @@ public final class CdefApplier {
         }
     }
 
-    /// Detects the dominant AV1 CDEF direction and variance for one luma 8x8 unit.
-    ///
-    /// @param plane the source plane metadata
-    /// @param startX the inclusive unit start X coordinate
-    /// @param startY the inclusive unit start Y coordinate
-    /// @param processingWidth the CDEF-grid-aligned luma processing width
-    /// @param processingHeight the CDEF-grid-aligned luma processing height
-    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
-    /// @return the dominant direction and its directional variance
-    private static CdefDirection detectDirection(
-            PaddedPlane plane,
-            int startX,
-            int startY,
-            int processingWidth,
-            int processingHeight,
-            int bitDepthShift
-    ) {
-        CdefWorkspace workspace = new CdefWorkspace();
-        detectDirection(
-                plane,
-                startX,
-                startY,
-                processingWidth,
-                processingHeight,
-                bitDepthShift,
-                workspace
-        );
-        return new CdefDirection(workspace.detectedDirection, workspace.detectedVariance);
-    }
-
     /// Detects one luma unit's dominant direction using reusable partial sums.
     ///
     /// @param plane the source plane metadata
@@ -1072,57 +1033,21 @@ public final class CdefApplier {
         }
     }
 
-    /// Luma-derived CDEF direction-estimator result.
-    @NotNullByDefault
-    private static final class CdefDirection {
-        /// The dominant direction index in `0..7`.
-        private final int direction;
-
-        /// The directional variance used for luma primary strength adjustment.
-        private final int variance;
-
-        /// Creates one CDEF direction-estimator result.
-        ///
-        /// @param direction the dominant direction index in `0..7`
-        /// @param variance the directional variance used for luma primary strength adjustment
-        private CdefDirection(int direction, int variance) {
-            this.direction = direction;
-            this.variance = variance;
-        }
-
-        /// Returns the dominant direction index in `0..7`.
-        ///
-        /// @return the dominant direction index in `0..7`
-        private int direction() {
-            return direction;
-        }
-
-        /// Returns the directional variance used for luma primary strength adjustment.
-        ///
-        /// @return the directional variance used for luma primary strength adjustment
-        private int variance() {
-            return variance;
-        }
-    }
-
     /// Row-major decoded CDEF syntax state for luma CDEF units.
+    ///
+    /// The caller must relinquish both arrays after construction.
+    ///
+    /// @param cdefIndices the exclusively owned CDEF index array for each luma CDEF unit
+    /// @param nonSkipUnits the exclusively owned non-skip array for each luma CDEF unit
     @NotNullByDefault
-    private static final class CdefUnitMap {
-        /// The decoded CDEF index for each luma CDEF unit.
-        private final int @Unmodifiable [] cdefIndices;
-
-        /// Whether each luma CDEF unit contains at least one non-skipped block.
-        private final boolean @Unmodifiable [] nonSkipUnits;
-
+    private record CdefUnitMap(
+            int @Unmodifiable [] cdefIndices,
+            boolean @Unmodifiable [] nonSkipUnits
+    ) {
         /// Creates one row-major decoded CDEF syntax map.
-        ///
-        /// The caller must relinquish both arrays after construction.
-        ///
-        /// @param cdefIndices the exclusively owned CDEF index array for each luma CDEF unit
-        /// @param nonSkipUnits the exclusively owned non-skip array for each luma CDEF unit
-        private CdefUnitMap(int[] cdefIndices, boolean[] nonSkipUnits) {
-            this.cdefIndices = Objects.requireNonNull(cdefIndices, "cdefIndices");
-            this.nonSkipUnits = Objects.requireNonNull(nonSkipUnits, "nonSkipUnits");
+        private CdefUnitMap {
+            Objects.requireNonNull(cdefIndices, "cdefIndices");
+            Objects.requireNonNull(nonSkipUnits, "nonSkipUnits");
         }
 
         /// Returns the decoded CDEF index for one luma CDEF unit.
@@ -1143,23 +1068,20 @@ public final class CdefApplier {
     }
 
     /// Row-major luma-derived CDEF direction state.
+    ///
+    /// The caller must relinquish both arrays after construction.
+    ///
+    /// @param directions the exclusively owned dominant-direction array for each luma CDEF unit
+    /// @param variances the exclusively owned directional-variance array for each luma CDEF unit
     @NotNullByDefault
-    private static final class CdefDirectionMap {
-        /// The dominant direction for each luma CDEF unit.
-        private final int @Unmodifiable [] directions;
-
-        /// The directional variance for each luma CDEF unit.
-        private final int @Unmodifiable [] variances;
-
+    private record CdefDirectionMap(
+            int @Unmodifiable [] directions,
+            int @Unmodifiable [] variances
+    ) {
         /// Creates one row-major luma-derived CDEF direction map.
-        ///
-        /// The caller must relinquish both arrays after construction.
-        ///
-        /// @param directions the exclusively owned dominant-direction array for each luma CDEF unit
-        /// @param variances the exclusively owned directional-variance array for each luma CDEF unit
-        private CdefDirectionMap(int[] directions, int[] variances) {
-            this.directions = Objects.requireNonNull(directions, "directions");
-            this.variances = Objects.requireNonNull(variances, "variances");
+        private CdefDirectionMap {
+            Objects.requireNonNull(directions, "directions");
+            Objects.requireNonNull(variances, "variances");
         }
 
         /// Returns the dominant direction for one luma CDEF unit.

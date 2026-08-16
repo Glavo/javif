@@ -2166,10 +2166,7 @@ final class Av1DecoderTest {
 
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), tilePayload, 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                tilePayload.length,
                 new TileBitstream[]{new TileBitstream(0, tilePayload, 0, tilePayload.length)}
         );
         return assembly;
@@ -3386,7 +3383,7 @@ final class Av1DecoderTest {
     /// @param chromaFormat the requested public chroma layout
     /// @return the parsed test-only full sequence header that enables `show_existing_frame`
     private static SequenceHeader parseFullSequenceHeader(Av1ChromaFormat chromaFormat) throws IOException {
-        return new SequenceHeaderParser().parse(
+        return SequenceHeaderParser.parse(
                 new ObuPacket(
                         new ObuHeader(ObuType.SEQUENCE_HEADER, false, true, 0, 0),
                         fullSequenceHeaderPayload(chromaFormat),
@@ -3564,7 +3561,7 @@ final class Av1DecoderTest {
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
-        DecodedSurface synthesizedPlanes = new FilmGrainSynthesizer().apply(
+        DecodedSurface synthesizedPlanes = FilmGrainSynthesizer.apply(
                 referenceSurfaceSnapshot.decodedPlanes(),
                 referenceSurfaceSnapshot.frameHeader(),
                 referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()

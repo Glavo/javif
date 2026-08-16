@@ -21,8 +21,8 @@ import java.util.Objects;
 /// Parser for AV1 sequence header OBUs.
 @NotNullByDefault
 public final class SequenceHeaderParser {
-    /// Creates a sequence-header parser.
-    public SequenceHeaderParser() {
+    /// Prevents instantiation of this stateless parser.
+    private SequenceHeaderParser() {
     }
 
     /// The AV1 `BT.709` color primaries code.
@@ -46,7 +46,7 @@ public final class SequenceHeaderParser {
     /// @param strictStdCompliance whether strict standards compliance should be enforced
     /// @return the parsed sequence header
     /// @throws IOException if the OBU is truncated, unreadable, or invalid
-    public SequenceHeader parse(ObuPacket obu, boolean strictStdCompliance) throws IOException {
+    public static SequenceHeader parse(ObuPacket obu, boolean strictStdCompliance) throws IOException {
         Objects.requireNonNull(obu, "obu");
         if (obu.header().type() != ObuType.SEQUENCE_HEADER) {
             throw new IllegalArgumentException("OBU type is not a sequence header: " + obu.header().type());
@@ -89,7 +89,7 @@ public final class SequenceHeaderParser {
     /// @param strictStdCompliance whether strict standards compliance should be enforced
     /// @return the parsed sequence header
     /// @throws IOException if the payload is truncated or invalid
-    private SequenceHeader parse(BitReader reader, boolean strictStdCompliance) throws IOException {
+    private static SequenceHeader parse(BitReader reader, boolean strictStdCompliance) throws IOException {
         int profile = readInt(reader, 3);
         if (profile > 2) {
             fail("Sequence header profile out of range: " + profile);

@@ -69,14 +69,8 @@ public final class TileBlockHeaderReader {
     /// The AV1 LAST3_FRAME index in internal LAST..ALTREF order.
     private static final int LAST3_FRAME = 2;
 
-    /// The AV1 GOLDEN_FRAME index in internal LAST..ALTREF order.
-    private static final int GOLDEN_FRAME = 3;
-
     /// The AV1 BWDREF_FRAME index in internal LAST..ALTREF order.
     private static final int BWDREF_FRAME = 4;
-
-    /// The AV1 ALTREF2_FRAME index in internal LAST..ALTREF order.
-    private static final int ALTREF2_FRAME = 5;
 
     /// The AV1 ALTREF_FRAME index in internal LAST..ALTREF order.
     private static final int ALTREF_FRAME = 6;
@@ -323,7 +317,6 @@ public final class TileBlockHeaderReader {
                         nonNullPosition,
                         nonNullSize,
                         nonNullNeighborContext,
-                        segmentData,
                         skipMode,
                         compoundReference,
                         referenceFrame0,
@@ -967,7 +960,6 @@ public final class TileBlockHeaderReader {
     /// @param position the local tile-relative block origin
     /// @param size the decoded block size
     /// @param neighborContext the mutable neighbor context used for OBMC candidate availability
-    /// @param segmentData the decoded segment feature state
     /// @param skipMode whether skip-mode syntax selected this block
     /// @param compoundReference whether the block uses compound references
     /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
@@ -978,7 +970,6 @@ public final class TileBlockHeaderReader {
             BlockPosition position,
             BlockSize size,
             BlockNeighborContext neighborContext,
-            FrameHeader.SegmentData segmentData,
             boolean skipMode,
             boolean compoundReference,
             int referenceFrame0,

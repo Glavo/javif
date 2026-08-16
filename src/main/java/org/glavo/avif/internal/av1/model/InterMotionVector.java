@@ -7,21 +7,14 @@ import org.jetbrains.annotations.NotNullByDefault;
 import java.util.Objects;
 
 /// One inter motion-vector state that may already be final or still provisional.
+///
+/// @param vector the underlying motion-vector value in eighth-pel units
+/// @param resolved whether the vector is final for the current block
 @NotNullByDefault
-public final class InterMotionVector {
-    /// The underlying motion-vector value in eighth-pel units.
-    private final MotionVector vector;
-
-    /// Whether the vector is final for the current block instead of only a provisional predictor.
-    private final boolean resolved;
-
+public record InterMotionVector(MotionVector vector, boolean resolved) {
     /// Creates one inter motion-vector state.
-    ///
-    /// @param vector the underlying motion-vector value in eighth-pel units
-    /// @param resolved whether the vector is final for the current block
-    public InterMotionVector(MotionVector vector, boolean resolved) {
-        this.vector = Objects.requireNonNull(vector, "vector");
-        this.resolved = resolved;
+    public InterMotionVector {
+        Objects.requireNonNull(vector, "vector");
     }
 
     /// Creates one final inter motion-vector state.
@@ -40,20 +33,6 @@ public final class InterMotionVector {
         return new InterMotionVector(vector, false);
     }
 
-    /// Returns the underlying motion-vector value in eighth-pel units.
-    ///
-    /// @return the underlying motion-vector value in eighth-pel units
-    public MotionVector vector() {
-        return vector;
-    }
-
-    /// Returns whether the vector is final for the current block.
-    ///
-    /// @return whether the vector is final for the current block
-    public boolean resolved() {
-        return resolved;
-    }
-
     /// Returns this motion vector downgraded to a provisional predictor.
     ///
     /// @return this motion vector downgraded to a provisional predictor
@@ -66,25 +45,5 @@ public final class InterMotionVector {
     /// @return this motion vector promoted to a final block vector
     public InterMotionVector asResolved() {
         return resolved ? this : new InterMotionVector(vector, true);
-    }
-
-    /// Returns whether this inter motion-vector state equals the supplied object.
-    ///
-    /// @param obj the object to compare
-    /// @return whether this inter motion-vector state equals the supplied object
-    @Override
-    public boolean equals(Object obj) {
-        if (!(obj instanceof InterMotionVector other)) {
-            return false;
-        }
-        return resolved == other.resolved && vector.equals(other.vector);
-    }
-
-    /// Returns the hash code of this inter motion-vector state.
-    ///
-    /// @return the hash code of this inter motion-vector state
-    @Override
-    public int hashCode() {
-        return vector.hashCode() * 31 + (resolved ? 1 : 0);
     }
 }

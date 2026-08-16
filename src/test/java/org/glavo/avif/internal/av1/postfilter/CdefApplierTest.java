@@ -21,6 +21,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -55,8 +56,8 @@ final class CdefApplierTest {
                     Objects.requireNonNull(lastFrameSyntaxDecodeResult(reader), "lastFrameSyntaxDecodeResult");
             FrameHeader frameHeader = syntaxDecodeResult.assembly().frameHeader();
             DecodedSurface reconstructed = new FrameReconstructor().reconstruct(syntaxDecodeResult);
-            DecodedSurface afterLoopFilter = new LoopFilterApplier().apply(reconstructed, frameHeader, syntaxDecodeResult);
-            DecodedSurface filtered = new CdefApplier().apply(afterLoopFilter, frameHeader.cdef(), syntaxDecodeResult);
+            DecodedSurface afterLoopFilter = LoopFilterApplier.apply(reconstructed, frameHeader, syntaxDecodeResult);
+            DecodedSurface filtered = CdefApplier.apply(afterLoopFilter, frameHeader.cdef(), syntaxDecodeResult);
 
             PaddedPlane lumaPlane = afterLoopFilter.lumaPlane();
             int startX = 560;
@@ -153,8 +154,8 @@ final class CdefApplierTest {
         FrameSyntaxDecodeResult syntaxDecodeResult =
                 PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
 
-        DecodedSurface baselineFiltered = new CdefApplier().apply(baselinePlanes, cdef, syntaxDecodeResult);
-        DecodedSurface paddedFiltered = new CdefApplier().apply(paddedPlanes, cdef, syntaxDecodeResult);
+        DecodedSurface baselineFiltered = CdefApplier.apply(baselinePlanes, cdef, syntaxDecodeResult);
+        DecodedSurface paddedFiltered = CdefApplier.apply(paddedPlanes, cdef, syntaxDecodeResult);
 
         assertEquals(100, baselineFiltered.lumaPlane().sample(6, 4));
         assertTrue(paddedFiltered.lumaPlane().sample(6, 4) > baselineFiltered.lumaPlane().sample(6, 4));
@@ -169,6 +170,10 @@ final class CdefApplierTest {
     /// @return the detected CDEF direction
     private static int detectDirection(PaddedPlane plane, int startX, int startY) {
         try {
+            Class<?> workspaceClass = Class.forName(CdefApplier.class.getName() + "$CdefWorkspace");
+            Constructor<?> workspaceConstructor = workspaceClass.getDeclaredConstructor();
+            workspaceConstructor.setAccessible(true);
+            Object workspace = workspaceConstructor.newInstance();
             Method detectDirection = declaredMethod(
                     "detectDirection",
                     PaddedPlane.class,
@@ -176,21 +181,23 @@ final class CdefApplierTest {
                     int.class,
                     int.class,
                     int.class,
-                    int.class
+                    int.class,
+                    workspaceClass
             );
-            Object direction = detectDirection.invoke(
+            detectDirection.invoke(
                     null,
                     plane,
                     startX,
                     startY,
                     plane.width(),
                     plane.height(),
-                    0
+                    0,
+                    workspace
             );
-            Method directionAccessor = direction.getClass().getDeclaredMethod("direction");
-            directionAccessor.setAccessible(true);
-            return (int) directionAccessor.invoke(direction);
-        } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException exception) {
+            Field detectedDirection = workspaceClass.getDeclaredField("detectedDirection");
+            detectedDirection.setAccessible(true);
+            return detectedDirection.getInt(workspace);
+        } catch (ReflectiveOperationException exception) {
             throw new AssertionError(exception);
         }
     }

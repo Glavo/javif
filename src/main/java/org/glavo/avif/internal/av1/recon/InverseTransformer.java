@@ -2397,7 +2397,7 @@ final class InverseTransformer {
     ///
     /// @param clipRange the temporary clip range
     /// @param action the stage body to execute
-    private void withActiveClipRange(ClipRange clipRange, ClipRangeAction action) {
+    private void withActiveClipRange(ClipRange clipRange, Runnable action) {
         ClipRange previous = activeClipRange;
         activeClipRange = clipRange;
         try {
@@ -2622,10 +2622,4 @@ final class InverseTransformer {
     private record ClipRange(int minimum, int maximum, boolean rejectOutOfRange) {
     }
 
-    /// Functional interface for one clip-range-scoped inverse-transform stage.
-    @FunctionalInterface
-    private interface ClipRangeAction {
-        /// Runs one exact inverse-transform stage.
-        void run();
-    }
 }

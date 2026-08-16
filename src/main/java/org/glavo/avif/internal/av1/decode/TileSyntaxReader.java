@@ -1183,35 +1183,10 @@ public final class TileSyntaxReader {
     }
 
     /// The signed CFL alpha pair decoded for one block.
+    ///
+    /// @param alphaU the signed CFL alpha for chroma U
+    /// @param alphaV the signed CFL alpha for chroma V
     @NotNullByDefault
-    public static final class CflAlpha {
-        /// The signed CFL alpha for chroma U.
-        private final int alphaU;
-
-        /// The signed CFL alpha for chroma V.
-        private final int alphaV;
-
-        /// Creates one signed CFL alpha pair.
-        ///
-        /// @param alphaU the signed CFL alpha for chroma U
-        /// @param alphaV the signed CFL alpha for chroma V
-        public CflAlpha(int alphaU, int alphaV) {
-            this.alphaU = alphaU;
-            this.alphaV = alphaV;
-        }
-
-        /// Returns the signed CFL alpha for chroma U.
-        ///
-        /// @return the signed CFL alpha for chroma U
-        public int alphaU() {
-            return alphaU;
-        }
-
-        /// Returns the signed CFL alpha for chroma V.
-        ///
-        /// @return the signed CFL alpha for chroma V
-        public int alphaV() {
-            return alphaV;
-        }
+    public record CflAlpha(int alphaU, int alphaV) {
     }
 }

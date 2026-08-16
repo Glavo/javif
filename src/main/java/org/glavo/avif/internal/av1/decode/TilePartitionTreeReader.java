@@ -572,51 +572,21 @@ public final class TilePartitionTreeReader {
     }
 
     /// One partition tree leaf that already contains a decoded leaf block header.
+    ///
+    /// @param header the decoded leaf block header
+    /// @param transformLayout the decoded block-level transform layout
+    /// @param residualLayout the decoded block-level residual layout
     @NotNullByDefault
-    public static final class LeafNode implements Node {
-        /// The decoded leaf block header.
-        private final TileBlockHeaderReader.BlockHeader header;
-
-        /// The decoded block-level transform layout.
-        private final TransformLayout transformLayout;
-
-        /// The decoded block-level residual layout.
-        private final ResidualLayout residualLayout;
-
+    public record LeafNode(
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            ResidualLayout residualLayout
+    ) implements Node {
         /// Creates one partition tree leaf.
-        ///
-        /// @param header the decoded leaf block header
-        /// @param transformLayout the decoded block-level transform layout
-        /// @param residualLayout the decoded block-level residual layout
-        public LeafNode(
-                TileBlockHeaderReader.BlockHeader header,
-                TransformLayout transformLayout,
-                ResidualLayout residualLayout
-        ) {
-            this.header = Objects.requireNonNull(header, "header");
-            this.transformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
-            this.residualLayout = Objects.requireNonNull(residualLayout, "residualLayout");
-        }
-
-        /// Returns the decoded leaf block header.
-        ///
-        /// @return the decoded leaf block header
-        public TileBlockHeaderReader.BlockHeader header() {
-            return header;
-        }
-
-        /// Returns the decoded block-level transform layout.
-        ///
-        /// @return the decoded block-level transform layout
-        public TransformLayout transformLayout() {
-            return transformLayout;
-        }
-
-        /// Returns the decoded block-level residual layout.
-        ///
-        /// @return the decoded block-level residual layout
-        public ResidualLayout residualLayout() {
-            return residualLayout;
+        public LeafNode {
+            Objects.requireNonNull(header, "header");
+            Objects.requireNonNull(transformLayout, "transformLayout");
+            Objects.requireNonNull(residualLayout, "residualLayout");
         }
 
         /// Returns the local tile-relative origin of this node.

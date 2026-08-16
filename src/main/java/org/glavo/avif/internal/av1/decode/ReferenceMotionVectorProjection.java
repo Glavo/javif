@@ -146,15 +146,6 @@ final class ReferenceMotionVectorProjection {
         );
     }
 
-    /// Returns whether at least one temporal source was projected at the supplied coordinate.
-    ///
-    /// @param x8 the frame-relative X coordinate in 8x8 units
-    /// @param y8 the frame-relative Y coordinate in 8x8 units
-    /// @return whether the projected field contains a block at the supplied coordinate
-    boolean hasBlock(int x8, int y8) {
-        return blockAt(x8, y8) != null;
-    }
-
     /// Returns whether the current frame enables reference-frame motion vectors.
     ///
     /// @return whether the current frame enables reference-frame motion vectors

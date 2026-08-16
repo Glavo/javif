@@ -257,26 +257,22 @@ final class ChromaDequantizer {
     /// The block-local `qindex` already includes any superblock-level delta-q updates. Plane-local
     /// DC and AC deltas are carried explicitly so U and V can reuse the same logic with different
     /// quantizer adjustments.
+    ///
+    /// @param qIndex the block-local chroma AC quantizer index in `[0, 255]`
+    /// @param dcDelta the plane-local DC delta quantizer
+    /// @param acDelta the plane-local AC delta quantizer
+    /// @param bitDepth the decoded sample bit depth
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrix the chroma quantization matrix index in `[0, 15]`
     @NotNullByDefault
-    static final class Context {
-        /// The block-local chroma AC quantizer index in `[0, 255]`.
-        private final int qIndex;
-
-        /// The plane-local DC delta quantizer.
-        private final int dcDelta;
-
-        /// The plane-local AC delta quantizer.
-        private final int acDelta;
-
-        /// The decoded sample bit depth.
-        private final int bitDepth;
-
-        /// Whether frame-level quantization matrices are enabled.
-        private final boolean useQuantizationMatrices;
-
-        /// The chroma quantization matrix index in `[0, 15]`.
-        private final int quantizationMatrix;
-
+    record Context(
+            int qIndex,
+            int dcDelta,
+            int acDelta,
+            int bitDepth,
+            boolean useQuantizationMatrices,
+            int quantizationMatrix
+    ) {
         /// Creates one chroma dequantization context.
         ///
         /// @param qIndex the block-local chroma AC quantizer index in `[0, 255]`
@@ -295,14 +291,7 @@ final class ChromaDequantizer {
         /// @param bitDepth the decoded sample bit depth
         /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
         /// @param quantizationMatrix the chroma quantization matrix index in `[0, 15]`
-        Context(
-                int qIndex,
-                int dcDelta,
-                int acDelta,
-                int bitDepth,
-                boolean useQuantizationMatrices,
-                int quantizationMatrix
-        ) {
+        Context {
             if (qIndex < 0 || qIndex > 255) {
                 throw new IllegalArgumentException("qIndex out of range: " + qIndex);
             }
@@ -312,54 +301,6 @@ final class ChromaDequantizer {
             if (quantizationMatrix < 0 || quantizationMatrix > 15) {
                 throw new IllegalArgumentException("quantizationMatrix out of range: " + quantizationMatrix);
             }
-            this.qIndex = qIndex;
-            this.dcDelta = dcDelta;
-            this.acDelta = acDelta;
-            this.bitDepth = bitDepth;
-            this.useQuantizationMatrices = useQuantizationMatrices;
-            this.quantizationMatrix = quantizationMatrix;
-        }
-
-        /// Returns the block-local chroma AC quantizer index in `[0, 255]`.
-        ///
-        /// @return the block-local chroma AC quantizer index in `[0, 255]`
-        int qIndex() {
-            return qIndex;
-        }
-
-        /// Returns the plane-local DC delta quantizer.
-        ///
-        /// @return the plane-local DC delta quantizer
-        int dcDelta() {
-            return dcDelta;
-        }
-
-        /// Returns the plane-local AC delta quantizer.
-        ///
-        /// @return the plane-local AC delta quantizer
-        int acDelta() {
-            return acDelta;
-        }
-
-        /// Returns the decoded sample bit depth.
-        ///
-        /// @return the decoded sample bit depth
-        int bitDepth() {
-            return bitDepth;
-        }
-
-        /// Returns whether frame-level quantization matrices are enabled.
-        ///
-        /// @return whether frame-level quantization matrices are enabled
-        boolean useQuantizationMatrices() {
-            return useQuantizationMatrices;
-        }
-
-        /// Returns the chroma quantization matrix index in `[0, 15]`.
-        ///
-        /// @return the chroma quantization matrix index in `[0, 15]`
-        int quantizationMatrix() {
-            return quantizationMatrix;
         }
     }
 }

@@ -5,9 +5,6 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockPosition;
@@ -490,7 +487,7 @@ final class TileBlockHeaderReaderTest {
         assertFalse(expectedSkip);
         assertTrue(intraIfConsumed);
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(new BlockPosition(0, 0), BlockSize.SIZE_16X16, false, 0, -1);
+                zeroGlobalMotionContext(neighborContext, new BlockPosition(0, 0), BlockSize.SIZE_16X16, false, 0, -1);
         InterModeExpectation expectedInterMode =
                 decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
 
@@ -625,10 +622,7 @@ final class TileBlockHeaderReaderTest {
                 0
         );
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
@@ -670,7 +664,14 @@ final class TileBlockHeaderReaderTest {
         oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
         int expectedReferenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(position, BlockSize.SIZE_16X16, false, expectedReferenceFrame0, -1);
+                zeroGlobalMotionContext(
+                        neighborContext,
+                        position,
+                        BlockSize.SIZE_16X16,
+                        false,
+                        expectedReferenceFrame0,
+                        -1
+                );
         InterModeExpectation expectedInterMode =
                 decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
         assertEquals(SingleInterPredictionMode.NEWMV, expectedInterMode.singleInterMode());
@@ -748,7 +749,8 @@ final class TileBlockHeaderReaderTest {
         InterReferenceExpectation expectedReferences =
                 decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(
+                zeroGlobalMotionContext(
+                        neighborContext,
                         position,
                         BlockSize.SIZE_16X16,
                         true,
@@ -2002,6 +2004,36 @@ final class TileBlockHeaderReaderTest {
         return Math.max(min, Math.min(max, value));
     }
 
+    /// Builds a provisional inter-mode context with zero translation-only global motion.
+    ///
+    /// @param context the neighbor context under test
+    /// @param position the current block position
+    /// @param size the current block size
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @return the provisional inter-mode context
+    private static BlockNeighborContext.ProvisionalInterModeContext zeroGlobalMotionContext(
+            BlockNeighborContext context,
+            BlockPosition position,
+            BlockSize size,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
+        return context.provisionalInterModeContext(
+                position,
+                size,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                MotionVector.zero(),
+                MotionVector.zero(),
+                FrameHeader.GlobalMotionType.TRANSLATION,
+                FrameHeader.GlobalMotionType.TRANSLATION
+        );
+    }
+
     /// Creates a simple tile context used by block-header tests.
     ///
     /// @param frameType the synthetic frame type
@@ -2346,10 +2378,7 @@ final class TileBlockHeaderReaderTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return TileDecodeContext.create(assembly, 0);

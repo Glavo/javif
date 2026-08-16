@@ -246,23 +246,20 @@ final class LumaDequantizer {
     ///
     /// The block-local `qindex` already includes any superblock-level delta-q updates. The luma DC
     /// delta remains frame-level state. Bit depth must be `8`, `10`, or `12`.
+    ///
+    /// @param qIndex the block-local luma AC quantizer index in `[0, 255]`
+    /// @param yDcDelta the frame-level luma DC delta quantizer
+    /// @param bitDepth the decoded sample bit depth
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrix the luma quantization matrix index in `[0, 15]`
     @NotNullByDefault
-    static final class Context {
-        /// The block-local luma AC quantizer index in `[0, 255]`.
-        private final int qIndex;
-
-        /// The frame-level luma DC delta quantizer.
-        private final int yDcDelta;
-
-        /// The decoded sample bit depth.
-        private final int bitDepth;
-
-        /// Whether frame-level quantization matrices are enabled.
-        private final boolean useQuantizationMatrices;
-
-        /// The luma quantization matrix index in `[0, 15]`.
-        private final int quantizationMatrix;
-
+    record Context(
+            int qIndex,
+            int yDcDelta,
+            int bitDepth,
+            boolean useQuantizationMatrices,
+            int quantizationMatrix
+    ) {
         /// Creates one luma dequantization context.
         ///
         /// @param qIndex the block-local luma AC quantizer index in `[0, 255]`
@@ -279,13 +276,7 @@ final class LumaDequantizer {
         /// @param bitDepth the decoded sample bit depth
         /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
         /// @param quantizationMatrix the luma quantization matrix index in `[0, 15]`
-        Context(
-                int qIndex,
-                int yDcDelta,
-                int bitDepth,
-                boolean useQuantizationMatrices,
-                int quantizationMatrix
-        ) {
+        Context {
             if (qIndex < 0 || qIndex > 255) {
                 throw new IllegalArgumentException("qIndex out of range: " + qIndex);
             }
@@ -295,46 +286,6 @@ final class LumaDequantizer {
             if (quantizationMatrix < 0 || quantizationMatrix > 15) {
                 throw new IllegalArgumentException("quantizationMatrix out of range: " + quantizationMatrix);
             }
-            this.qIndex = qIndex;
-            this.yDcDelta = yDcDelta;
-            this.bitDepth = bitDepth;
-            this.useQuantizationMatrices = useQuantizationMatrices;
-            this.quantizationMatrix = quantizationMatrix;
-        }
-
-        /// Returns the block-local luma AC quantizer index in `[0, 255]`.
-        ///
-        /// @return the block-local luma AC quantizer index in `[0, 255]`
-        int qIndex() {
-            return qIndex;
-        }
-
-        /// Returns the frame-level luma DC delta quantizer.
-        ///
-        /// @return the frame-level luma DC delta quantizer
-        int yDcDelta() {
-            return yDcDelta;
-        }
-
-        /// Returns the decoded sample bit depth.
-        ///
-        /// @return the decoded sample bit depth
-        int bitDepth() {
-            return bitDepth;
-        }
-
-        /// Returns whether frame-level quantization matrices are enabled.
-        ///
-        /// @return whether frame-level quantization matrices are enabled
-        boolean useQuantizationMatrices() {
-            return useQuantizationMatrices;
-        }
-
-        /// Returns the luma quantization matrix index in `[0, 15]`.
-        ///
-        /// @return the luma quantization matrix index in `[0, 15]`
-        int quantizationMatrix() {
-            return quantizationMatrix;
         }
     }
 }

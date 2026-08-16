@@ -29,7 +29,7 @@ final class SequenceHeaderParserTest {
     /// @throws IOException if the test payload cannot be parsed
     @Test
     void parsesReducedStillPictureHeader() throws IOException {
-        SequenceHeader header = new SequenceHeaderParser().parse(sequenceHeaderObu(reducedStillPicturePayload()), false);
+        SequenceHeader header = SequenceHeaderParser.parse(sequenceHeaderObu(reducedStillPicturePayload()), false);
 
         assertEquals(0, header.profile());
         assertTrue(header.stillPicture());
@@ -70,7 +70,7 @@ final class SequenceHeaderParserTest {
     /// @throws IOException if the test payload cannot be parsed
     @Test
     void parsesFullSequenceHeader() throws IOException {
-        SequenceHeader header = new SequenceHeaderParser().parse(sequenceHeaderObu(fullSequenceHeaderPayload()), true);
+        SequenceHeader header = SequenceHeaderParser.parse(sequenceHeaderObu(fullSequenceHeaderPayload()), true);
 
         assertEquals(2, header.profile());
         assertFalse(header.stillPicture());
@@ -151,7 +151,7 @@ final class SequenceHeaderParserTest {
     @Test
     void strictModeRejectsIdentityMatrixWithSubsampledChroma() {
         assertThrows(Av1DecodeException.class, () ->
-                new SequenceHeaderParser().parse(sequenceHeaderObu(invalidStrictIdentityPayload()), true)
+                SequenceHeaderParser.parse(sequenceHeaderObu(invalidStrictIdentityPayload()), true)
         );
     }
 

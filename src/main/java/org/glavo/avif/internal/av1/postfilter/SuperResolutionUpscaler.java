@@ -113,8 +113,8 @@ final class SuperResolutionUpscaler {
             {0, 0, -1, 2, 128, -1, 0, 0}
     };
 
-    /// Creates one stateless super-resolution stage.
-    SuperResolutionUpscaler() {
+    /// Prevents instantiation of this stateless upscaler.
+    private SuperResolutionUpscaler() {
     }
 
     /// Applies super-resolution when enabled by the supplied frame header.
@@ -125,7 +125,7 @@ final class SuperResolutionUpscaler {
     /// @param decodedPlanes the decoded planes after CDEF in the coded-width domain
     /// @param frameHeader the frame header that owns the decoded planes
     /// @return the input planes or a new post-super-resolution snapshot
-    DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader frameHeader) {
+    static DecodedSurface apply(DecodedSurface decodedPlanes, FrameHeader frameHeader) {
         DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         if (!checkedFrameHeader.superResolution().enabled()) {

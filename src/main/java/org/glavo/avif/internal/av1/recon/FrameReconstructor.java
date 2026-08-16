@@ -52,9 +52,6 @@ public final class FrameReconstructor {
     /// The AV1 fixed-filter normalization shift.
     private static final int INTER_FILTER_BITS = 6;
 
-    /// The AV1 fixed-filter normalization factor.
-    private static final int INTER_FILTER_SCALE = 1 << INTER_FILTER_BITS;
-
     /// The supported AV1 fractional phases for fixed interpolation filters.
     private static final int INTER_FILTER_PHASES = 16;
 
@@ -907,44 +904,6 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Recursively reconstructs one partition-tree node.
-    ///
-    /// @param node the partition-tree node to reconstruct
-    /// @param lumaPlane the mutable luma plane
-    /// @param chromaUPlane the mutable chroma U plane, or `null`
-    /// @param chromaVPlane the mutable chroma V plane, or `null`
-    /// @param chromaFormat the active decoded chroma layout
-    /// @param frameHeader the frame header that owns the block
-    /// @param orderHintBits the number of order-hint bits declared by the sequence
-    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
-    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
-    private void reconstructNode(
-            TilePartitionTreeReader.Node node,
-            MutablePlaneBuffer lumaPlane,
-            @Nullable MutablePlaneBuffer chromaUPlane,
-            @Nullable MutablePlaneBuffer chromaVPlane,
-            Av1ChromaFormat chromaFormat,
-            FrameHeader frameHeader,
-            int orderHintBits,
-            boolean intraEdgeFilterEnabled,
-            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
-    ) {
-        reconstructNode(
-                node,
-                lumaPlane,
-                chromaUPlane,
-                chromaVPlane,
-                chromaFormat,
-                frameHeader,
-                orderHintBits,
-                intraEdgeFilterEnabled,
-                referenceSurfaceSnapshots,
-                DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height()),
-                fullFrameSampleBounds(chromaFormat, lumaPlane.width(), lumaPlane.height()),
-                false
-        );
-    }
-
     /// Recursively reconstructs one partition-tree node using the supplied decoded-block map.
     ///
     /// @param node the partition-tree node to reconstruct
@@ -1048,8 +1007,6 @@ public final class FrameReconstructor {
 
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
-        int visibleLumaWidth = transformLayout.visibleWidthPixels();
-        int visibleLumaHeight = transformLayout.visibleHeightPixels();
         boolean lumaResidualsApplied = false;
 
         if (header.useIntrabc()) {
@@ -2894,7 +2851,6 @@ public final class FrameReconstructor {
         );
         WarpedMotion.Sample[] samples = new WarpedMotion.Sample[WarpedMotion.SAMPLE_CAPACITY];
         int sampleCount = collectLocalWarpSamples(
-                header,
                 decodedBlockMap,
                 blockX4,
                 blockY4,
@@ -3049,7 +3005,6 @@ public final class FrameReconstructor {
 
     /// Converts top and left projectable masks into affine motion samples.
     ///
-    /// @param currentHeader the current block header
     /// @param decodedBlockMap the decoded leaf map
     /// @param blockX4 the current block X origin
     /// @param blockY4 the current block Y origin
@@ -3058,7 +3013,6 @@ public final class FrameReconstructor {
     /// @param samples the destination sample array
     /// @return the populated sample count
     private int collectLocalWarpSamples(
-            TileBlockHeaderReader.BlockHeader currentHeader,
             DecodedBlockMap decodedBlockMap,
             int blockX4,
             int blockY4,

@@ -17,24 +17,8 @@ import java.util.Objects;
 /// that ordering regardless of whether a particular stage currently changes samples.
 @NotNullByDefault
 public final class FramePostprocessor {
-    /// The current loop-filter applier.
-    private final LoopFilterApplier loopFilterApplier;
-
-    /// The current CDEF applier.
-    private final CdefApplier cdefApplier;
-
-    /// The current super-resolution upscaler.
-    private final SuperResolutionUpscaler superResolutionUpscaler;
-
-    /// The current restoration applier.
-    private final RestorationApplier restorationApplier;
-
-    /// Creates one frame postprocessor.
-    public FramePostprocessor() {
-        this.loopFilterApplier = new LoopFilterApplier();
-        this.cdefApplier = new CdefApplier();
-        this.superResolutionUpscaler = new SuperResolutionUpscaler();
-        this.restorationApplier = new RestorationApplier();
+    /// Prevents instantiation of this stateless pipeline.
+    private FramePostprocessor() {
     }
 
     /// Runs postfiltering on one reconstructed frame.
@@ -42,7 +26,7 @@ public final class FramePostprocessor {
     /// @param decodedPlanes the reconstructed planes to post-process
     /// @param frameHeader the normalized frame header that owns the planes
     /// @return the post-filter, pre-grain decoded planes
-    public DecodedSurface postprocess(DecodedSurface decodedPlanes, FrameHeader frameHeader) {
+    public static DecodedSurface postprocess(DecodedSurface decodedPlanes, FrameHeader frameHeader) {
         return postprocess(decodedPlanes, frameHeader, null);
     }
 
@@ -52,7 +36,7 @@ public final class FramePostprocessor {
     /// @param frameHeader the normalized frame header that owns the planes
     /// @param syntaxDecodeResult the decoded frame syntax that carries block-level postfilter state, or `null`
     /// @return the post-filter, pre-grain decoded planes
-    public DecodedSurface postprocess(
+    public static DecodedSurface postprocess(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
@@ -70,19 +54,19 @@ public final class FramePostprocessor {
     /// @param frameHeader the normalized frame header that owns the planes
     /// @param syntaxDecodeResult the decoded frame syntax that carries block-level postfilter state, or `null`
     /// @return the prepared postfilter operation
-    public PreparedFrame prepare(
+    public static PreparedFrame prepare(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
         DecodedSurface checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
-        LoopFilterApplier.PreparedApplication preparedLoopFilter = loopFilterApplier.prepare(
+        LoopFilterApplier.PreparedApplication preparedLoopFilter = LoopFilterApplier.prepare(
                 checkedDecodedPlanes,
                 checkedFrameHeader,
                 syntaxDecodeResult
         );
-        CdefApplier.PreparedApplication preparedCdef = cdefApplier.prepare(
+        CdefApplier.PreparedApplication preparedCdef = CdefApplier.prepare(
                 checkedDecodedPlanes,
                 checkedFrameHeader.cdef(),
                 syntaxDecodeResult
@@ -110,23 +94,23 @@ public final class FramePostprocessor {
     ///
     /// @param preparedFrame the syntax-independent prepared postfilter operation
     /// @return the post-filter, pre-grain decoded planes
-    public DecodedSurface finish(PreparedFrame preparedFrame) {
+    public static DecodedSurface finish(PreparedFrame preparedFrame) {
         PreparedFrame prepared = Objects.requireNonNull(preparedFrame, "preparedFrame");
-        DecodedSurface afterLoopFilter = loopFilterApplier.applyPrepared(
+        DecodedSurface afterLoopFilter = LoopFilterApplier.applyPrepared(
                 prepared.reconstructedPlanes,
                 prepared.preparedLoopFilter
         );
         FrameHeader checkedFrameHeader = prepared.frameHeader;
-        DecodedSurface afterCdef = cdefApplier.applyPrepared(afterLoopFilter, prepared.preparedCdef);
-        DecodedSurface afterSuperResolution = superResolutionUpscaler.apply(afterCdef, checkedFrameHeader);
+        DecodedSurface afterCdef = CdefApplier.applyPrepared(afterLoopFilter, prepared.preparedCdef);
+        DecodedSurface afterSuperResolution = SuperResolutionUpscaler.apply(afterCdef, checkedFrameHeader);
         DecodedSurface restorationBoundary = afterSuperResolution;
         if (RestorationApplier.hasActiveRestoration(
                 checkedFrameHeader.restoration(),
                 afterLoopFilter.hasChroma()
         ) && afterLoopFilter != afterCdef) {
-            restorationBoundary = superResolutionUpscaler.apply(afterLoopFilter, checkedFrameHeader);
+            restorationBoundary = SuperResolutionUpscaler.apply(afterLoopFilter, checkedFrameHeader);
         }
-        return restorationApplier.applyPrepared(
+        return RestorationApplier.applyPrepared(
                 afterSuperResolution,
                 restorationBoundary,
                 checkedFrameHeader.restoration(),

@@ -24,8 +24,8 @@ public final class TileListParser {
     /// The maximum tile-list entry count permitted by the AV1 specification.
     private static final int MAX_TILE_LIST_ENTRIES = 512;
 
-    /// Creates a tile-list parser.
-    public TileListParser() {
+    /// Prevents instantiation of this stateless parser.
+    private TileListParser() {
     }
 
     /// Parses one tile-list OBU.
@@ -36,7 +36,7 @@ public final class TileListParser {
     /// @param strictStdCompliance whether Large Scale Tile conformance constraints must be enforced
     /// @return the parsed tile list
     /// @throws Av1DecodeException if the payload or an entry violates tile-list syntax
-    public TileList parse(
+    public static TileList parse(
             ObuPacket obu,
             SequenceHeader sequenceHeader,
             FrameHeader cameraFrameHeader,
@@ -112,7 +112,7 @@ public final class TileListParser {
     /// @param cameraFrameHeader the common camera frame header
     /// @param strictStdCompliance whether conformance constraints must be enforced
     /// @throws Av1DecodeException if strict validation finds a nonconformant value
-    public void validateCameraFrame(
+    public static void validateCameraFrame(
             ObuPacket obu,
             SequenceHeader sequenceHeader,
             FrameHeader cameraFrameHeader,

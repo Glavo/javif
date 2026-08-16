@@ -188,46 +188,6 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         return new PaddedPlane(width, height, width, samples);
     }
 
-    /// Converts the top-left crop of this mutable buffer into one immutable decoded-plane snapshot.
-    ///
-    /// @param croppedWidth the cropped plane width in samples
-    /// @param croppedHeight the cropped plane height in samples
-    /// @return one immutable decoded-plane snapshot containing the requested top-left crop and
-    ///         retaining internal right and bottom padding
-    /// @throws IllegalStateException if this buffer retains only a plane subregion
-    PaddedPlane toDecodedPlane(int croppedWidth, int croppedHeight) {
-        requireCompletePlaneStorage();
-        if (croppedWidth <= 0 || croppedWidth > width) {
-            throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
-        }
-        if (croppedHeight <= 0 || croppedHeight > height) {
-            throw new IllegalArgumentException("croppedHeight out of range: " + croppedHeight);
-        }
-        if (croppedWidth == width && croppedHeight == height) {
-            return toDecodedPlane();
-        }
-        return new PaddedPlane(croppedWidth, croppedHeight, width, samples);
-    }
-
-    /// Transfers this buffer's sample storage into one immutable decoded plane.
-    ///
-    /// The caller must permanently discard this mutable buffer after the transfer.
-    ///
-    /// @param croppedWidth the visible plane width in samples
-    /// @param croppedHeight the visible plane height in samples
-    /// @return one immutable plane that owns this buffer's sample storage
-    /// @throws IllegalStateException if this buffer retains only a plane subregion
-    PaddedPlane takeDecodedPlane(int croppedWidth, int croppedHeight) {
-        requireCompletePlaneStorage();
-        if (croppedWidth <= 0 || croppedWidth > width) {
-            throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
-        }
-        if (croppedHeight <= 0 || croppedHeight > height) {
-            throw new IllegalArgumentException("croppedHeight out of range: " + croppedHeight);
-        }
-        return PaddedPlane.fromOwnedSamples(croppedWidth, croppedHeight, width, samples);
-    }
-
     /// Transfers the retained storage region into one immutable coordinate-local decoded plane.
     ///
     /// The caller must permanently discard this mutable buffer after the transfer. The requested

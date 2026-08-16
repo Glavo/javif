@@ -52,40 +52,19 @@ public final class Leb128 {
     }
 
     /// Decoded unsigned LEB128 value and encoded byte count.
+    ///
+    /// @param value the decoded unsigned value
+    /// @param byteCount the number of bytes consumed from the source
     @NotNullByDefault
-    public static final class ReadResult {
-        /// The decoded unsigned value.
-        private final long value;
-        /// The number of bytes consumed from the source.
-        private final int byteCount;
-
+    public record ReadResult(long value, int byteCount) {
         /// Creates a decoded unsigned LEB128 result.
-        ///
-        /// @param value the decoded unsigned value
-        /// @param byteCount the number of bytes consumed
-        public ReadResult(long value, int byteCount) {
+        public ReadResult {
             if (value < 0) {
                 throw new IllegalArgumentException("value < 0: " + value);
             }
             if (byteCount <= 0) {
                 throw new IllegalArgumentException("byteCount <= 0: " + byteCount);
             }
-            this.value = value;
-            this.byteCount = byteCount;
-        }
-
-        /// Returns the decoded unsigned value.
-        ///
-        /// @return the decoded unsigned value
-        public long value() {
-            return value;
-        }
-
-        /// Returns the number of bytes consumed from the source.
-        ///
-        /// @return the number of bytes consumed
-        public int byteCount() {
-            return byteCount;
         }
     }
 }

@@ -5,9 +5,6 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.bitstream.ObuHeader;
-import org.glavo.avif.internal.av1.bitstream.ObuPacket;
-import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundPredictionType;
@@ -316,7 +313,7 @@ final class BlockNeighborContextTest {
 
         BlockPosition position = new BlockPosition(4, 4);
         BlockNeighborContext.ProvisionalInterModeContext singleContext =
-                context.provisionalInterModeContext(position, BlockSize.SIZE_16X16, false, 0, -1);
+                zeroGlobalMotionContext(context, position, BlockSize.SIZE_16X16, false, 0, -1);
         assertEquals(5, singleContext.singleNewMvContext());
         assertEquals(0, singleContext.singleGlobalMvContext());
         assertEquals(5, singleContext.singleReferenceMvContext());
@@ -333,7 +330,7 @@ final class BlockNeighborContextTest {
         assertEquals(0, singleContext.drlContext(0));
 
         BlockNeighborContext.ProvisionalInterModeContext compoundContext =
-                context.provisionalInterModeContext(position, BlockSize.SIZE_16X16, true, 0, 4);
+                zeroGlobalMotionContext(context, position, BlockSize.SIZE_16X16, true, 0, 4);
         assertEquals(3, compoundContext.singleNewMvContext());
         assertEquals(0, compoundContext.singleGlobalMvContext());
         assertEquals(3, compoundContext.singleReferenceMvContext());
@@ -422,7 +419,8 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(
+                zeroGlobalMotionContext(
+                        context,
                         new BlockPosition(4, 4),
                         BlockSize.SIZE_8X8,
                         false,
@@ -471,7 +469,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext singleContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
 
         assertEquals(4, singleContext.singleNewMvContext());
         assertEquals(5, singleContext.singleReferenceMvContext());
@@ -512,7 +510,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
 
         assertEquals(4, provisionalContext.singleNewMvContext());
         assertEquals(5, provisionalContext.singleReferenceMvContext());
@@ -560,7 +558,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
 
         assertEquals(1, provisionalContext.singleNewMvContext());
         assertEquals(2, provisionalContext.singleReferenceMvContext());
@@ -601,7 +599,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
 
         assertEquals(2, provisionalContext.singleNewMvContext());
         assertEquals(3, provisionalContext.singleReferenceMvContext());
@@ -627,7 +625,8 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(
+                zeroGlobalMotionContext(
+                        context,
                         new BlockPosition(14, 14),
                         BlockSize.SIZE_8X8,
                         false,
@@ -673,7 +672,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
 
         assertEquals(1, provisionalContext.singleNewMvContext());
         assertEquals(1, provisionalContext.singleReferenceMvContext());
@@ -721,7 +720,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
 
         assertEquals(1, provisionalContext.singleNewMvContext());
         assertEquals(2, provisionalContext.singleReferenceMvContext());
@@ -749,7 +748,7 @@ final class BlockNeighborContextTest {
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_8X8, true, 0, 4);
+                zeroGlobalMotionContext(context, new BlockPosition(4, 4), BlockSize.SIZE_8X8, true, 0, 4);
 
         assertEquals(0, provisionalContext.singleNewMvContext());
         assertEquals(0, provisionalContext.singleReferenceMvContext());
@@ -1017,6 +1016,36 @@ final class BlockNeighborContextTest {
         );
     }
 
+    /// Builds a provisional inter-mode context with zero translation-only global motion.
+    ///
+    /// @param context the neighbor context under test
+    /// @param position the current block position
+    /// @param size the current block size
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @return the provisional inter-mode context
+    private static BlockNeighborContext.ProvisionalInterModeContext zeroGlobalMotionContext(
+            BlockNeighborContext context,
+            BlockPosition position,
+            BlockSize size,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
+        return context.provisionalInterModeContext(
+                position,
+                size,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                MotionVector.zero(),
+                MotionVector.zero(),
+                FrameHeader.GlobalMotionType.TRANSLATION,
+                FrameHeader.GlobalMotionType.TRANSLATION
+        );
+    }
+
     /// Creates a simple tile context used by neighbor-context tests.
     ///
     /// @param frameType the synthetic frame type
@@ -1158,10 +1187,7 @@ final class BlockNeighborContextTest {
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
                 new TileBitstream[]{new TileBitstream(0, new byte[]{0x00}, 0, 1)}
         );
         return TileDecodeContext.create(assembly, 0);
