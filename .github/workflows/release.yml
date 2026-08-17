@@ -89,18 +89,6 @@ jobs:
           publishToSonatype closeAndReleaseStagingRepositories
           --info --no-daemon --stacktrace
 
-      - name: Create checksums
-        env:
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-        shell: bash
-        run: |
-          cd build/libs
-          sha256sum \
-            "avif-$RELEASE_VERSION.jar" \
-            "avif-$RELEASE_VERSION-sources.jar" \
-            "avif-$RELEASE_VERSION-javadoc.jar" \
-            > "avif-$RELEASE_VERSION-checksums.txt"
-
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,9 +100,6 @@ jobs:
             release_flags+=(--prerelease --latest=false)
           fi
           gh release create "$GITHUB_REF_NAME" \
-            "build/libs/avif-$RELEASE_VERSION.jar#Library JAR" \
-            "build/libs/avif-$RELEASE_VERSION-sources.jar#Sources JAR" \
-            "build/libs/avif-$RELEASE_VERSION-javadoc.jar#Javadoc JAR" \
-            "build/libs/avif-$RELEASE_VERSION-checksums.txt#SHA-256 checksums" \
+            "build/libs/avif-$RELEASE_VERSION.jar#javif Image Viewer" \
             "${release_flags[@]}" \
             --title "javif $RELEASE_VERSION"
