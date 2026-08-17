@@ -535,21 +535,23 @@ final class LoopFilterApplier {
             boolean highEdgeVariance,
             int[] edgeSamples
     ) {
-        int offset = 0x80 << (plane.bitDepth() - 8);
+        int bitDepth = plane.bitDepth();
+        int signedLimit = 1 << (bitDepth - 1);
+        int offset = 0x80 << (bitDepth - 8);
         int qs0 = edgeSamples[7] - offset;
         int qs1 = edgeSamples[8] - offset;
         int ps0 = edgeSamples[6] - offset;
         int ps1 = edgeSamples[5] - offset;
-        int filter = highEdgeVariance ? filter4Clamp(ps1 - qs1, plane.bitDepth()) : 0;
-        filter = filter4Clamp(filter + 3 * (qs0 - ps0), plane.bitDepth());
-        int filter1 = filter4Clamp(filter + 4, plane.bitDepth()) >> 3;
-        int filter2 = filter4Clamp(filter + 3, plane.bitDepth()) >> 3;
-        setSampleRelative(plane, x, y, dx, dy, 0, filter4Clamp(qs0 - filter1, plane.bitDepth()) + offset);
-        setSampleRelative(plane, x, y, dx, dy, -1, filter4Clamp(ps0 + filter2, plane.bitDepth()) + offset);
+        int filter = highEdgeVariance ? filter4Clamp(ps1 - qs1, signedLimit) : 0;
+        filter = filter4Clamp(filter + 3 * (qs0 - ps0), signedLimit);
+        int filter1 = filter4Clamp(filter + 4, signedLimit) >> 3;
+        int filter2 = filter4Clamp(filter + 3, signedLimit) >> 3;
+        setSampleRelative(plane, x, y, dx, dy, 0, filter4Clamp(qs0 - filter1, signedLimit) + offset);
+        setSampleRelative(plane, x, y, dx, dy, -1, filter4Clamp(ps0 + filter2, signedLimit) + offset);
         if (!highEdgeVariance) {
             int secondaryFilter = round2(filter1, 1);
-            setSampleRelative(plane, x, y, dx, dy, 1, filter4Clamp(qs1 - secondaryFilter, plane.bitDepth()) + offset);
-            setSampleRelative(plane, x, y, dx, dy, -2, filter4Clamp(ps1 + secondaryFilter, plane.bitDepth()) + offset);
+            setSampleRelative(plane, x, y, dx, dy, 1, filter4Clamp(qs1 - secondaryFilter, signedLimit) + offset);
+            setSampleRelative(plane, x, y, dx, dy, -2, filter4Clamp(ps1 + secondaryFilter, signedLimit) + offset);
         }
     }
 
@@ -842,9 +844,7 @@ final class LoopFilterApplier {
             int lastOffset,
             int[] edgeSamples
     ) {
-        for (int offset = firstOffset; offset <= lastOffset; offset++) {
-            edgeSamples[offset + 7] = plane.sampleClamped(x + dx * offset, y + dy * offset);
-        }
+        plane.loadRelativeSamples(x, y, dx, dy, firstOffset, lastOffset, edgeSamples);
     }
 
     /// Stores one sample at a boundary-relative offset.
@@ -918,11 +918,10 @@ final class LoopFilterApplier {
     /// Clips one signed narrow-filter intermediate to the decoded bit-depth range.
     ///
     /// @param value the input value
-    /// @param bitDepth the decoded bit depth
+    /// @param signedLimit the positive exclusive bound for the signed intermediate
     /// @return the clipped narrow-filter intermediate
-    private static int filter4Clamp(int value, int bitDepth) {
-        int limit = 1 << (bitDepth - 1);
-        return clamp(value, -limit, limit - 1);
+    private static int filter4Clamp(int value, int signedLimit) {
+        return clamp(value, -signedLimit, signedLimit - 1);
     }
 
     /// Mutable plane storage used by loop filtering.
@@ -1068,6 +1067,43 @@ final class LoopFilterApplier {
         /// @return the nearest in-plane sample
         private int sampleClamped(int x, int y) {
             return sample(clamp(x, 0, processingWidth - 1), clamp(y, 0, processingHeight - 1));
+        }
+
+        /// Loads one contiguous boundary-relative sample range into edge-sample storage.
+        ///
+        /// @param x the boundary origin x coordinate
+        /// @param y the boundary origin y coordinate
+        /// @param dx the horizontal offset across the boundary
+        /// @param dy the vertical offset across the boundary
+        /// @param firstOffset the first signed boundary-relative offset
+        /// @param lastOffset the last signed boundary-relative offset
+        /// @param destination destination storage indexed by `offset + 7`
+        private void loadRelativeSamples(
+                int x,
+                int y,
+                int dx,
+                int dy,
+                int firstOffset,
+                int lastOffset,
+                int[] destination
+        ) {
+            int firstX = x + dx * firstOffset;
+            int firstY = y + dy * firstOffset;
+            int lastX = x + dx * lastOffset;
+            int lastY = y + dy * lastOffset;
+            if (contains(firstX, firstY) && contains(lastX, lastY)) {
+                int sampleIndex = firstY * stride + firstX;
+                int sampleStep = dy * stride + dx;
+                for (int offset = firstOffset; offset <= lastOffset; offset++) {
+                    destination[offset + 7] = samples[sampleIndex] & 0xFFFF;
+                    sampleIndex += sampleStep;
+                }
+                return;
+            }
+
+            for (int offset = firstOffset; offset <= lastOffset; offset++) {
+                destination[offset + 7] = sampleClamped(x + dx * offset, y + dy * offset);
+            }
         }
 
         /// Stores one sample after clipping it to this plane bit depth.

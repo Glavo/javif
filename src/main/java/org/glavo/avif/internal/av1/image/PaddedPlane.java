@@ -7,6 +7,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnmodifiableView;
 
 import java.nio.ShortBuffer;
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Immutable snapshot of one decoded image plane.
@@ -171,6 +172,63 @@ public final class PaddedPlane {
             throw new IndexOutOfBoundsException("y out of stored range: " + y);
         }
         return samples.get(y * stride + x) & 0xFFFF;
+    }
+
+    /// Copies one visible row segment with nearest-edge extension into mutable storage.
+    ///
+    /// Source coordinates outside the visible plane are replaced by the nearest visible sample.
+    /// The destination range is validated before any samples are written.
+    ///
+    /// @param startX the horizontal coordinate of the first requested sample
+    /// @param y the vertical coordinate of the requested row
+    /// @param destination the destination sample array
+    /// @param destinationOffset the first destination index
+    /// @param length the non-negative number of samples to copy
+    public void copyExtendedRowTo(
+            int startX,
+            int y,
+            short[] destination,
+            int destinationOffset,
+            int length
+    ) {
+        short[] checkedDestination = Objects.requireNonNull(destination, "destination");
+        Objects.checkFromIndexSize(destinationOffset, length, checkedDestination.length);
+        if (length == 0) {
+            return;
+        }
+
+        int sourceY = Math.max(0, Math.min(y, height - 1));
+        int rowOffset = sourceY * stride;
+        int firstVisibleIndex = (int) Math.min(length, Math.max(0L, -(long) startX));
+        int visibleEndIndex = (int) Math.min(
+                length,
+                Math.max((long) firstVisibleIndex, (long) width - startX)
+        );
+        if (firstVisibleIndex > 0) {
+            Arrays.fill(
+                    checkedDestination,
+                    destinationOffset,
+                    destinationOffset + firstVisibleIndex,
+                    samples.get(rowOffset)
+            );
+        }
+        int visibleLength = visibleEndIndex - firstVisibleIndex;
+        if (visibleLength > 0) {
+            samples.get(
+                    rowOffset + startX + firstVisibleIndex,
+                    checkedDestination,
+                    destinationOffset + firstVisibleIndex,
+                    visibleLength
+            );
+        }
+        if (visibleEndIndex < length) {
+            Arrays.fill(
+                    checkedDestination,
+                    destinationOffset + visibleEndIndex,
+                    destinationOffset + length,
+                    samples.get(rowOffset + width - 1)
+            );
+        }
     }
 
     /// Copies array input into immutable read-only buffer storage.

@@ -63,6 +63,83 @@ final class MutablePlaneBufferTest {
         assertEquals(22, retained.sample(2, 3));
     }
 
+    /// Verifies clipped constant block addition within coordinate-preserving subregion storage.
+    @Test
+    void addsConstantBlockWithinRetainedSubregion() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 10, 8, 4, 2, 4, 3);
+        for (int y = 2; y < 5; y++) {
+            for (int x = 4; x < 8; x++) {
+                plane.setSample(x, y, x == 6 ? 250 : 20);
+            }
+        }
+
+        plane.addConstantBlock(5, 3, 2, 2, 10);
+
+        assertEquals(20, plane.sample(4, 3));
+        assertEquals(30, plane.sample(5, 3));
+        assertEquals(255, plane.sample(6, 3));
+        assertEquals(30, plane.sample(5, 4));
+        assertTrue(plane.hasWrittenSample(6, 4));
+        assertThrows(IndexOutOfBoundsException.class, () -> plane.addConstantBlock(7, 3, 2, 1, 1));
+
+        MutablePlaneBuffer widePlane = new MutablePlaneBuffer(80, 1, 8);
+        widePlane.addConstantBlock(5, 0, 70, 1, 10);
+        assertFalse(widePlane.hasWrittenSample(4, 0));
+        assertTrue(widePlane.hasWrittenSample(5, 0));
+        assertTrue(widePlane.hasWrittenSample(63, 0));
+        assertTrue(widePlane.hasWrittenSample(64, 0));
+        assertTrue(widePlane.hasWrittenSample(74, 0));
+        assertFalse(widePlane.hasWrittenSample(75, 0));
+        assertEquals(10, widePlane.sample(74, 0));
+    }
+
+    /// Verifies constant fills clip at visible edges while retaining compact-storage boundaries.
+    @Test
+    void fillsVisiblePlaneEdgeWithinRetainedSubregion() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 10, 8, 8, 7, 4, 3);
+
+        plane.fillBlock(9, 8, 8, 4, 300);
+
+        assertEquals(255, plane.sample(9, 8));
+        assertEquals(255, plane.sample(11, 9));
+        assertTrue(plane.hasWrittenSample(9, 8));
+        assertTrue(plane.hasWrittenSample(11, 9));
+        assertFalse(plane.hasWrittenSample(8, 8));
+        assertThrows(IndexOutOfBoundsException.class, () -> plane.fillBlock(7, 8, 1, 1, 1));
+        assertThrows(IllegalArgumentException.class, () -> plane.fillBlock(9, 8, 0, 1, 1));
+    }
+
+    /// Verifies edge-extended block copies write compact retained storage and written-state ranges.
+    @Test
+    void copiesExtendedReferenceBlockIntoRetainedSubregion() {
+        PaddedPlane source = new PaddedPlane(3, 2, 3, new short[]{10, 11, 12, 20, 21, 22});
+        MutablePlaneBuffer destination = new MutablePlaneBuffer(12, 10, 8, 4, 2, 4, 3);
+
+        destination.copyExtendedBlockFrom(source, 5, 3, -1, 1, 3, 2);
+
+        assertEquals(20, destination.sample(5, 3));
+        assertEquals(20, destination.sample(6, 3));
+        assertEquals(21, destination.sample(7, 3));
+        assertEquals(20, destination.sample(5, 4));
+        assertEquals(21, destination.sample(7, 4));
+        assertTrue(destination.hasWrittenSample(5, 3));
+        assertTrue(destination.hasWrittenSample(7, 4));
+        assertThrows(
+                IndexOutOfBoundsException.class,
+                () -> destination.copyExtendedBlockFrom(source, 7, 3, 0, 0, 2, 1)
+        );
+
+        MutablePlaneBuffer wideDestination = new MutablePlaneBuffer(80, 2, 8);
+        PaddedPlane wideSource = new PaddedPlane(70, 1, 70, new short[70]);
+        wideDestination.copyExtendedBlockFrom(wideSource, 5, 0, 0, 0, 70, 1);
+        assertFalse(wideDestination.hasWrittenSample(4, 0));
+        assertTrue(wideDestination.hasWrittenSample(5, 0));
+        assertTrue(wideDestination.hasWrittenSample(63, 0));
+        assertTrue(wideDestination.hasWrittenSample(64, 0));
+        assertTrue(wideDestination.hasWrittenSample(74, 0));
+        assertFalse(wideDestination.hasWrittenSample(75, 0));
+    }
+
     /// Verifies written-state tracking and copying across packed-word boundaries.
     @Test
     void tracksWrittenSamplesAcrossPackedWordBoundaries() {
@@ -131,6 +208,23 @@ final class MutablePlaneBufferTest {
         assertEquals(63, overlay.sample(0, 7));
         assertEquals(64, overlay.sample(1, 7));
         assertEquals(10, overlay.sample(2, 7));
+    }
+
+    /// Verifies overlay fills clip to the containing plane and isolate their packed write ranges.
+    @Test
+    void blockOverlayFillsVisibleEdgeWithoutChangingBasePlane() {
+        MutablePlaneBuffer basePlane = new MutablePlaneBuffer(9, 8, 8);
+        basePlane.fillBlock(0, 0, 9, 8, 10);
+        BlockOverlayPlane overlay = new BlockOverlayPlane(basePlane, 0, 0, 9, 8);
+
+        overlay.fillBlock(1, 6, 20, 4, -3);
+
+        assertEquals(10, overlay.sample(0, 6));
+        assertEquals(0, overlay.sample(1, 6));
+        assertEquals(0, overlay.sample(8, 7));
+        assertEquals(10, basePlane.sample(1, 6));
+        assertThrows(IndexOutOfBoundsException.class, () -> overlay.fillBlock(9, 7, 1, 1, 1));
+        assertThrows(IllegalArgumentException.class, () -> overlay.fillBlock(1, 6, 1, -1, 1));
     }
 
     /// Verifies that recursive filter-intra reads samples already written into a block overlay.

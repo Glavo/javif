@@ -107,6 +107,13 @@ public final class BlockNeighborContext {
     /// The stored decoded block map indexed in tile-relative 4x4 units.
     private final StoredBlock[] storedBlocks;
 
+    /// Reusable candidate workspace whose active prefix is copied into each returned context.
+    private final ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] provisionalCandidateScratch =
+            new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[PROVISIONAL_CANDIDATE_CAPACITY];
+
+    /// Reusable reference-count workspace for the immediately reduced syntax contexts.
+    private final int[] referenceCountScratch = new int[4];
+
     /// The above-edge intra flags indexed in 4x4 units.
     private final byte[] aboveIntra;
 
@@ -909,7 +916,7 @@ public final class BlockNeighborContext {
     /// @return the single-reference primary context for the supplied block position
     public int singleReferenceContext(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[2];
+        int[] count = resetReferenceCountScratch();
         accumulateForwardBackwardCounts(count, false, nonNullPosition);
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
@@ -920,7 +927,7 @@ public final class BlockNeighborContext {
     /// @return the forward-reference context for the supplied block position
     public int forwardReferenceContext(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[4];
+        int[] count = resetReferenceCountScratch();
         accumulateReferenceCounts(count, nonNullPosition, 0, 4);
         count[0] += count[1];
         count[2] += count[3];
@@ -933,7 +940,7 @@ public final class BlockNeighborContext {
     /// @return the LAST-vs-LAST2 reference context for the supplied block position
     public int forwardReference1Context(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[2];
+        int[] count = resetReferenceCountScratch();
         accumulateReferenceCounts(count, nonNullPosition, 0, 2);
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
@@ -944,7 +951,7 @@ public final class BlockNeighborContext {
     /// @return the LAST3-vs-GOLDEN reference context for the supplied block position
     public int forwardReference2Context(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[2];
+        int[] count = resetReferenceCountScratch();
         accumulateReferenceCounts(count, nonNullPosition, 2, 2);
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
@@ -955,7 +962,7 @@ public final class BlockNeighborContext {
     /// @return the backward-reference primary context for the supplied block position
     public int backwardReferenceContext(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[3];
+        int[] count = resetReferenceCountScratch();
         accumulateReferenceCounts(count, nonNullPosition, 4, 3);
         count[1] += count[0];
         return count[2] == count[1] ? 1 : count[1] < count[2] ? 0 : 2;
@@ -967,7 +974,7 @@ public final class BlockNeighborContext {
     /// @return the BWDREF-vs-ALTREF2 reference context for the supplied block position
     public int backwardReference1Context(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[3];
+        int[] count = resetReferenceCountScratch();
         accumulateReferenceCounts(count, nonNullPosition, 4, 3);
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
@@ -978,7 +985,7 @@ public final class BlockNeighborContext {
     /// @return the LAST2/LAST3/GOLDEN unidirectional-reference context for the supplied block position
     public int unidirectionalReference1Context(BlockPosition position) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
-        int[] count = new int[3];
+        int[] count = resetReferenceCountScratch();
         accumulateReferenceCounts(count, nonNullPosition, 1, 3);
         count[1] += count[2];
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
@@ -1018,8 +1025,7 @@ public final class BlockNeighborContext {
                 false,
                 false
         );
-        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
-                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[PROVISIONAL_CANDIDATE_CAPACITY];
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates = provisionalCandidateScratch;
         int candidateCount = 0;
         int maximumRows = 0;
         int scannedRows = -1;
@@ -1083,7 +1089,7 @@ public final class BlockNeighborContext {
 
         int nearestCandidateCount = candidateCount;
         for (int index = 0; index < nearestCandidateCount; index++) {
-            candidates[index] = candidates[index].withWeight(candidates[index].weight() + 640);
+            candidates[index].increaseWeight(640);
         }
 
         if (scannedRows >= 0 && scannedColumns >= 0) {
@@ -1230,8 +1236,7 @@ public final class BlockNeighborContext {
                 nonNullGlobalMotionType0.ordinal() > FrameHeader.GlobalMotionType.TRANSLATION.ordinal(),
                 nonNullGlobalMotionType1.ordinal() > FrameHeader.GlobalMotionType.TRANSLATION.ordinal()
         );
-        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
-                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[PROVISIONAL_CANDIDATE_CAPACITY];
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates = provisionalCandidateScratch;
         int candidateCount = 0;
 
         int maximumRows = 0;
@@ -1305,7 +1310,7 @@ public final class BlockNeighborContext {
 
         int nearestCandidateCount = candidateCount;
         for (int i = 0; i < nearestCandidateCount; i++) {
-            candidates[i] = candidates[i].withWeight(candidates[i].weight() + 640);
+            candidates[i].increaseWeight(640);
         }
 
         TemporalScanResult temporalScan = scanTemporalMotionField(
@@ -1420,26 +1425,30 @@ public final class BlockNeighborContext {
         for (int index = 0; index < candidateCount; index++) {
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate = candidates[index];
             @Nullable InterMotionVector secondaryMotionVector = candidate.motionVector1();
-            candidates[index] = new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
-                    candidate.weight(),
-                    clampReferenceMotionVector(
-                            candidate.motionVector0(),
+            InterMotionVector clampedPrimary = clampReferenceMotionVector(
+                    candidate.motionVector0(),
+                    minimumRow,
+                    maximumRow,
+                    minimumColumn,
+                    maximumColumn
+            );
+            @Nullable InterMotionVector clampedSecondary = secondaryMotionVector == null
+                    ? null
+                    : clampReferenceMotionVector(
+                            secondaryMotionVector,
                             minimumRow,
                             maximumRow,
                             minimumColumn,
                             maximumColumn
-                    ),
-                    secondaryMotionVector == null
-                            ? null
-                            : clampReferenceMotionVector(
-                                    secondaryMotionVector,
-                                    minimumRow,
-                                    maximumRow,
-                                    minimumColumn,
-                                    maximumColumn
-                            ),
-                    candidate.synthetic()
-            );
+                    );
+            if (clampedPrimary != candidate.motionVector0() || clampedSecondary != secondaryMotionVector) {
+                candidates[index] = new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                        candidate.weight(),
+                        clampedPrimary,
+                        clampedSecondary,
+                        candidate.synthetic()
+                );
+            }
         }
         while (candidateCount < 2) {
             candidates[candidateCount++] = new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
@@ -1458,7 +1467,7 @@ public final class BlockNeighborContext {
                 haveNewMotionVectorMatch
         );
 
-        return new ProvisionalInterModeContext(
+        return ProvisionalInterModeContext.fromOwnedCandidates(
                 refMvsContextSummary.singleNewMvContext(),
                 globalMotionContext,
                 refMvsContextSummary.singleReferenceMvContext(),
@@ -3068,6 +3077,14 @@ public final class BlockNeighborContext {
         return (diff & (mask - 1)) - (diff & mask);
     }
 
+    /// Clears and returns the reusable reference-count workspace.
+    ///
+    /// @return the zero-filled four-entry reference-count workspace
+    private int[] resetReferenceCountScratch() {
+        Arrays.fill(referenceCountScratch, 0);
+        return referenceCountScratch;
+    }
+
     /// Accumulates forward-vs-backward reference counts from already-decoded neighbors.
     ///
     /// @param count the two-entry destination array for forward and backward reference counts
@@ -3092,7 +3109,7 @@ public final class BlockNeighborContext {
 
     /// Accumulates reference counts for one contiguous range of reference-frame indices.
     ///
-    /// @param count the destination count array whose length equals the tracked range length
+    /// @param count the destination count array with at least `length` entries
     /// @param position the current block position
     /// @param startReference the inclusive first tracked reference-frame index
     /// @param length the number of tracked reference-frame indices
@@ -3588,7 +3605,7 @@ public final class BlockNeighborContext {
             if (!existing.synthetic()
                     && existing.motionVector0().vector().equals(candidate.motionVector0().vector())
                     && equivalentMotionVector(existing.motionVector1(), candidate.motionVector1())) {
-                destination[i] = existing.withWeight(existing.weight() + 2);
+                existing.increaseWeight(2);
                 return count;
             }
         }
@@ -3699,7 +3716,7 @@ public final class BlockNeighborContext {
             if (!existing.synthetic()
                     && existing.motionVector0().vector().equals(nonNullCandidate.motionVector0().vector())
                     && equivalentMotionVector(existing.motionVector1(), nonNullCandidate.motionVector1())) {
-                destination[i] = existing.withWeight(existing.weight() + nonNullCandidate.weight());
+                existing.increaseWeight(nonNullCandidate.weight());
                 return count;
             }
         }
@@ -3870,6 +3887,63 @@ public final class BlockNeighborContext {
                 int syntaxCandidateCount,
                 ProvisionalMotionVectorCandidate[] candidates
         ) {
+            this(
+                    singleNewMvContext,
+                    singleGlobalMvContext,
+                    singleReferenceMvContext,
+                    compoundInterModeContext,
+                    syntaxCandidateCount,
+                    candidates,
+                    false
+            );
+        }
+
+        /// Creates one provisional context that owns an exact candidate snapshot.
+        ///
+        /// @param singleNewMvContext the zero-based provisional `newmv` context index in `[0, 6)`
+        /// @param singleGlobalMvContext the zero-based temporal `globalmv` context index in `[0, 2)`
+        /// @param singleReferenceMvContext the zero-based provisional `refmv` context index in `[0, 6)`
+        /// @param compoundInterModeContext the zero-based provisional compound inter-mode context index in `[0, 8)`
+        /// @param syntaxCandidateCount the number of candidates visible to dynamic-reference-list syntax
+        /// @param candidates the exclusively owned exact candidate snapshot
+        /// @return one provisional inter-mode context backed by `candidates`
+        private static ProvisionalInterModeContext fromOwnedCandidates(
+                int singleNewMvContext,
+                int singleGlobalMvContext,
+                int singleReferenceMvContext,
+                int compoundInterModeContext,
+                int syntaxCandidateCount,
+                ProvisionalMotionVectorCandidate[] candidates
+        ) {
+            return new ProvisionalInterModeContext(
+                    singleNewMvContext,
+                    singleGlobalMvContext,
+                    singleReferenceMvContext,
+                    compoundInterModeContext,
+                    syntaxCandidateCount,
+                    candidates,
+                    true
+            );
+        }
+
+        /// Creates one provisional inter-mode context with configurable candidate ownership.
+        ///
+        /// @param singleNewMvContext the zero-based provisional `newmv` context index in `[0, 6)`
+        /// @param singleGlobalMvContext the zero-based temporal `globalmv` context index in `[0, 2)`
+        /// @param singleReferenceMvContext the zero-based provisional `refmv` context index in `[0, 6)`
+        /// @param compoundInterModeContext the zero-based provisional compound inter-mode context index in `[0, 8)`
+        /// @param syntaxCandidateCount the number of candidates visible to dynamic-reference-list syntax
+        /// @param candidates the provisional motion-vector candidates sorted in descending weight order
+        /// @param takeOwnership whether `candidates` is an exclusively owned exact snapshot
+        private ProvisionalInterModeContext(
+                int singleNewMvContext,
+                int singleGlobalMvContext,
+                int singleReferenceMvContext,
+                int compoundInterModeContext,
+                int syntaxCandidateCount,
+                ProvisionalMotionVectorCandidate[] candidates,
+                boolean takeOwnership
+        ) {
             this.singleNewMvContext = singleNewMvContext;
             if (singleGlobalMvContext < 0 || singleGlobalMvContext > 1) {
                 throw new IllegalArgumentException("singleGlobalMvContext out of range: " + singleGlobalMvContext);
@@ -3877,7 +3951,11 @@ public final class BlockNeighborContext {
             this.singleGlobalMvContext = singleGlobalMvContext;
             this.singleReferenceMvContext = singleReferenceMvContext;
             this.compoundInterModeContext = compoundInterModeContext;
-            this.candidates = Arrays.copyOf(Objects.requireNonNull(candidates, "candidates"), candidates.length);
+            ProvisionalMotionVectorCandidate[] checkedCandidates =
+                    Objects.requireNonNull(candidates, "candidates");
+            this.candidates = takeOwnership
+                    ? checkedCandidates
+                    : Arrays.copyOf(checkedCandidates, checkedCandidates.length);
             if (syntaxCandidateCount < 0 || syntaxCandidateCount > this.candidates.length) {
                 throw new IllegalArgumentException("syntaxCandidateCount out of range: " + syntaxCandidateCount);
             }
@@ -3989,8 +4067,8 @@ public final class BlockNeighborContext {
         /// One provisional motion-vector candidate derived from one bounded neighbor source.
         @NotNullByDefault
         public static final class ProvisionalMotionVectorCandidate {
-            /// The candidate weight used for DRL-context derivation.
-            private final int weight;
+            /// The candidate weight, mutable only while the owning context is being assembled.
+            private int weight;
 
             /// The primary provisional motion vector carried by this candidate.
             private final InterMotionVector motionVector0;
@@ -4047,12 +4125,14 @@ public final class BlockNeighborContext {
                 return synthetic;
             }
 
-            /// Returns this candidate copied with a different weight.
+            /// Increases this candidate's weight while its owning context is being assembled.
             ///
-            /// @param newWeight the replacement candidate weight
-            /// @return this candidate copied with a different weight
-            private ProvisionalMotionVectorCandidate withWeight(int newWeight) {
-                return new ProvisionalMotionVectorCandidate(newWeight, motionVector0, motionVector1, synthetic);
+            /// @param increment the non-negative weight increment
+            private void increaseWeight(int increment) {
+                if (increment < 0) {
+                    throw new IllegalArgumentException("increment < 0: " + increment);
+                }
+                weight += increment;
             }
         }
     }

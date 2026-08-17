@@ -5,6 +5,9 @@ package org.glavo.avif.internal.av1.recon;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 
+import java.util.Arrays;
+import java.util.Objects;
+
 /// Mutable decoded-plane buffer used while reconstruction is still in progress.
 ///
 /// Samples are stored as unsigned values in the low bits of each `short`. The mutable buffer uses
@@ -149,6 +152,112 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         markWritten(index);
     }
 
+    /// Fills the in-plane portion of one rectangular block and marks it as written.
+    ///
+    /// @param x the horizontal block origin in containing-plane coordinates
+    /// @param y the vertical block origin in containing-plane coordinates
+    /// @param blockWidth the positive coded block width in samples
+    /// @param blockHeight the positive coded block height in samples
+    /// @param value the sample value, clipped to the legal bit-depth range
+    @Override
+    public void fillBlock(int x, int y, int blockWidth, int blockHeight, int value) {
+        if (blockWidth <= 0) {
+            throw new IllegalArgumentException("blockWidth <= 0: " + blockWidth);
+        }
+        if (blockHeight <= 0) {
+            throw new IllegalArgumentException("blockHeight <= 0: " + blockHeight);
+        }
+        int localX = x - originX;
+        int localY = y - originY;
+        int writtenWidth = Math.min(blockWidth, width - x);
+        int writtenHeight = Math.min(blockHeight, height - y);
+        if (localX < 0 || writtenWidth <= 0 || writtenWidth > storageWidth - localX) {
+            throw new IndexOutOfBoundsException("Block origin is outside retained horizontal storage");
+        }
+        if (localY < 0 || writtenHeight <= 0 || writtenHeight > storageHeight - localY) {
+            throw new IndexOutOfBoundsException("Block origin is outside retained vertical storage");
+        }
+
+        short sample = (short) clipped(value);
+        for (int row = 0; row < writtenHeight; row++) {
+            int startIndex = (localY + row) * storageWidth + localX;
+            Arrays.fill(samples, startIndex, startIndex + writtenWidth, sample);
+            markWrittenRange(startIndex, writtenWidth);
+        }
+    }
+
+    /// Adds one constant signed value to every sample in a retained rectangular block.
+    ///
+    /// Each result is clipped independently to the legal bit-depth range and marked as written.
+    ///
+    /// @param x the horizontal block origin in containing-plane coordinates
+    /// @param y the vertical block origin in containing-plane coordinates
+    /// @param blockWidth the positive block width in samples
+    /// @param blockHeight the positive block height in samples
+    /// @param value the signed value to add
+    void addConstantBlock(int x, int y, int blockWidth, int blockHeight, int value) {
+        int localX = x - originX;
+        int localY = y - originY;
+        if (blockWidth <= 0 || localX < 0 || blockWidth > storageWidth - localX) {
+            throw new IndexOutOfBoundsException("Block is outside retained horizontal storage");
+        }
+        if (blockHeight <= 0 || localY < 0 || blockHeight > storageHeight - localY) {
+            throw new IndexOutOfBoundsException("Block is outside retained vertical storage");
+        }
+
+        for (int row = 0; row < blockHeight; row++) {
+            int startIndex = (localY + row) * storageWidth + localX;
+            int index = startIndex;
+            int rowEnd = startIndex + blockWidth;
+            while (index < rowEnd) {
+                samples[index] = (short) clipped((samples[index] & 0xFFFF) + value);
+                index++;
+            }
+            markWrittenRange(startIndex, blockWidth);
+        }
+    }
+
+    /// Copies one edge-extended source block into retained storage and marks it as written.
+    ///
+    /// @param source the immutable source plane
+    /// @param destinationX the horizontal destination origin in containing-plane coordinates
+    /// @param destinationY the vertical destination origin in containing-plane coordinates
+    /// @param sourceX the horizontal source origin
+    /// @param sourceY the vertical source origin
+    /// @param blockWidth the positive block width in samples
+    /// @param blockHeight the positive block height in samples
+    void copyExtendedBlockFrom(
+            PaddedPlane source,
+            int destinationX,
+            int destinationY,
+            int sourceX,
+            int sourceY,
+            int blockWidth,
+            int blockHeight
+    ) {
+        PaddedPlane checkedSource = Objects.requireNonNull(source, "source");
+        int localX = destinationX - originX;
+        int localY = destinationY - originY;
+        if (blockWidth <= 0 || localX < 0 || blockWidth > storageWidth - localX) {
+            throw new IndexOutOfBoundsException("Block is outside retained horizontal storage");
+        }
+        if (blockHeight <= 0 || localY < 0 || blockHeight > storageHeight - localY) {
+            throw new IndexOutOfBoundsException("Block is outside retained vertical storage");
+        }
+
+        for (int row = 0; row < blockHeight; row++) {
+            int destinationIndex = (localY + row) * storageWidth + localX;
+            checkedSource.copyExtendedRowTo(
+                    sourceX,
+                    sourceY + row,
+                    samples,
+                    destinationIndex,
+                    blockWidth
+            );
+            markWrittenRange(destinationIndex, blockWidth);
+        }
+    }
+
     /// Returns whether one retained-region sample has been written by reconstruction.
     ///
     /// @param x the zero-based horizontal sample coordinate
@@ -237,6 +346,25 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param index the compact sample index
     private void markWritten(int index) {
         writtenSampleBits[index / Long.SIZE] |= 1L << (index % Long.SIZE);
+    }
+
+    /// Marks one non-empty contiguous compact sample range as written.
+    ///
+    /// @param startIndex the first compact sample index
+    /// @param length the positive number of samples to mark
+    private void markWrittenRange(int startIndex, int length) {
+        int endIndex = startIndex + length;
+        int firstWord = startIndex / Long.SIZE;
+        int lastWord = (endIndex - 1) / Long.SIZE;
+        long firstMask = -1L << (startIndex % Long.SIZE);
+        long lastMask = -1L >>> (Long.SIZE - 1 - ((endIndex - 1) % Long.SIZE));
+        if (firstWord == lastWord) {
+            writtenSampleBits[firstWord] |= firstMask & lastMask;
+            return;
+        }
+        writtenSampleBits[firstWord] |= firstMask;
+        Arrays.fill(writtenSampleBits, firstWord + 1, lastWord, -1L);
+        writtenSampleBits[lastWord] |= lastMask;
     }
 
     /// Returns whether one compact sample position has been written.

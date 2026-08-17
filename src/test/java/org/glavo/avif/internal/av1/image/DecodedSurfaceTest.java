@@ -49,6 +49,25 @@ final class DecodedSurfaceTest {
         assertThrows(IndexOutOfBoundsException.class, () -> plane.storedSample(0, 3));
     }
 
+    /// Verifies bulk row copies preserve visible-row stride and extend every crossed edge.
+    @Test
+    void copiesEdgeExtendedRowsIntoCallerStorage() {
+        PaddedPlane plane = new PaddedPlane(
+                3,
+                2,
+                4,
+                new short[]{10, 11, 12, 90, 20, 21, 22, 91}
+        );
+        short[] destination = new short[9];
+
+        plane.copyExtendedRowTo(-2, -1, destination, 1, 7);
+
+        assertArrayEquals(new short[]{0, 10, 10, 10, 11, 12, 12, 12, 0}, destination);
+        plane.copyExtendedRowTo(1, 4, destination, 2, 4);
+        assertArrayEquals(new short[]{0, 10, 21, 22, 22, 22, 12, 12, 0}, destination);
+        assertThrows(IndexOutOfBoundsException.class, () -> plane.copyExtendedRowTo(0, 0, destination, 8, 2));
+    }
+
     /// Verifies that monochrome decoded planes reject unexpected chroma storage.
     @Test
     void monochromeDecodedPlanesRejectUnexpectedChroma() {

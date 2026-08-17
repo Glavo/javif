@@ -16,6 +16,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /// Tests for minimal luma dequantization.
 @NotNullByDefault
 final class LumaDequantizerTest {
+    /// Verifies that compact DC-only units can be dequantized without a coefficient block.
+    @Test
+    void dequantizesDcCoefficientWithoutCoefficientBlock() {
+        TransformResidualUnit residualUnit = TransformResidualUnit.dcOnly(
+                new BlockPosition(0, 0),
+                TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
+                2,
+                4,
+                4,
+                0x11
+        );
+
+        assertEquals(16, LumaDequantizer.dequantizeDcCoefficient(residualUnit, 2, 0, 8, false, 0));
+    }
+
     /// Verifies that luma dequantization uses separate DC and AC lookup tables.
     @Test
     void dequantizesDcAndAcCoefficientsWithIndependentLookupTables() {

@@ -24,6 +24,7 @@ import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -146,6 +147,9 @@ public final class FrameReconstructor {
     /// Reusable scratch storage for one inter-predicted block.
     @NotNullByDefault
     private static final class InterPredictionWorkspace {
+        /// Edge-extended reference samples reused by unscaled prediction passes.
+        private short[] referenceSamples = new short[0];
+
         /// Horizontally filtered samples consumed by the vertical pass.
         private int[] horizontalSamples = new int[0];
 
@@ -157,6 +161,17 @@ public final class FrameReconstructor {
 
         /// Creates an empty inter-prediction workspace.
         private InterPredictionWorkspace() {
+        }
+
+        /// Returns edge-extended reference storage with at least the requested length.
+        ///
+        /// @param requiredLength the minimum number of reference samples
+        /// @return reusable reference sample storage
+        private short[] referenceSamples(int requiredLength) {
+            if (referenceSamples.length < requiredLength) {
+                referenceSamples = new short[requiredLength];
+            }
+            return referenceSamples;
         }
 
         /// Returns horizontal intermediate storage with at least the requested length.
@@ -3759,13 +3774,23 @@ public final class FrameReconstructor {
         int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
         if (verticalFilter == null) {
             int[] checkedHorizontalFilter = Objects.requireNonNull(horizontalFilter, "horizontalFilter");
+            int referenceStride = width + INTER_FILTER_TAP_COUNT - 1;
+            short[] referenceSamples = copyExtendedReferenceRegion(
+                    referencePlane,
+                    sourceX0 - INTER_FILTER_START_OFFSET,
+                    sourceY0,
+                    referenceStride,
+                    height
+            );
             for (int y = 0; y < height; y++) {
-                int sourceY = sourceY0 + y;
+                int referenceRowOffset = y * referenceStride;
                 for (int x = 0; x < width; x++) {
-                    int intermediate = roundShift(
-                            horizontalInterpolate(referencePlane, sourceX0 + x, sourceY, checkedHorizontalFilter),
-                            INTER_FILTER_BITS - intermediateBits
-                    );
+                    long filtered = 0;
+                    for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                        filtered += (long) checkedHorizontalFilter[tapIndex]
+                                * (referenceSamples[referenceRowOffset + x + tapIndex] & 0xFFFF);
+                    }
+                    int intermediate = roundShift(filtered, INTER_FILTER_BITS - intermediateBits);
                     destinationPlane.setSample(
                             destinationX + x,
                             destinationY + y,
@@ -3776,21 +3801,26 @@ public final class FrameReconstructor {
             return;
         }
         if (horizontalFilter == null) {
+            int referenceRowCount = height + INTER_FILTER_TAP_COUNT - 1;
+            short[] referenceSamples = copyExtendedReferenceRegion(
+                    referencePlane,
+                    sourceX0,
+                    sourceY0 - INTER_FILTER_START_OFFSET,
+                    width,
+                    referenceRowCount
+            );
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
+                    long filtered = 0;
+                    for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                        filtered += (long) verticalFilter[tapIndex]
+                                * (referenceSamples[(y + tapIndex) * width + x] & 0xFFFF);
+                    }
                     destinationPlane.setSample(
                             destinationX + x,
                             destinationY + y,
                             clamp(
-                                    roundShift(
-                                            verticalInterpolate(
-                                                    referencePlane,
-                                                    sourceX0 + x,
-                                                    sourceY0 + y,
-                                                    verticalFilter
-                                            ),
-                                            INTER_FILTER_BITS
-                                    ),
+                                    roundShift(filtered, INTER_FILTER_BITS),
                                     0,
                                     maximumSampleValue
                             )
@@ -3803,24 +3833,23 @@ public final class FrameReconstructor {
         int horizontalRowCount = height + INTER_FILTER_TAP_COUNT - 1;
         int[] horizontalSamples = interPredictionWorkspace
                 .horizontalSamples(width * horizontalRowCount);
+        int referenceStride = width + INTER_FILTER_TAP_COUNT - 1;
+        short[] referenceSamples = copyExtendedReferenceRegion(
+                referencePlane,
+                sourceX0 - INTER_FILTER_START_OFFSET,
+                sourceY0 - INTER_FILTER_START_OFFSET,
+                referenceStride,
+                horizontalRowCount
+        );
         int firstPassRound = INTER_FILTER_BITS - intermediateBits;
         for (int row = 0; row < horizontalRowCount; row++) {
-            int sourceY = clamp(
-                    sourceY0 + row - INTER_FILTER_START_OFFSET,
-                    0,
-                    referencePlane.height() - 1
-            );
             int rowOffset = row * width;
+            int referenceRowOffset = row * referenceStride;
             for (int x = 0; x < width; x++) {
-                int integerSourceX = sourceX0 + x;
                 long filtered = 0;
                 for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
-                    int sourceX = clamp(
-                            integerSourceX + tapIndex - INTER_FILTER_START_OFFSET,
-                            0,
-                            referencePlane.width() - 1
-                    );
-                    filtered += (long) horizontalFilter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+                    filtered += (long) horizontalFilter[tapIndex]
+                            * (referenceSamples[referenceRowOffset + x + tapIndex] & 0xFFFF);
                 }
                 horizontalSamples[rowOffset + x] = roundShift(filtered, firstPassRound);
             }
@@ -3871,28 +3900,35 @@ public final class FrameReconstructor {
     ) {
         int maximumSampleValue = destinationPlane.maxSampleValue();
         int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
+        int referenceStride = phaseX == 0 ? width : width + 1;
+        int referenceRowCount = phaseY == 0 ? height : height + 1;
+        short[] referenceSamples = copyExtendedReferenceRegion(
+                referencePlane,
+                sourceX0,
+                sourceY0,
+                referenceStride,
+                referenceRowCount
+        );
         for (int y = 0; y < height; y++) {
-            int topY = clamp(sourceY0 + y, 0, referencePlane.height() - 1);
-            int bottomY = clamp(sourceY0 + y + 1, 0, referencePlane.height() - 1);
+            int topRowOffset = y * referenceStride;
+            int bottomRowOffset = (y + 1) * referenceStride;
             for (int x = 0; x < width; x++) {
-                int leftX = clamp(sourceX0 + x, 0, referencePlane.width() - 1);
-                int rightX = clamp(sourceX0 + x + 1, 0, referencePlane.width() - 1);
-                int topLeft = referencePlane.sample(leftX, topY);
+                int topLeft = referenceSamples[topRowOffset + x] & 0xFFFF;
                 int sample;
                 if (phaseY == 0) {
-                    int topRight = referencePlane.sample(rightX, topY);
+                    int topRight = referenceSamples[topRowOffset + x + 1] & 0xFFFF;
                     int horizontal = roundShift(
                             bilinearFilterSum(topLeft, topRight, phaseX),
                             4 - intermediateBits
                     );
                     sample = roundShift(horizontal, intermediateBits);
                 } else if (phaseX == 0) {
-                    int bottomLeft = referencePlane.sample(leftX, bottomY);
+                    int bottomLeft = referenceSamples[bottomRowOffset + x] & 0xFFFF;
                     sample = roundShift(bilinearFilterSum(topLeft, bottomLeft, phaseY), 4);
                 } else {
-                    int topRight = referencePlane.sample(rightX, topY);
-                    int bottomLeft = referencePlane.sample(leftX, bottomY);
-                    int bottomRight = referencePlane.sample(rightX, bottomY);
+                    int topRight = referenceSamples[topRowOffset + x + 1] & 0xFFFF;
+                    int bottomLeft = referenceSamples[bottomRowOffset + x] & 0xFFFF;
+                    int bottomRight = referenceSamples[bottomRowOffset + x + 1] & 0xFFFF;
                     int top = roundShift(
                             bilinearFilterSum(topLeft, topRight, phaseX),
                             4 - intermediateBits
@@ -4209,12 +4245,18 @@ public final class FrameReconstructor {
         int phaseY = interpolationPhase(Math.floorMod(sourceOffsetEighthPelY, denominatorY), denominatorY);
         int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
         if (phaseX == 0 && phaseY == 0) {
+            short[] referenceSamples = copyExtendedReferenceRegion(
+                    referencePlane,
+                    sourceX0,
+                    sourceY0,
+                    width,
+                    height
+            );
             for (int y = 0; y < height; y++) {
-                int sourceY = clamp(sourceY0 + y, 0, referencePlane.height() - 1);
                 int rowOffset = y * width;
                 for (int x = 0; x < width; x++) {
-                    int sourceX = clamp(sourceX0 + x, 0, referencePlane.width() - 1);
-                    nonNullDestination[rowOffset + x] = referencePlane.sample(sourceX, sourceY) << postRoundBits;
+                    nonNullDestination[rowOffset + x] =
+                            (referenceSamples[rowOffset + x] & 0xFFFF) << postRoundBits;
                 }
             }
             return;
@@ -4252,36 +4294,46 @@ public final class FrameReconstructor {
         int firstPassRound = INTER_FILTER_BITS - postRoundBits;
         if (verticalFilter == null) {
             int[] checkedHorizontalFilter = Objects.requireNonNull(horizontalFilter, "horizontalFilter");
+            int referenceStride = width + INTER_FILTER_TAP_COUNT - 1;
+            short[] referenceSamples = copyExtendedReferenceRegion(
+                    referencePlane,
+                    sourceX0 - INTER_FILTER_START_OFFSET,
+                    sourceY0,
+                    referenceStride,
+                    height
+            );
             for (int y = 0; y < height; y++) {
-                int sourceY = sourceY0 + y;
                 int rowOffset = y * width;
+                int referenceRowOffset = y * referenceStride;
                 for (int x = 0; x < width; x++) {
-                    nonNullDestination[rowOffset + x] = roundShift(
-                            horizontalInterpolate(
-                                    referencePlane,
-                                    sourceX0 + x,
-                                    sourceY,
-                                    checkedHorizontalFilter
-                            ),
-                            firstPassRound
-                    );
+                    long filtered = 0;
+                    for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                        filtered += (long) checkedHorizontalFilter[tapIndex]
+                                * (referenceSamples[referenceRowOffset + x + tapIndex] & 0xFFFF);
+                    }
+                    nonNullDestination[rowOffset + x] = roundShift(filtered, firstPassRound);
                 }
             }
             return;
         }
         if (horizontalFilter == null) {
+            int referenceRowCount = height + INTER_FILTER_TAP_COUNT - 1;
+            short[] referenceSamples = copyExtendedReferenceRegion(
+                    referencePlane,
+                    sourceX0,
+                    sourceY0 - INTER_FILTER_START_OFFSET,
+                    width,
+                    referenceRowCount
+            );
             for (int y = 0; y < height; y++) {
                 int rowOffset = y * width;
                 for (int x = 0; x < width; x++) {
-                    nonNullDestination[rowOffset + x] = roundShift(
-                            verticalInterpolate(
-                                    referencePlane,
-                                    sourceX0 + x,
-                                    sourceY0 + y,
-                                    verticalFilter
-                            ),
-                            firstPassRound
-                    );
+                    long filtered = 0;
+                    for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                        filtered += (long) verticalFilter[tapIndex]
+                                * (referenceSamples[(y + tapIndex) * width + x] & 0xFFFF);
+                    }
+                    nonNullDestination[rowOffset + x] = roundShift(filtered, firstPassRound);
                 }
             }
             return;
@@ -4290,23 +4342,22 @@ public final class FrameReconstructor {
         int horizontalRowCount = height + INTER_FILTER_TAP_COUNT - 1;
         int[] horizontalSamples = interPredictionWorkspace
                 .horizontalSamples(width * horizontalRowCount);
+        int referenceStride = width + INTER_FILTER_TAP_COUNT - 1;
+        short[] referenceSamples = copyExtendedReferenceRegion(
+                referencePlane,
+                sourceX0 - INTER_FILTER_START_OFFSET,
+                sourceY0 - INTER_FILTER_START_OFFSET,
+                referenceStride,
+                horizontalRowCount
+        );
         for (int row = 0; row < horizontalRowCount; row++) {
-            int sourceY = clamp(
-                    sourceY0 + row - INTER_FILTER_START_OFFSET,
-                    0,
-                    referencePlane.height() - 1
-            );
             int rowOffset = row * width;
+            int referenceRowOffset = row * referenceStride;
             for (int x = 0; x < width; x++) {
-                int integerSourceX = sourceX0 + x;
                 long filtered = 0;
                 for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
-                    int sourceX = clamp(
-                            integerSourceX + tapIndex - INTER_FILTER_START_OFFSET,
-                            0,
-                            referencePlane.width() - 1
-                    );
-                    filtered += (long) horizontalFilter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+                    filtered += (long) horizontalFilter[tapIndex]
+                            * (referenceSamples[referenceRowOffset + x + tapIndex] & 0xFFFF);
                 }
                 horizontalSamples[rowOffset + x] = roundShift(filtered, firstPassRound);
             }
@@ -4347,31 +4398,38 @@ public final class FrameReconstructor {
             int[] destination
     ) {
         int firstPassRound = 4 - postRoundBits;
+        int referenceStride = phaseX == 0 ? width : width + 1;
+        int referenceRowCount = phaseY == 0 ? height : height + 1;
+        short[] referenceSamples = copyExtendedReferenceRegion(
+                referencePlane,
+                sourceX0,
+                sourceY0,
+                referenceStride,
+                referenceRowCount
+        );
         for (int y = 0; y < height; y++) {
-            int topY = clamp(sourceY0 + y, 0, referencePlane.height() - 1);
-            int bottomY = clamp(sourceY0 + y + 1, 0, referencePlane.height() - 1);
             int rowOffset = y * width;
+            int topRowOffset = y * referenceStride;
+            int bottomRowOffset = (y + 1) * referenceStride;
             for (int x = 0; x < width; x++) {
-                int leftX = clamp(sourceX0 + x, 0, referencePlane.width() - 1);
-                int rightX = clamp(sourceX0 + x + 1, 0, referencePlane.width() - 1);
-                int topLeft = referencePlane.sample(leftX, topY);
+                int topLeft = referenceSamples[topRowOffset + x] & 0xFFFF;
                 int predictor;
                 if (phaseY == 0) {
-                    int topRight = referencePlane.sample(rightX, topY);
+                    int topRight = referenceSamples[topRowOffset + x + 1] & 0xFFFF;
                     predictor = roundShift(
                             bilinearFilterSum(topLeft, topRight, phaseX),
                             firstPassRound
                     );
                 } else if (phaseX == 0) {
-                    int bottomLeft = referencePlane.sample(leftX, bottomY);
+                    int bottomLeft = referenceSamples[bottomRowOffset + x] & 0xFFFF;
                     predictor = roundShift(
                             bilinearFilterSum(topLeft, bottomLeft, phaseY),
                             firstPassRound
                     );
                 } else {
-                    int topRight = referencePlane.sample(rightX, topY);
-                    int bottomLeft = referencePlane.sample(leftX, bottomY);
-                    int bottomRight = referencePlane.sample(rightX, bottomY);
+                    int topRight = referenceSamples[topRowOffset + x + 1] & 0xFFFF;
+                    int bottomLeft = referenceSamples[bottomRowOffset + x] & 0xFFFF;
+                    int bottomRight = referenceSamples[bottomRowOffset + x + 1] & 0xFFFF;
                     int top = roundShift(
                             bilinearFilterSum(topLeft, topRight, phaseX),
                             firstPassRound
@@ -4722,17 +4780,44 @@ public final class FrameReconstructor {
             int width,
             int height
     ) {
-        for (int y = 0; y < height; y++) {
-            int clampedSourceY = clamp(sourceY + y, 0, referencePlane.height() - 1);
-            for (int x = 0; x < width; x++) {
-                int clampedSourceX = clamp(sourceX + x, 0, referencePlane.width() - 1);
-                destinationPlane.setSample(
-                        destinationX + x,
-                        destinationY + y,
-                        referencePlane.sample(clampedSourceX, clampedSourceY)
-                );
-            }
+        destinationPlane.copyExtendedBlockFrom(
+                referencePlane,
+                destinationX,
+                destinationY,
+                sourceX,
+                sourceY,
+                width,
+                height
+        );
+    }
+
+    /// Copies one edge-extended reference region into reusable tightly packed storage.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceX the horizontal source origin
+    /// @param sourceY the vertical source origin
+    /// @param width the positive copied width in samples
+    /// @param height the positive copied height in samples
+    /// @return reusable row-major reference storage whose active prefix has `width * height` samples
+    private short[] copyExtendedReferenceRegion(
+            PaddedPlane referencePlane,
+            int sourceX,
+            int sourceY,
+            int width,
+            int height
+    ) {
+        int requiredLength = Math.multiplyExact(width, height);
+        short[] referenceSamples = interPredictionWorkspace.referenceSamples(requiredLength);
+        for (int row = 0; row < height; row++) {
+            referencePlane.copyExtendedRowTo(
+                    sourceX,
+                    sourceY + row,
+                    referenceSamples,
+                    row * width,
+                    width
+            );
         }
+        return referenceSamples;
     }
 
     /// Returns one fixed-filter interpolated unsigned sample at the supplied plane-local source
@@ -5712,6 +5797,33 @@ public final class FrameReconstructor {
         if (residualUnit.allZero()) {
             return;
         }
+        int destinationX = residualUnit.position().x4() << 2;
+        int destinationY = residualUnit.position().y4() << 2;
+        int writtenWidth = Math.min(residualUnit.size().widthPixels(), lumaPlane.width() - destinationX);
+        int writtenHeight = Math.min(residualUnit.size().heightPixels(), lumaPlane.height() - destinationY);
+        if (residualUnit.endOfBlockIndex() == 0 && residualUnit.transformType() == TransformType.DCT_DCT) {
+            int dequantizedDcCoefficient = LumaDequantizer.dequantizeDcCoefficient(
+                    residualUnit,
+                    qIndex,
+                    quantization.yDcDelta(),
+                    lumaPlane.bitDepth(),
+                    quantization.useQuantizationMatrices(),
+                    quantization.quantizationMatrixY()
+            );
+            inverseTransformer.reconstructAndAddDcOnlyDctBlock(
+                    lumaPlane,
+                    destinationX,
+                    destinationY,
+                    residualUnit.size(),
+                    lumaPlane.bitDepth(),
+                    writtenWidth,
+                    writtenHeight,
+                    strictStdCompliance,
+                    dequantizedDcCoefficient
+            );
+            return;
+        }
+
         int[] dequantizedCoefficients = inverseTransformer.coefficientBuffer(residualUnit.size());
         LumaDequantizer.dequantize(
                 residualUnit,
@@ -5722,8 +5834,6 @@ public final class FrameReconstructor {
                 quantization.quantizationMatrixY(),
                 dequantizedCoefficients
         );
-        int destinationX = residualUnit.position().x4() << 2;
-        int destinationY = residualUnit.position().y4() << 2;
         inverseTransformer.reconstructAndAddResidualBlock(
                 lumaPlane,
                 destinationX,
@@ -5731,8 +5841,8 @@ public final class FrameReconstructor {
                 residualUnit.size(),
                 residualUnit.transformType(),
                 lumaPlane.bitDepth(),
-                Math.min(residualUnit.size().widthPixels(), lumaPlane.width() - destinationX),
-                Math.min(residualUnit.size().heightPixels(), lumaPlane.height() - destinationY),
+                writtenWidth,
+                writtenHeight,
                 strictStdCompliance,
                 dequantizedCoefficients
         );
@@ -6290,19 +6400,47 @@ public final class FrameReconstructor {
         if (residualUnit.allZero()) {
             return;
         }
+        int dcDelta = chromaU ? quantization.uDcDelta() : quantization.vDcDelta();
+        int acDelta = chromaU ? quantization.uAcDelta() : quantization.vAcDelta();
+        int quantizationMatrix = chromaU ? quantization.quantizationMatrixU() : quantization.quantizationMatrixV();
+        int destinationX = residualUnit.position().x4() << (2 - chromaSubsamplingX);
+        int destinationY = residualUnit.position().y4() << (2 - chromaSubsamplingY);
+        int writtenWidth = Math.min(residualUnit.size().widthPixels(), chromaPlane.width() - destinationX);
+        int writtenHeight = Math.min(residualUnit.size().heightPixels(), chromaPlane.height() - destinationY);
+        if (residualUnit.endOfBlockIndex() == 0 && residualUnit.transformType() == TransformType.DCT_DCT) {
+            int dequantizedDcCoefficient = ChromaDequantizer.dequantizeDcCoefficient(
+                    residualUnit,
+                    qIndex,
+                    dcDelta,
+                    chromaPlane.bitDepth(),
+                    quantization.useQuantizationMatrices(),
+                    quantizationMatrix
+            );
+            inverseTransformer.reconstructAndAddDcOnlyDctBlock(
+                    chromaPlane,
+                    destinationX,
+                    destinationY,
+                    residualUnit.size(),
+                    chromaPlane.bitDepth(),
+                    writtenWidth,
+                    writtenHeight,
+                    strictStdCompliance,
+                    dequantizedDcCoefficient
+            );
+            return;
+        }
+
         int[] dequantizedCoefficients = inverseTransformer.coefficientBuffer(residualUnit.size());
         ChromaDequantizer.dequantize(
                 residualUnit,
                 qIndex,
-                chromaU ? quantization.uDcDelta() : quantization.vDcDelta(),
-                chromaU ? quantization.uAcDelta() : quantization.vAcDelta(),
+                dcDelta,
+                acDelta,
                 chromaPlane.bitDepth(),
                 quantization.useQuantizationMatrices(),
-                chromaU ? quantization.quantizationMatrixU() : quantization.quantizationMatrixV(),
+                quantizationMatrix,
                 dequantizedCoefficients
         );
-        int destinationX = residualUnit.position().x4() << (2 - chromaSubsamplingX);
-        int destinationY = residualUnit.position().y4() << (2 - chromaSubsamplingY);
         inverseTransformer.reconstructAndAddResidualBlock(
                 chromaPlane,
                 destinationX,
@@ -6310,8 +6448,8 @@ public final class FrameReconstructor {
                 residualUnit.size(),
                 residualUnit.transformType(),
                 chromaPlane.bitDepth(),
-                Math.min(residualUnit.size().widthPixels(), chromaPlane.width() - destinationX),
-                Math.min(residualUnit.size().heightPixels(), chromaPlane.height() - destinationY),
+                writtenWidth,
+                writtenHeight,
                 strictStdCompliance,
                 dequantizedCoefficients
         );

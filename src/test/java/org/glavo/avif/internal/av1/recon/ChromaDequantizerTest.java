@@ -16,6 +16,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /// Tests for minimal chroma dequantization.
 @NotNullByDefault
 final class ChromaDequantizerTest {
+    /// Verifies that compact DC-only units can be dequantized without a coefficient block.
+    @Test
+    void dequantizesDcCoefficientWithoutCoefficientBlock() {
+        TransformResidualUnit residualUnit = TransformResidualUnit.dcOnly(
+                new BlockPosition(0, 0),
+                TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
+                2,
+                4,
+                4,
+                0x11
+        );
+
+        assertEquals(20, ChromaDequantizer.dequantizeDcCoefficient(residualUnit, 1, 1, 10, false, 0));
+    }
+
     /// Verifies that `10-bit` chroma dequantization applies plane-local DC and AC deltas before
     /// looking up the QTX tables.
     @Test

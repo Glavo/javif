@@ -65,6 +65,41 @@ final class ChromaDequantizer {
         );
     }
 
+    /// Dequantizes only the DC coefficient of one chroma residual unit.
+    ///
+    /// @param residualUnit the chroma residual unit to dequantize
+    /// @param qIndex the block-local chroma quantizer index in `[0, 255]`
+    /// @param dcDelta the plane-local DC delta quantizer
+    /// @param bitDepth the decoded sample bit depth
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrixIndex the chroma quantization matrix index in `[0, 15]`
+    /// @return the signed dequantized DC coefficient, or zero for an all-zero unit
+    static int dequantizeDcCoefficient(
+            TransformResidualUnit residualUnit,
+            int qIndex,
+            int dcDelta,
+            int bitDepth,
+            boolean useQuantizationMatrices,
+            int quantizationMatrixIndex
+    ) {
+        TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
+        validateParameters(qIndex, bitDepth, quantizationMatrixIndex);
+
+        byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(
+                nonNullResidualUnit,
+                useQuantizationMatrices,
+                quantizationMatrixIndex
+        );
+        return scaledDcCoefficient(
+                nonNullResidualUnit,
+                qIndex,
+                dcDelta,
+                QuantizerTables.dequantizationShift(nonNullResidualUnit.size()),
+                bitDepth,
+                quantizationMatrix
+        );
+    }
+
     /// Dequantizes one chroma transform residual unit from scalar plane parameters.
     ///
     /// This allocation-free entry point overwrites the complete exact-length destination array.
@@ -89,15 +124,7 @@ final class ChromaDequantizer {
     ) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         int[] nonNullDestination = Objects.requireNonNull(destination, "destination");
-        if (qIndex < 0 || qIndex > 255) {
-            throw new IllegalArgumentException("qIndex out of range: " + qIndex);
-        }
-        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
-            throw new IllegalStateException("Unsupported chroma dequantization bit depth: " + bitDepth);
-        }
-        if (quantizationMatrixIndex < 0 || quantizationMatrixIndex > 15) {
-            throw new IllegalArgumentException("quantizationMatrixIndex out of range: " + quantizationMatrixIndex);
-        }
+        validateParameters(qIndex, bitDepth, quantizationMatrixIndex);
 
         int coefficientCount = nonNullResidualUnit.coefficientCount();
         if (nonNullDestination.length != coefficientCount) {
@@ -108,26 +135,24 @@ final class ChromaDequantizer {
             return;
         }
 
-        int dcQuantizer = QuantizerTables.dcQuantizer(
-                qIndex + dcDelta,
-                bitDepth
-        );
-        int acQuantizer = QuantizerTables.acQuantizer(
-                qIndex + acDelta,
-                bitDepth
-        );
         int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
         byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(
                 nonNullResidualUnit,
                 useQuantizationMatrices,
                 quantizationMatrixIndex
         );
-        nonNullDestination[0] = scaledCoefficient(
-                nonNullResidualUnit.coefficient(0),
-                dcQuantizer,
+        nonNullDestination[0] = scaledDcCoefficient(
+                nonNullResidualUnit,
+                qIndex,
+                dcDelta,
                 dequantizationShift,
                 bitDepth,
-                matrixValue(quantizationMatrix, nonNullResidualUnit.size(), 0)
+                quantizationMatrix
+        );
+
+        int acQuantizer = QuantizerTables.acQuantizer(
+                qIndex + acDelta,
+                bitDepth
         );
         for (int coefficientIndex = 1; coefficientIndex < coefficientCount; coefficientIndex++) {
             nonNullDestination[coefficientIndex] = scaledCoefficient(
@@ -138,6 +163,49 @@ final class ChromaDequantizer {
                     matrixValue(quantizationMatrix, nonNullResidualUnit.size(), coefficientIndex)
             );
         }
+    }
+
+    /// Validates scalar chroma dequantization parameters shared by both entry points.
+    ///
+    /// @param qIndex the block-local chroma quantizer index
+    /// @param bitDepth the decoded sample bit depth
+    /// @param quantizationMatrixIndex the chroma quantization matrix index
+    private static void validateParameters(int qIndex, int bitDepth, int quantizationMatrixIndex) {
+        if (qIndex < 0 || qIndex > 255) {
+            throw new IllegalArgumentException("qIndex out of range: " + qIndex);
+        }
+        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
+            throw new IllegalStateException("Unsupported chroma dequantization bit depth: " + bitDepth);
+        }
+        if (quantizationMatrixIndex < 0 || quantizationMatrixIndex > 15) {
+            throw new IllegalArgumentException("quantizationMatrixIndex out of range: " + quantizationMatrixIndex);
+        }
+    }
+
+    /// Scales one chroma DC coefficient from already validated parameters.
+    ///
+    /// @param residualUnit the chroma residual unit
+    /// @param qIndex the block-local chroma quantizer index
+    /// @param dcDelta the plane-local DC delta quantizer
+    /// @param dequantizationShift the transform-size dequantization shift
+    /// @param bitDepth the decoded sample bit depth
+    /// @param quantizationMatrix the active quantization matrix, or `null`
+    /// @return the signed dequantized DC coefficient
+    private static int scaledDcCoefficient(
+            TransformResidualUnit residualUnit,
+            int qIndex,
+            int dcDelta,
+            int dequantizationShift,
+            int bitDepth,
+            byte @Nullable @Unmodifiable [] quantizationMatrix
+    ) {
+        return scaledCoefficient(
+                residualUnit.coefficient(0),
+                QuantizerTables.dcQuantizer(qIndex + dcDelta, bitDepth),
+                dequantizationShift,
+                bitDepth,
+                matrixValue(quantizationMatrix, residualUnit.size(), 0)
+        );
     }
 
     /// Returns the active quantization matrix for one residual unit, or `null` when no matrix applies.

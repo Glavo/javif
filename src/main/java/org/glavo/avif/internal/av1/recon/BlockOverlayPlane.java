@@ -4,6 +4,7 @@ package org.glavo.avif.internal.av1.recon;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Stores predicted samples for one block while reading all other samples through a base plane.
@@ -130,12 +131,65 @@ final class BlockOverlayPlane implements MutableSamplePlane {
         writtenSampleBits[index / Long.SIZE] |= 1L << (index % Long.SIZE);
     }
 
+    /// Fills the in-plane portion of one rectangular block inside this overlay.
+    ///
+    /// @param x the horizontal block origin in containing-plane coordinates
+    /// @param y the vertical block origin in containing-plane coordinates
+    /// @param blockWidth the positive coded block width in samples
+    /// @param blockHeight the positive coded block height in samples
+    /// @param value the sample value, clipped to the legal bit-depth range
+    @Override
+    public void fillBlock(int x, int y, int blockWidth, int blockHeight, int value) {
+        if (blockWidth <= 0) {
+            throw new IllegalArgumentException("blockWidth <= 0: " + blockWidth);
+        }
+        if (blockHeight <= 0) {
+            throw new IllegalArgumentException("blockHeight <= 0: " + blockHeight);
+        }
+        int localX = x - originX;
+        int localY = y - originY;
+        int writtenWidth = Math.min(blockWidth, width() - x);
+        int writtenHeight = Math.min(blockHeight, height() - y);
+        if (localX < 0 || writtenWidth <= 0 || writtenWidth > overlayWidth - localX) {
+            throw new IndexOutOfBoundsException("Block origin is outside overlay horizontal storage");
+        }
+        if (localY < 0 || writtenHeight <= 0 || writtenHeight > overlayHeight - localY) {
+            throw new IndexOutOfBoundsException("Block origin is outside overlay vertical storage");
+        }
+
+        short sample = (short) Math.max(0, Math.min(value, maximumSampleValue));
+        for (int row = 0; row < writtenHeight; row++) {
+            int startIndex = (localY + row) * overlayWidth + localX;
+            Arrays.fill(samples, startIndex, startIndex + writtenWidth, sample);
+            markWrittenRange(startIndex, writtenWidth);
+        }
+    }
+
     /// Returns the number of words needed to store one written-state bit per sample.
     ///
     /// @param sampleCount the positive overlay sample count
     /// @return the required packed-word count
     private static int writtenWordCount(int sampleCount) {
         return (int) (((long) sampleCount + Long.SIZE - 1L) / Long.SIZE);
+    }
+
+    /// Marks one non-empty contiguous compact sample range as written.
+    ///
+    /// @param startIndex the first compact sample index
+    /// @param length the positive number of samples to mark
+    private void markWrittenRange(int startIndex, int length) {
+        int endIndex = startIndex + length;
+        int firstWord = startIndex / Long.SIZE;
+        int lastWord = (endIndex - 1) / Long.SIZE;
+        long firstMask = -1L << (startIndex % Long.SIZE);
+        long lastMask = -1L >>> (Long.SIZE - 1 - ((endIndex - 1) % Long.SIZE));
+        if (firstWord == lastWord) {
+            writtenSampleBits[firstWord] |= firstMask & lastMask;
+            return;
+        }
+        writtenSampleBits[firstWord] |= firstMask;
+        Arrays.fill(writtenSampleBits, firstWord + 1, lastWord, -1L);
+        writtenSampleBits[lastWord] |= lastMask;
     }
 
     /// Returns whether one compact overlay position has been written.

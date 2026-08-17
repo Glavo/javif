@@ -1166,7 +1166,7 @@ final class IntraPredictor {
             case HORIZONTAL -> predictHorizontal(plane, x, y, width, height, left);
             case PAETH -> {
                 if (x <= leftBoundary && y <= topBoundary) {
-                    fillBlock(plane, x, y, width, height, defaultSample);
+                    plane.fillBlock(x, y, width, height, defaultSample);
                 } else if (x <= leftBoundary) {
                     predictVertical(plane, x, y, width, height, top);
                 } else if (y <= topBoundary) {
@@ -1834,7 +1834,7 @@ final class IntraPredictor {
             int topBoundary
     ) {
         int value = dcPredictionValue(width, height, top, left, defaultSample, y > topBoundary, x > leftBoundary);
-        fillBlock(plane, x, y, width, height, value);
+        plane.fillBlock(x, y, width, height, value);
     }
 
     /// Returns the stable DC predictor value for one block with tile-boundary availability.
@@ -2583,22 +2583,6 @@ final class IntraPredictor {
     /// @return the interpolation fraction in `[0, 62]`
     private int directionalFraction(int projectedCoordinate, boolean upsampled) {
         return (projectedCoordinate << (upsampled ? 1 : 0)) & 0x3E;
-    }
-
-    /// Fills one rectangular block with one constant sample value.
-    ///
-    /// @param plane the mutable destination plane
-    /// @param x the zero-based horizontal sample coordinate
-    /// @param y the zero-based vertical sample coordinate
-    /// @param width the block width in samples
-    /// @param height the block height in samples
-    /// @param value the constant sample value
-    private void fillBlock(MutableSamplePlane plane, int x, int y, int width, int height, int value) {
-        for (int row = 0; row < height; row++) {
-            for (int column = 0; column < width; column++) {
-                setSampleIfInside(plane, x + column, y + row, value);
-            }
-        }
     }
 
     /// Clamps one integer to an inclusive range.

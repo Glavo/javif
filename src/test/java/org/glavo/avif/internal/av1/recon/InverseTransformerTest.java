@@ -577,6 +577,53 @@ final class InverseTransformerTest {
         }
     }
 
+    /// Verifies that the DC-only write-back path matches full `DCT_DCT` reconstruction for every
+    /// declared transform size.
+    @Test
+    void directlyAddsDcOnlyDctResidualForEveryTransformSize() {
+        for (TransformSize transformSize : TransformSize.values()) {
+            int width = transformSize.widthPixels();
+            int height = transformSize.heightPixels();
+            int[] coefficients = new int[width * height];
+            coefficients[0] = 256;
+            int[] expectedResidual = transformer.reconstructResidualBlock(
+                    coefficients,
+                    transformSize,
+                    TransformType.DCT_DCT,
+                    12
+            );
+            MutablePlaneBuffer plane = new MutablePlaneBuffer(width, height, 12);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    plane.setSample(x, y, 2_048);
+                }
+            }
+
+            transformer.reconstructAndAddDcOnlyDctBlock(
+                    plane,
+                    0,
+                    0,
+                    transformSize,
+                    12,
+                    width,
+                    height,
+                    false,
+                    coefficients[0]
+            );
+
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int sampleIndex = y * width + x;
+                    assertEquals(
+                            2_048 + expectedResidual[sampleIndex],
+                            plane.sample(x, y),
+                            transformSize.name()
+                    );
+                }
+            }
+        }
+    }
+
     /// Verifies that skipped zero rows clear intermediate storage left by a previous workspace use.
     @Test
     void reusesWorkspaceAcrossSparseSixtyFourPointRows() {

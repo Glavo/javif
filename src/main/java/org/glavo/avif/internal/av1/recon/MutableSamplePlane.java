@@ -39,4 +39,16 @@ interface MutableSamplePlane {
     /// @param y     the zero-based vertical sample coordinate
     /// @param value the sample value, clipped to the legal bit-depth range
     void setSample(int x, int y, int value);
+
+    /// Fills the in-plane portion of one rectangular block with a constant sample value.
+    ///
+    /// The origin must be an in-range writable coordinate. Samples beyond the right or bottom
+    /// plane edge are ignored, matching coded-block reconstruction at visible frame boundaries.
+    ///
+    /// @param x the zero-based horizontal block origin
+    /// @param y the zero-based vertical block origin
+    /// @param blockWidth the positive coded block width in samples
+    /// @param blockHeight the positive coded block height in samples
+    /// @param value the sample value, clipped to the legal bit-depth range
+    void fillBlock(int x, int y, int blockWidth, int blockHeight, int value);
 }

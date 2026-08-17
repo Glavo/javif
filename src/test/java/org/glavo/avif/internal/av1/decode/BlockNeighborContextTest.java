@@ -348,6 +348,11 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(new MotionVector(8, -4)), compoundContext.motionVectorCandidate(1).motionVector0());
         assertEquals(InterMotionVector.predicted(new MotionVector(-8, 16)), compoundContext.motionVectorCandidate(1).motionVector1());
         assertEquals(1, compoundContext.drlContext(0));
+
+        assertEquals(648, singleContext.candidateWeight(0));
+        assertEquals(648, singleContext.candidateWeight(1));
+        assertEquals(InterMotionVector.resolved(new MotionVector(8, -4)), singleContext.candidateMotionVector0(0));
+        assertEquals(InterMotionVector.resolved(new MotionVector(12, 4)), singleContext.candidateMotionVector0(1));
     }
 
     /// Verifies affine `GLOBALMV` neighbors contribute the current block's position-dependent

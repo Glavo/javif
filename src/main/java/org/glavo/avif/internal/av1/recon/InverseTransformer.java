@@ -373,6 +373,101 @@ final class InverseTransformer {
         );
     }
 
+    /// Reconstructs and immediately applies one DC-only `DCT_DCT` residual block.
+    ///
+    /// @param plane the destination predictor plane
+    /// @param x the zero-based destination x coordinate
+    /// @param y the zero-based destination y coordinate
+    /// @param transformSize the coded residual block size
+    /// @param bitDepth the decoded sample bit depth
+    /// @param writtenWidthPixels the residual width to write in pixels
+    /// @param writtenHeightPixels the residual height to write in pixels
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
+    /// @param dequantizedDcCoefficient the dequantized DC coefficient
+    void reconstructAndAddDcOnlyDctBlock(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            TransformSize transformSize,
+            int bitDepth,
+            int writtenWidthPixels,
+            int writtenHeightPixels,
+            boolean strictStdCompliance,
+            int dequantizedDcCoefficient
+    ) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (writtenWidthPixels <= 0 || writtenWidthPixels > nonNullTransformSize.widthPixels()) {
+            throw new IllegalArgumentException("writtenWidthPixels out of range: " + writtenWidthPixels);
+        }
+        if (writtenHeightPixels <= 0 || writtenHeightPixels > nonNullTransformSize.heightPixels()) {
+            throw new IllegalArgumentException("writtenHeightPixels out of range: " + writtenHeightPixels);
+        }
+        int residualSample = reconstructDcOnlyDctDct(
+                dequantizedDcCoefficient,
+                nonNullTransformSize,
+                bitDepth,
+                strictStdCompliance
+        );
+        Objects.requireNonNull(plane, "plane").addConstantBlock(
+                x, y, writtenWidthPixels, writtenHeightPixels, residualSample
+        );
+    }
+
+    /// Reconstructs the constant residual sample produced by one DC-only `DCT_DCT` block.
+    ///
+    /// Only one row and one column transform are required because a DCT DC basis has the same
+    /// value at every output position.
+    ///
+    /// @param dcCoefficient the dequantized DC coefficient
+    /// @param transformSize the transform size to reconstruct
+    /// @param bitDepth the decoded sample bit depth
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
+    /// @return the constant signed residual sample
+    private int reconstructDcOnlyDctDct(
+            int dcCoefficient,
+            TransformSize transformSize,
+            int bitDepth,
+            boolean strictStdCompliance
+    ) {
+        int width = transformSize.widthPixels();
+        int height = transformSize.heightPixels();
+        int scratchLength = Math.max(width, height);
+        int[] input = reconstructionWorkspace.scratchInput(scratchLength);
+        int[] output = reconstructionWorkspace.scratchOutput(scratchLength);
+        Arrays.fill(input, 0, width, 0);
+        input[0] = width * 2 == height || height * 2 == width
+                ? positiveRoundShift((long) dcCoefficient * 181, 8)
+                : dcCoefficient;
+
+        ClipRange rowClipRange = conformanceClipRange(rowClipRange(bitDepth), strictStdCompliance);
+        ClipRange columnClipRange = conformanceClipRange(columnClipRange(bitDepth), strictStdCompliance);
+        withActiveClipRange(rowClipRange, () -> inverseDctDctAxis(transformSize, input, output, width));
+        int columnInput = clipToRange(
+                positiveRoundShift(output[0], intermediateTransformShift(transformSize)),
+                columnClipRange
+        );
+
+        Arrays.fill(input, 0, height, 0);
+        input[0] = columnInput;
+        withActiveClipRange(columnClipRange, () -> inverseDctDctAxis(transformSize, input, output, height));
+        return positiveRoundShift(output[0], 4);
+    }
+
+    /// Applies the DCT kernel used by one axis of the supplied two-dimensional transform size.
+    ///
+    /// @param transformSize the two-dimensional transform size
+    /// @param input the transform input vector
+    /// @param output the transform output vector
+    /// @param length the active vector length
+    private void inverseDctDctAxis(TransformSize transformSize, int[] input, int[] output, int length) {
+        switch (transformSize) {
+            case TX_4X4 -> inverseDct4(input, output);
+            case TX_8X8 -> inverseDct8(input, output);
+            case TX_16X16 -> inverseDct16(input, output);
+            default -> inverseDct(input, output, length);
+        }
+    }
+
     /// Reconstructs one `TX_4X4` `DCT_DCT` residual block.
     ///
     /// @param coefficients the dequantized `TX_4X4` coefficients in natural raster order
@@ -396,6 +491,10 @@ final class InverseTransformer {
             scratchIn[1] = coefficients[rowOffset + 1];
             scratchIn[2] = coefficients[rowOffset + 2];
             scratchIn[3] = coefficients[rowOffset + 3];
+            if ((scratchIn[0] | scratchIn[1] | scratchIn[2] | scratchIn[3]) == 0) {
+                Arrays.fill(buffer, rowOffset, rowOffset + 4, 0);
+                continue;
+            }
             withActiveClipRange(rowClipRange, () -> inverseDct4(scratchIn, scratchOut));
             buffer[rowOffset] = clipToRange(scratchOut[0], columnClipRange);
             buffer[rowOffset + 1] = clipToRange(scratchOut[1], columnClipRange);
@@ -436,8 +535,15 @@ final class InverseTransformer {
         int[] scratchOut = scratchOutput(workspace, 8);
         for (int row = 0; row < 8; row++) {
             int rowOffset = row << 3;
+            int rowNonZero = 0;
             for (int column = 0; column < 8; column++) {
-                scratchIn[column] = coefficients[rowOffset + column];
+                int coefficient = coefficients[rowOffset + column];
+                scratchIn[column] = coefficient;
+                rowNonZero |= coefficient;
+            }
+            if (rowNonZero == 0) {
+                Arrays.fill(buffer, rowOffset, rowOffset + 8, 0);
+                continue;
             }
             withActiveClipRange(rowClipRange, () -> inverseDct8(scratchIn, scratchOut));
             for (int column = 0; column < 8; column++) {
@@ -480,8 +586,15 @@ final class InverseTransformer {
         int[] scratchOut = scratchOutput(workspace, 16);
         for (int row = 0; row < 16; row++) {
             int rowOffset = row << 4;
+            int rowNonZero = 0;
             for (int column = 0; column < 16; column++) {
-                scratchIn[column] = coefficients[rowOffset + column];
+                int coefficient = coefficients[rowOffset + column];
+                scratchIn[column] = coefficient;
+                rowNonZero |= coefficient;
+            }
+            if (rowNonZero == 0) {
+                Arrays.fill(buffer, rowOffset, rowOffset + 16, 0);
+                continue;
             }
             withActiveClipRange(rowClipRange, () -> inverseDct16(scratchIn, scratchOut));
             for (int column = 0; column < 16; column++) {
@@ -603,11 +716,18 @@ final class InverseTransformer {
 
         for (int row = 0; row < height; row++) {
             int rowOffset = row * width;
+            int rowNonZero = 0;
             for (int column = 0; column < width; column++) {
                 int coefficient = coefficients[rowOffset + column];
-                rowScratchIn[column] = requiresRectangularPrescale
+                int transformInput = requiresRectangularPrescale
                         ? positiveRoundShift((long) coefficient * 181, 8)
                         : coefficient;
+                rowScratchIn[column] = transformInput;
+                rowNonZero |= transformInput;
+            }
+            if (rowNonZero == 0) {
+                Arrays.fill(buffer, rowOffset, rowOffset + width, 0);
+                continue;
             }
             withActiveClipRange(
                     rowClipRange,
