@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameSyntaxDecoder`.
@@ -243,6 +244,89 @@ final class FrameSyntaxDecoderTest {
         savedCdf.mutableSkipCdf(0)[0] = 32000;
 
         assertEquals(savedSkipThreshold, state.savedFrameCdfContext().mutableSkipCdf(0)[0]);
+    }
+
+    /// Verifies that partial camera-frame decoding can select a nonzero tile without collecting
+    /// the preceding tile bitstreams.
+    @Test
+    void decodeTileAcceptsNonzeroTileFromPartialAssembly() {
+        FrameAssembly completeAssembly = createAssembly(
+                Av1FrameType.INTER,
+                new byte[][]{INTER_BLOCK_PAYLOAD, INTER_BLOCK_PAYLOAD},
+                false,
+                128,
+                64,
+                noRestoration(),
+                twoColumnTiling(0)
+        );
+        FrameAssembly partialAssembly = new FrameAssembly(
+                completeAssembly.sequenceHeader(),
+                completeAssembly.frameHeader(),
+                0,
+                0
+        );
+        partialAssembly.addTileForPartialDecode(completeAssembly.tileBitstream(1));
+
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decodeTile(partialAssembly, 1);
+
+        assertEquals(1, partialAssembly.collectedTileCount());
+        assertEquals(0, partialAssembly.nextTileIndex());
+        assertFalse(partialAssembly.isComplete());
+        assertEquals(0, result.tileRoots(0).length);
+        assertTrue(result.tileRoots(1).length > 0);
+    }
+
+    /// Verifies that partial and sequential tile collection remain distinct assembly modes.
+    @Test
+    void partialAndSequentialTileCollectionCannotBeMixed() {
+        FrameAssembly completeAssembly = createAssembly(
+                Av1FrameType.INTER,
+                new byte[][]{INTER_BLOCK_PAYLOAD, INTER_BLOCK_PAYLOAD},
+                false,
+                128,
+                64,
+                noRestoration(),
+                twoColumnTiling(0)
+        );
+        FrameAssembly partialAssembly = new FrameAssembly(
+                completeAssembly.sequenceHeader(),
+                completeAssembly.frameHeader(),
+                0,
+                0
+        );
+        TileBitstream tile0 = completeAssembly.tileBitstream(0);
+        TileBitstream tile1 = completeAssembly.tileBitstream(1);
+        TileGroupHeader firstTileHeader = new TileGroupHeader(false, 0, 0, 2);
+
+        partialAssembly.addTileForPartialDecode(tile1);
+        assertThrows(IllegalArgumentException.class, () -> partialAssembly.addTileForPartialDecode(tile1));
+        assertThrows(
+                IllegalStateException.class,
+                () -> partialAssembly.addTileGroup(firstTileHeader, new TileBitstream[]{tile0})
+        );
+
+        FrameAssembly sequentialAssembly = new FrameAssembly(
+                completeAssembly.sequenceHeader(),
+                completeAssembly.frameHeader(),
+                0,
+                0
+        );
+        sequentialAssembly.addTileGroup(firstTileHeader, new TileBitstream[]{tile0});
+        assertThrows(IllegalStateException.class, () -> sequentialAssembly.addTileForPartialDecode(tile1));
+
+        FrameAssembly outOfOrderAssembly = new FrameAssembly(
+                completeAssembly.sequenceHeader(),
+                completeAssembly.frameHeader(),
+                0,
+                0
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> outOfOrderAssembly.addTileGroup(
+                        new TileGroupHeader(false, 1, 1, 2),
+                        new TileBitstream[]{tile1}
+                )
+        );
     }
 
     /// Creates a synthetic frame assembly used by structural frame-decoder tests.

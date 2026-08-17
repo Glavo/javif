@@ -28,6 +28,8 @@ public final class FrameAssembly {
     private final @Nullable TileBitstream[] tileBitstreams;
     /// The number of tile groups collected so far.
     private int tileGroupCount;
+    /// The number of tile bitstreams collected so far.
+    private int collectedTileCount;
     /// The next tile index that must be covered by the next tile group.
     private int nextTileIndex;
 
@@ -154,29 +156,65 @@ public final class FrameAssembly {
         return tileGroupCount;
     }
 
-    /// Returns the number of tiles collected so far across all tile groups.
+    /// Returns the number of tile bitstreams collected so far.
     ///
-    /// @return the number of tiles collected so far across all tile groups
+    /// @return the number of collected tile bitstreams
     public int collectedTileCount() {
-        return nextTileIndex;
+        return collectedTileCount;
     }
 
     /// Returns a collected tile bitstream by tile index.
     ///
     /// @param tileIndex the zero-based tile index within the frame
     /// @return the collected tile bitstream
+    /// @throws IllegalArgumentException if the index is outside the frame or its tile bitstream
+    /// has not been collected
     public TileBitstream tileBitstream(int tileIndex) {
-        if (tileIndex < 0 || tileIndex >= nextTileIndex) {
-            throw new IllegalArgumentException("Tile index out of collected range: " + tileIndex);
+        if (tileIndex < 0 || tileIndex >= totalTiles) {
+            throw new IllegalArgumentException("Tile index out of frame range: " + tileIndex);
         }
-        return Objects.requireNonNull(tileBitstreams[tileIndex], "tileBitstreams[" + tileIndex + "]");
+        TileBitstream tile = tileBitstreams[tileIndex];
+        if (tile == null) {
+            throw new IllegalArgumentException("Tile bitstream has not been collected: " + tileIndex);
+        }
+        return tile;
+    }
+
+    /// Adds one arbitrary tile bitstream for partial camera-frame decoding.
+    ///
+    /// This operation may be repeated for distinct tile indices, but it must not be mixed with
+    /// [#addTileGroup(TileGroupHeader, TileBitstream[])].
+    ///
+    /// @param tile the tile bitstream to add
+    /// @throws IllegalArgumentException if the tile index is outside the frame or was already added
+    /// @throws IllegalStateException if a sequential tile group was already added
+    public void addTileForPartialDecode(TileBitstream tile) {
+        if (tileGroupCount != 0) {
+            throw new IllegalStateException("Partial tiles cannot be added after tile groups");
+        }
+        TileBitstream checkedTile = Objects.requireNonNull(tile, "tile");
+        int tileIndex = checkedTile.tileIndex();
+        if (tileIndex < 0 || tileIndex >= totalTiles) {
+            throw new IllegalArgumentException("Tile index out of frame range: " + tileIndex);
+        }
+        if (tileBitstreams[tileIndex] != null) {
+            throw new IllegalArgumentException("Tile bitstream has already been collected: " + tileIndex);
+        }
+        tileBitstreams[tileIndex] = checkedTile;
+        collectedTileCount++;
     }
 
     /// Appends one tile group's bitstreams and advances the expected tile cursor.
     ///
     /// @param header the parsed tile-group header
     /// @param tiles the parsed per-tile bitstream views
+    /// @throws IllegalArgumentException if the group does not continue the frame's sequential tile
+    /// coverage or its tile entries do not match the header
+    /// @throws IllegalStateException if an arbitrary tile was already added for partial decoding
     public void addTileGroup(TileGroupHeader header, TileBitstream[] tiles) {
+        if (collectedTileCount != nextTileIndex) {
+            throw new IllegalStateException("Tile groups cannot be added after partial tiles");
+        }
         TileGroupHeader checkedHeader = Objects.requireNonNull(header, "header");
         if (checkedHeader.totalTileCount() != totalTiles) {
             throw new IllegalArgumentException("Tile-group header belongs to a different frame layout");
@@ -199,6 +237,7 @@ public final class FrameAssembly {
             tileBitstreams[expectedTileIndex] = tile;
         }
         tileGroupCount++;
+        collectedTileCount += checkedTiles.length;
         nextTileIndex = checkedHeader.endTileIndex() + 1;
     }
 }

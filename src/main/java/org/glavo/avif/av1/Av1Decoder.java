@@ -1071,16 +1071,7 @@ public final class Av1Decoder implements AutoCloseable {
                         packet.streamOffset(),
                         packet.obuIndex()
                 );
-                TileGroupHeader tileHeader = new TileGroupHeader(
-                        false,
-                        sourceTileIndex,
-                        sourceTileIndex,
-                        tileAssembly.totalTiles()
-                );
-                tileAssembly.addTileGroup(
-                        tileHeader,
-                        new TileBitstream[]{entry.bitstream()}
-                );
+                tileAssembly.addTileForPartialDecode(entry.bitstream());
 
                 ReferenceFrameSyntaxState[] referenceSyntaxStates = Arrays.copyOf(
                         largeScaleTileCameraReferenceSyntaxStates,
